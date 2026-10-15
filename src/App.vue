@@ -18,11 +18,12 @@ const navigation = [
 ];
 onMounted(connection.initializeApp);
 onBeforeUnmount(connection.dispose);
+function focusContent(): void { document.getElementById('main-content')?.focus(); }
 </script>
 
 <template>
   <div class="flex min-h-full text-ink md:h-full md:overflow-hidden">
-    <a href="#main-content" class="fixed top-3 left-3 z-50 -translate-y-24 rounded-control bg-brand px-4 py-3 text-sm text-white focus:translate-y-0">跳到主要内容</a>
+    <a href="#main-content" class="fixed top-3 left-3 z-50 -translate-y-24 rounded-control bg-brand px-4 py-3 text-sm text-white focus:translate-y-0" @click.prevent="focusContent">跳到主要内容</a>
     <aside class="hidden w-52 shrink-0 flex-col border-r border-line/70 bg-sidebar p-3 md:flex">
       <div class="flex items-center gap-3 px-2 py-4"><div class="grid size-10 shrink-0 place-items-center rounded-xl bg-brand"><Smartphone :size="21" aria-hidden="true" /></div><div><p class="text-sm font-semibold">Por Auto</p><p class="mt-1 text-xs text-ink-muted">Android 工作流</p></div></div>
       <nav class="mt-6 space-y-2" aria-label="工作台">
