@@ -4,7 +4,7 @@ const tones = { success: 'bg-success-soft text-success', warning: 'bg-warning-so
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium" :class="tones[tone]">
+  <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium" :class="tones[tone]">
     <span class="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" /><slot />
   </span>
 </template>

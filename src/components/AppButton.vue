@@ -10,8 +10,8 @@ const variants = {
 </script>
 
 <template>
-  <button type="button" class="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45" :class="variants[variant]" :disabled="disabled || loading" :aria-busy="loading || undefined">
-    <LoaderCircle v-if="loading" :size="16" class="animate-spin" aria-hidden="true" />
+  <button type="button" class="inline-flex min-h-8 shrink-0 items-center justify-center gap-2 rounded-control px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 pointer-coarse:min-h-11" :class="variants[variant]" :disabled="disabled || loading" :aria-busy="loading || undefined">
+    <LoaderCircle v-if="loading" :size="14" class="animate-spin" aria-hidden="true" />
     <slot />
   </button>
 </template>

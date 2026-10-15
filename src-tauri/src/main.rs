@@ -3,6 +3,8 @@
 mod android;
 mod history;
 mod registry;
+mod schedule;
+mod updater;
 mod workflow;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -14,7 +16,8 @@ use std::{
     io::{Cursor, Read},
     path::PathBuf,
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -244,6 +247,19 @@ async fn sync_registry(
 }
 
 #[tauri::command]
+async fn remove_registry(app: AppHandle, url: String, reference: String) -> Reply<registry::Store> {
+    blocking(move || {
+        let state = app.state::<Jobs>();
+        let _guard = state
+            .0
+            .try_lock()
+            .map_err(|_| "已有操作正在进行，请等待完成")?;
+        registry::remove(&data_dir(&app)?, &url, &reference)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn install_workflow(
     app: AppHandle,
     url: String,
@@ -269,7 +285,7 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
             .0
             .try_lock()
             .map_err(|_| "已有操作正在进行，请等待完成")?;
-        if serial.is_empty() || serial.len() > 256 || serial.chars().any(char::is_control) {
+        if !schedule::valid_serial(&serial) {
             return Err("请选择有效的手机设备".into());
         }
         let installed = registry::load(&data_dir(&app)?)?
@@ -277,111 +293,119 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
             .into_iter()
             .find(|w| w.key == workflow_key)
             .ok_or("请先安装并选择工作流")?;
-        let adb = adb_path(&app)?;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_millis() as u64;
-        let folder = data_dir(&app)?.join("runs").join(timestamp.to_string());
-        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-        let mut summary = history::Summary {
-            id: timestamp.to_string(),
-            workflow_name: installed.workflow.name.clone(),
-            workflow_version: installed.workflow.version.clone(),
-            serial: serial.clone(),
-            timestamp,
-            status: "running".into(),
-            error: None,
-        };
-        history::save_summary(&folder, &summary)?;
-        fs::write(
-            folder.join("workflow.json"),
-            serde_json::to_vec_pretty(&installed.workflow).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        history::log(&folder, 0, "started", "工作流开始，检查设备与目标应用")?;
-        let total = installed.workflow.steps.len();
-        let read = workflow::execute(
-            &installed.workflow,
-            &adb,
-            &serial,
-            &folder,
-            |step, count, message, status| {
-                history::log(&folder, step, status, message)?;
-                if status == "started" {
-                    progress(&app, step, count, message);
-                }
-                Ok(())
-            },
-        );
-        if let Err(error) = &read {
-            history::log(&folder, 0, "failed", error)?;
-        }
-        let screenshot = android::run(&adb, &["-s", &serial, "exec-out", "screencap", "-p"])
-            .and_then(|bytes| {
-                if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-                    return Err("手机截图格式无效".into());
-                }
-                fs::write(folder.join("screen.png"), &bytes).map_err(|e| e.to_string())?;
-                Ok(STANDARD.encode(bytes))
-            });
-        let warning = screenshot.as_ref().err().cloned();
-        if let Some(message) = &warning {
-            history::log(&folder, 0, "warning", message)?;
-        }
-        let result = RunResult {
-            nickname: read
-                .as_ref()
-                .ok()
-                .and_then(|outputs| outputs.get("nickname").cloned()),
-            outputs: read.as_ref().ok().cloned().unwrap_or_default(),
-            workflow_name: installed.workflow.name,
-            workflow_version: installed.workflow.version,
-            workflow_key,
-            commit: installed.commit,
-            serial,
-            timestamp,
-            screenshot: screenshot.ok(),
-            error: read.err(),
-            warning,
-            folder: folder.to_string_lossy().into_owned(),
-        };
-        fs::write(
-            folder.join("result.json"),
-            serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| format!("保存结果失败：{e}"))?;
-        summary.status = if result.error.is_some() {
-            "failed"
-        } else {
-            "completed"
-        }
-        .into();
-        summary.error = result.error.clone();
-        history::log(
-            &folder,
-            0,
-            &summary.status,
-            if result.error.is_some() {
-                "工作流执行失败"
-            } else {
-                "工作流执行完成"
-            },
-        )?;
-        history::save_summary(&folder, &summary)?;
-        progress(
-            &app,
-            if result.error.is_some() { 0 } else { total + 1 },
-            total,
-            if result.error.is_some() {
-                "工作流未完成，请查看提示与截图"
-            } else {
-                "工作流执行完成"
-            },
-        );
-        Ok(result)
+        run_installed(&app, serial, installed, None)
     })
     .await
+}
+
+fn run_installed(
+    app: &AppHandle,
+    serial: String,
+    installed: registry::Installed,
+    dispatch: Option<&schedule::Dispatch>,
+) -> Reply<RunResult> {
+    let adb = adb_path(app)?;
+    let (id, folder) = history::create_folder(&data_dir(app)?.join("runs"))?;
+    let timestamp = history::now();
+    let mut summary = history::Summary {
+        id,
+        workflow_name: installed.workflow.name.clone(),
+        workflow_version: installed.workflow.version.clone(),
+        serial: serial.clone(),
+        timestamp,
+        status: "running".into(),
+        error: None,
+        schedule_id: dispatch.map(|d| d.task.id.clone()),
+        schedule_name: dispatch.map(|d| d.task.name.clone()),
+        trigger: dispatch.map(|d| d.trigger.into()),
+    };
+    history::save_summary(&folder, &summary)?;
+    fs::write(
+        folder.join("workflow.json"),
+        serde_json::to_vec_pretty(&installed.workflow).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    history::log(&folder, 0, "started", "工作流开始，检查设备与目标应用")?;
+    let total = installed.workflow.steps.len();
+    let read = workflow::execute(
+        &installed.workflow,
+        &adb,
+        &serial,
+        &folder,
+        |step, count, message, status| {
+            history::log(&folder, step, status, message)?;
+            if status == "started" {
+                progress(app, step, count, message);
+            }
+            Ok(())
+        },
+    );
+    if let Err(error) = &read {
+        history::log(&folder, 0, "failed", error)?;
+    }
+    let screenshot =
+        android::run(&adb, &["-s", &serial, "exec-out", "screencap", "-p"]).and_then(|bytes| {
+            if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err("手机截图格式无效".into());
+            }
+            fs::write(folder.join("screen.png"), &bytes).map_err(|e| e.to_string())?;
+            Ok(STANDARD.encode(bytes))
+        });
+    let warning = screenshot.as_ref().err().cloned();
+    if let Some(message) = &warning {
+        history::log(&folder, 0, "warning", message)?;
+    }
+    let result = RunResult {
+        nickname: read
+            .as_ref()
+            .ok()
+            .and_then(|outputs| outputs.get("nickname").cloned()),
+        outputs: read.as_ref().ok().cloned().unwrap_or_default(),
+        workflow_name: installed.workflow.name,
+        workflow_version: installed.workflow.version,
+        workflow_key: installed.key,
+        commit: installed.commit,
+        serial,
+        timestamp,
+        screenshot: screenshot.ok(),
+        error: read.err(),
+        warning,
+        folder: folder.to_string_lossy().into_owned(),
+    };
+    fs::write(
+        folder.join("result.json"),
+        serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("保存结果失败：{e}"))?;
+    summary.status = if result.error.is_some() {
+        "failed"
+    } else {
+        "completed"
+    }
+    .into();
+    summary.error = result.error.clone();
+    history::log(
+        &folder,
+        0,
+        &summary.status,
+        if result.error.is_some() {
+            "工作流执行失败"
+        } else {
+            "工作流执行完成"
+        },
+    )?;
+    history::save_summary(&folder, &summary)?;
+    progress(
+        app,
+        if result.error.is_some() { 0 } else { total + 1 },
+        total,
+        if result.error.is_some() {
+            "工作流未完成，请查看提示与截图"
+        } else {
+            "工作流执行完成"
+        },
+    );
+    Ok(result)
 }
 
 #[tauri::command]
@@ -445,22 +469,255 @@ async fn export_runs(app: AppHandle, ids: Vec<String>) -> Reply<Option<String>> 
     .await
 }
 
+#[tauri::command]
+fn list_schedules(app: AppHandle) -> Reply<schedule::View> {
+    app.state::<schedule::Scheduler>().view()
+}
+
+#[tauri::command]
+async fn preview_cron(cron: String, timezone: String) -> Reply<Vec<u64>> {
+    blocking(move || schedule::upcoming(&cron, &timezone, history::now(), 5)).await
+}
+
+#[tauri::command]
+async fn save_schedule(app: AppHandle, input: schedule::Input) -> Reply<schedule::View> {
+    blocking(move || {
+        let scheduler = app.state::<schedule::Scheduler>();
+        scheduler.save(input)?;
+        let _ = app.emit("schedules-changed", ());
+        scheduler.view()
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_schedule_enabled(app: AppHandle, id: String, enabled: bool) -> Reply<schedule::View> {
+    blocking(move || {
+        let scheduler = app.state::<schedule::Scheduler>();
+        scheduler.enable(&id, enabled)?;
+        let _ = app.emit("schedules-changed", ());
+        scheduler.view()
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_schedule(app: AppHandle, id: String) -> Reply<schedule::View> {
+    blocking(move || {
+        let scheduler = app.state::<schedule::Scheduler>();
+        scheduler.delete(&id)?;
+        let _ = app.emit("schedules-changed", ());
+        scheduler.view()
+    })
+    .await
+}
+
+#[tauri::command]
+async fn run_schedule_now(app: AppHandle, id: String) -> Reply<schedule::View> {
+    blocking(move || {
+        let dispatch = app.state::<schedule::Scheduler>().claim_now(&id)?;
+        dispatch_schedule(app.clone(), dispatch);
+        app.state::<schedule::Scheduler>().view()
+    })
+    .await
+}
+
+fn run_schedule_logged(app: &AppHandle, dispatch: &schedule::Dispatch) -> Reply<(String, String)> {
+    let (id, folder) = history::create_folder(&data_dir(app)?.join("runs"))?;
+    let task = &dispatch.task;
+    let mut summary = history::Summary {
+        id,
+        workflow_name: task.snapshot.workflow.name.clone(),
+        workflow_version: task.snapshot.workflow.version.clone(),
+        serial: format!("{} 台手机 · 批次", task.serials.len()),
+        timestamp: history::now(),
+        status: "running".into(),
+        error: None,
+        schedule_id: Some(task.id.clone()),
+        schedule_name: Some(task.name.clone()),
+        trigger: Some(dispatch.trigger.into()),
+    };
+    history::save_summary(&folder, &summary)?;
+    fs::write(
+        folder.join("workflow.json"),
+        serde_json::to_vec_pretty(&task.snapshot.workflow).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    history::log(
+        &folder,
+        0,
+        "started",
+        &format!(
+            "{} · {} · 计划时点 {}",
+            task.name, dispatch.trigger, dispatch.scheduled_at
+        ),
+    )?;
+    let jobs = app.state::<Jobs>();
+    let guard = jobs.0.try_lock();
+    let skip = dispatch.skip_reason.clone().or_else(|| {
+        guard
+            .as_ref()
+            .err()
+            .map(|_| "其他运行或维护操作尚未完成，本轮跳过".to_string())
+    });
+    let mut results = Vec::new();
+    let (status, message) = if let Some(reason) = skip {
+        ("skipped".to_string(), reason)
+    } else {
+        let mut succeeded = 0;
+        for (index, serial) in task.serials.iter().enumerate() {
+            history::log(
+                &folder,
+                index + 1,
+                "started",
+                &format!("开始执行设备 {serial}"),
+            )?;
+            let result = run_installed(app, serial.clone(), task.snapshot.clone(), Some(dispatch));
+            let error = match &result {
+                Ok(run) => run.error.clone(),
+                Err(error) => Some(error.clone()),
+            };
+            if error.is_none() {
+                succeeded += 1;
+            }
+            history::log(
+                &folder,
+                index + 1,
+                if error.is_some() {
+                    "failed"
+                } else {
+                    "completed"
+                },
+                &format!("{serial}：{}", error.as_deref().unwrap_or("完成")),
+            )?;
+            results.push(serde_json::json!({
+                "serial": serial,
+                "error": error,
+                "runId": result.as_ref().ok().and_then(|r| std::path::Path::new(&r.folder).file_name()).map(|s| s.to_string_lossy().into_owned())
+            }));
+        }
+        let status = if succeeded == task.serials.len() {
+            "completed"
+        } else if succeeded == 0 {
+            "failed"
+        } else {
+            "partial"
+        };
+        (
+            status.into(),
+            format!(
+                "共 {} 台，成功 {} 台，失败 {} 台",
+                task.serials.len(),
+                succeeded,
+                task.serials.len() - succeeded
+            ),
+        )
+    };
+    summary.status = status.clone();
+    summary.error = if status == "completed" {
+        None
+    } else {
+        Some(message.clone())
+    };
+    fs::write(
+        folder.join("result.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schedule": task, "trigger": dispatch.trigger, "scheduledAt": dispatch.scheduled_at,
+            "status": status, "message": message, "devices": results
+        }))
+        .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    history::log(&folder, 0, &status, &message)?;
+    history::save_summary(&folder, &summary)?;
+    Ok((status, message))
+}
+
+fn dispatch_schedule(app: AppHandle, dispatch: schedule::Dispatch) {
+    let _ = app.emit("schedules-changed", ());
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_schedule_logged(&app, &dispatch)
+        }))
+        .unwrap_or_else(|_| Err("调度任务意外中断，请查看运行记录".into()));
+        let (status, message) = result.unwrap_or_else(|error| ("failed".into(), error));
+        let scheduler = app.state::<schedule::Scheduler>();
+        if let Err(error) = scheduler.finish(&dispatch, &status, &message) {
+            scheduler.report_error(error);
+        }
+        let _ = app.emit("schedules-changed", ());
+        let _ = app.emit("history-changed", ());
+    });
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Jobs::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            app.manage(schedule::Scheduler::open(data_dir(&handle)?));
+            app.manage(updater::AppUpdates::open(
+                data_dir(&handle)?,
+                app.package_info().version.to_string(),
+            ));
+            thread::spawn(move || loop {
+                let scheduler = handle.state::<schedule::Scheduler>();
+                match scheduler.tick(history::now()) {
+                    Ok(dispatches) => {
+                        for dispatch in dispatches {
+                            dispatch_schedule(handle.clone(), dispatch);
+                        }
+                    }
+                    Err(error) => {
+                        scheduler.report_error(error);
+                        let _ = handle.emit("schedules-changed", ());
+                    }
+                }
+                if handle
+                    .state::<updater::AppUpdates>()
+                    .should_check(history::now())
+                {
+                    let update_app = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = updater::check_for_updates(update_app).await;
+                    });
+                }
+                thread::sleep(Duration::from_secs(1));
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             check_environment,
             initialize_environment,
             workflow_store,
             sync_registry,
+            remove_registry,
             install_workflow,
             run_workflow,
             open_results,
             list_runs,
             run_details,
             delete_runs,
-            export_runs
+            export_runs,
+            list_schedules,
+            preview_cron,
+            save_schedule,
+            set_schedule_enabled,
+            delete_schedule,
+            run_schedule_now,
+            updater::update_status,
+            updater::set_auto_update_check,
+            updater::check_for_updates,
+            updater::install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("无法启动Por Auto");

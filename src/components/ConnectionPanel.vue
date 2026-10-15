@@ -4,58 +4,53 @@ import { storeToRefs } from 'pinia';
 import { RouterLink } from 'vue-router';
 import { useConnectionStore } from '../useConnection';
 import AppButton from './AppButton.vue';
+import DevicePicker from './DevicePicker.vue';
 import StatusPill from './StatusPill.vue';
 
 const connection = useConnectionStore();
-const { environmentRef, selectedRef, busyRef, runningRef, progressRef, resultRef, readyDevicesRef, selectedDeviceRef, storeRef, workflowKeyRef, selectedWorkflowRef } = storeToRefs(connection);
+const { environmentRef, selectedSerialsRef, busyRef, runningRef, progressRef, deviceRunsRef, activeRunRef, batchSummaryRef, readyDevicesRef, selectedDevicesRef, storeRef, workflowKeyRef, selectedWorkflowRef } = storeToRefs(connection);
 const { refresh, initialize, runWorkflow } = connection;
 const stateLabels: Record<string, string> = { device: '可以使用', unauthorized: '等待手机授权', offline: '设备离线', recovery: '恢复模式', sideload: '刷机模式', no: '连接权限不足' };
 </script>
 
 <template>
-  <div class="space-y-5">
-    <section id="connect" class="scroll-mt-6 rounded-card border border-line bg-surface p-5">
-      <div class="flex flex-wrap items-center justify-between gap-4">
+  <div class="space-y-4">
+    <section id="connect" class="scroll-mt-6 rounded-card border border-line bg-surface p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
-          <div class="grid size-10 place-items-center rounded-control bg-brand-soft text-brand-strong"><ShieldCheck :size="20" aria-hidden="true" /></div>
+          <div class="grid size-8 place-items-center rounded-control bg-brand-soft text-brand-strong"><ShieldCheck :size="20" aria-hidden="true" /></div>
           <div><h2 class="text-sm font-semibold">连接环境</h2><p class="mt-1 text-xs text-ink-muted">连接组件随软件提供，初始化后即可使用</p></div>
         </div>
         <StatusPill :tone="environmentRef?.ready ? 'success' : 'warning'">{{ environmentRef?.ready ? '组件已就绪' : '待初始化' }}</StatusPill>
       </div>
-      <div class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-control border border-line bg-canvas/50 px-4 py-3">
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-control border border-line bg-canvas/50 px-4 py-3">
         <div class="flex items-center gap-3 text-sm"><Usb :size="18" class="text-ink-muted" aria-hidden="true" /><span>Android 连接组件</span><span v-if="environmentRef" class="text-xs text-ink-muted">{{ environmentRef.version }}</span></div>
         <AppButton :variant="environmentRef?.ready ? 'secondary' : 'primary'" :loading="busyRef && !runningRef" :disabled="runningRef" @click="initialize"><Check v-if="environmentRef?.ready" :size="15" aria-hidden="true" /><Download v-else :size="15" aria-hidden="true" />{{ environmentRef?.ready ? '重新初始化' : '初始化连接组件' }}</AppButton>
       </div>
     </section>
 
-    <section class="rounded-card border border-line bg-surface p-5">
+    <section class="rounded-card border border-line bg-surface p-4">
       <div class="flex items-center justify-between gap-3">
         <div><h2 class="text-sm font-semibold">连接的手机</h2><p class="mt-1 text-xs text-ink-muted">先解锁手机，并在手机上允许这台电脑调试</p></div>
         <AppButton variant="ghost" :disabled="busyRef" @click="refresh"><RefreshCw :size="15" aria-hidden="true" />刷新设备</AppButton>
       </div>
-      <div v-if="!environmentRef?.devices.length" class="mt-5 flex items-center gap-4 rounded-control border border-dashed border-line bg-canvas/40 p-5">
+      <div v-if="!environmentRef?.devices.length" class="mt-4 flex items-center gap-3 rounded-control border border-dashed border-line bg-canvas/40 p-4">
         <div class="grid size-12 shrink-0 place-items-center rounded-2xl bg-surface-soft"><Cable :size="24" class="text-ink-muted" aria-hidden="true" /></div>
-        <div><p class="text-sm text-ink-secondary">尚未连接手机</p><p class="mt-1 text-xs leading-6 text-ink-muted">{{ environmentRef?.ready ? '接上数据线、允许 USB 调试，再点击「刷新设备」' : '先初始化连接组件，再检查手机连接' }}</p></div>
+        <div><p class="text-sm text-ink-secondary">尚未连接手机</p><p class="mt-1 text-xs leading-5 text-ink-muted">{{ environmentRef?.ready ? '接上数据线、允许 USB 调试，再点击「刷新设备」' : '先初始化连接组件，再检查手机连接' }}</p></div>
       </div>
-      <ul v-else class="mt-4 space-y-2" role="list">
+      <ul v-else class="mt-3 space-y-2" role="list">
         <li v-for="device in environmentRef.devices" :key="device.serial" class="flex items-center justify-between gap-3 rounded-control border border-line bg-canvas/50 px-4 py-3">
           <div class="flex min-w-0 items-center gap-3"><Smartphone :size="22" class="shrink-0 text-ink-secondary" aria-hidden="true" /><div class="min-w-0"><p class="truncate text-sm">{{ device.model }}</p><p class="mt-1 break-all text-xs text-ink-muted">{{ device.serial }}</p></div></div>
           <StatusPill :tone="device.state === 'device' ? 'success' : 'warning'">{{ stateLabels[device.state] ?? device.state }}</StatusPill>
         </li>
       </ul>
-      <p v-if="environmentRef?.devices.some(d => d.state === 'unauthorized')" class="mt-3 rounded-control bg-warning-soft p-3 text-xs leading-6 text-warning">请查看手机上的「允许 USB 调试」弹窗，勾选「始终允许」并确认，再刷新设备。</p>
-      <div class="mt-5 flex flex-wrap items-end justify-between gap-4 border-t border-line pt-5">
-        <div class="w-full"><label for="workflow" class="mb-2 block text-xs text-ink-muted">已安装的工作流</label><select id="workflow" v-model="workflowKeyRef" class="min-h-10 w-full rounded-control border border-line bg-surface-soft px-3 py-2 text-sm" :disabled="busyRef"><option v-for="item in storeRef.installed" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }} · {{ item.registryUrl.replace('https://github.com/', '') }} / {{ item.reference }}</option></select><p class="mt-2 text-xs leading-6 text-ink-muted">{{ selectedWorkflowRef?.workflow.description }}</p></div>
-        <div class="min-w-0 flex-1">
-          <label for="phone" class="mb-2 block text-xs text-ink-muted">操作手机</label>
-          <select id="phone" v-model="selectedRef" class="min-h-10 w-full rounded-control border border-line bg-surface-soft px-3 py-2 text-sm disabled:opacity-50" :disabled="busyRef || !readyDevicesRef.length">
-            <option value="" disabled>请选择已授权的手机</option>
-            <option v-for="device in readyDevicesRef" :key="device.serial" :value="device.serial">{{ device.model }} · {{ device.serial }}</option>
-          </select>
-        </div>
-        <AppButton :loading="runningRef" :disabled="busyRef || !selectedDeviceRef || !selectedWorkflowRef" @click="runWorkflow"><Play v-if="!runningRef" :size="15" aria-hidden="true" />{{ runningRef ? '正在执行…' : '运行工作流' }}</AppButton>
+      <p v-if="environmentRef?.devices.some(d => d.state === 'unauthorized')" class="mt-3 rounded-control bg-warning-soft p-3 text-xs leading-5 text-warning">请查看手机上的「允许 USB 调试」弹窗，勾选「始终允许」并确认，再刷新设备。</p>
+      <div class="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-line pt-4">
+        <div class="w-full"><label for="workflow" class="mb-2 block text-xs text-ink-muted">已安装的工作流</label><select id="workflow" v-model="workflowKeyRef" class="min-h-8 w-full rounded-control border border-line bg-surface-soft px-3 py-2 text-sm pointer-coarse:min-h-11" :disabled="busyRef"><option v-for="item in storeRef.installed" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }} · {{ item.registryUrl.replace('https://github.com/', '') }} / {{ item.reference }}</option></select><p class="mt-2 text-xs leading-5 text-ink-muted">{{ selectedWorkflowRef?.workflow.description }}</p></div>
+        <DevicePicker v-model="selectedSerialsRef" :devices="readyDevicesRef" :disabled="busyRef" />
+        <div class="flex w-full flex-wrap items-center justify-between gap-3"><p class="text-xs text-ink-secondary" aria-live="polite">{{ runningRef ? `正在执行第 ${batchSummaryRef.current} / ${batchSummaryRef.total} 台 · ${activeRunRef?.model ?? ''}` : `已选择 ${selectedDevicesRef.length} 台手机` }}</p><AppButton :loading="runningRef" :disabled="busyRef || !selectedDevicesRef.length || !selectedWorkflowRef" @click="runWorkflow"><Play v-if="!runningRef" :size="15" aria-hidden="true" />{{ runningRef ? '正在执行…' : `运行工作流${selectedDevicesRef.length ? `（${selectedDevicesRef.length} 台）` : ''}` }}</AppButton></div>
       </div>
-      <div class="mt-5 rounded-control bg-canvas/60 px-4 py-3">
+      <div class="mt-4 rounded-control bg-canvas/60 px-4 py-3">
         <ol class="flex flex-wrap items-center gap-2 text-xs text-ink-muted" role="list">
           <li v-for="(step, index) in selectedWorkflowRef?.workflow.steps" :key="index" class="flex items-center gap-2" :class="{ 'text-success': progressRef.step > index + 1, 'text-brand-strong': runningRef && progressRef.step === index + 1 }"><Check v-if="progressRef.step > index + 1" :size="13" aria-hidden="true" />{{ step.name }}<ArrowRight v-if="index < (selectedWorkflowRef?.workflow.steps.length ?? 0) - 1" :size="12" class="text-ink-muted" aria-hidden="true" /></li>
         </ol>
@@ -63,6 +58,6 @@ const stateLabels: Record<string, string> = { device: '可以使用', unauthoriz
       </div>
     </section>
 
-    <RouterLink v-if="resultRef && !runningRef" to="/results" class="block rounded-control border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand-strong">{{ resultRef.error ? '工作流未完成，查看结果与错误详情' : '工作流已完成，查看运行结果' }}</RouterLink>
+    <RouterLink v-if="deviceRunsRef.length" to="/results" class="block rounded-control border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand-strong">{{ runningRef ? `已处理 ${batchSummaryRef.done} / ${batchSummaryRef.total} 台手机` : `本次执行 ${batchSummaryRef.total} 台手机，成功 ${batchSummaryRef.succeeded} 台，失败 ${batchSummaryRef.failed} 台` }} · 查看每台手机的运行结果</RouterLink>
   </div>
 </template>

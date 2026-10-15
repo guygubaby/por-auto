@@ -20,17 +20,28 @@
   --color-danger: #ff8996;
   --color-danger-soft: #321a22;
   --font-sans: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei UI", sans-serif;
-  --radius-card: 1.25rem;
-  --radius-control: 0.75rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.25rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.5rem;
+  --text-2xl: 1.25rem;
+  --text-2xl--line-height: 1.75rem;
+  --radius-card: 1rem;
+  --radius-control: 0.5rem;
 }
 
 :root { color-scheme: dark; font-family: var(--font-sans); color: var(--color-ink); background: var(--color-canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; min-width: 360px; height: 100%; }
-body { background: radial-gradient(ellipse at 70% 0%, #6d7cff09, transparent 60%), var(--color-canvas); }
-button, input, select { font: inherit; }
+body { font-size: var(--text-sm); line-height: 1.5; background: radial-gradient(ellipse at 70% 0%, #6d7cff09, transparent 60%), var(--color-canvas); }
 button:not(:disabled), select:not(:disabled) { cursor: pointer; }
-:where(button, a, input, select):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 4px; }
+:where(button, a, input, select, summary):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 2px; }
 ::selection { background: #6d7cff60; color: white; }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-thumb { background: #a8b0c038; border-radius: 8px; }

@@ -17,6 +17,12 @@ pub struct Summary {
     pub timestamp: u64,
     pub status: String,
     pub error: Option<String>,
+    #[serde(default)]
+    pub schedule_id: Option<String>,
+    #[serde(default)]
+    pub schedule_name: Option<String>,
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -32,6 +38,19 @@ pub fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+pub fn create_folder(root: &Path) -> Result<(String, PathBuf), String> {
+    fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let mut id = now();
+    loop {
+        let path = root.join(id.to_string());
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok((id.to_string(), path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => id += 1,
+            Err(e) => return Err(format!("创建运行目录失败：{e}")),
+        }
+    }
 }
 
 pub fn log(folder: &Path, step: usize, status: &str, message: &str) -> Result<(), String> {
@@ -182,6 +201,9 @@ mod tests {
                     timestamp: id.parse().unwrap(),
                     status: "failed".into(),
                     error: Some("手机断开".into()),
+                    schedule_id: None,
+                    schedule_name: None,
+                    trigger: None,
                 },
             )
             .unwrap();

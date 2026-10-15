@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia';
-import ResultPanel from '../components/ResultPanel.vue';
+import BatchResults from '../components/BatchResults.vue';
 import { useConnectionStore } from '../useConnection';
-definePage({ meta: { title: '运行结果', description: '查看本次工作流的输出内容和手机截图。' } });
+definePage({ meta: { title: '运行结果', description: '选择手机，查看本次工作流在每台设备上的输出与截图。' } });
 const connection = useConnectionStore();
-const { resultRef, busyRef } = storeToRefs(connection);
+const { deviceRunsRef, busyRef } = storeToRefs(connection);
 </script>
-<template><ResultPanel :result="resultRef" :busy="busyRef" @open-results="connection.openResults" /></template>
+<template><BatchResults :runs="deviceRunsRef" :busy="busyRef" @open-results="connection.openResults" /></template>

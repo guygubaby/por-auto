@@ -1,9 +1,9 @@
 [package]
 name = "wechat-connection-demo"
-version = "0.1.0"
+version = "0.1.1"
 description = "Android WeChat nickname connection demo"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.90"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -19,6 +19,15 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 wait-timeout = "0.2"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2.4.2"
+tauri-plugin-updater = "2.14.0"
+chrono = "0.4"
+chrono-tz = "0.10.4"
+croner = "4.0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+minisign-verify = "0.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

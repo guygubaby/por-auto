@@ -99,11 +99,31 @@ pub fn valid_path(path: &str, id: &str) -> bool {
     valid_id(id) && path == format!("workflows/{id}/workflow.json")
 }
 
+fn keep_official_first(store: &mut Store) -> Result<(), String> {
+    let official = if let Some(index) = store
+        .registries
+        .iter()
+        .position(|r| r.url.eq_ignore_ascii_case(DEFAULT_URL) && r.reference == "main")
+    {
+        store.registries.remove(index)
+    } else {
+        Registry {
+            url: DEFAULT_URL.into(),
+            reference: "main".into(),
+            name: "Por Auto 官方工作流".into(),
+            commit: "bundled".into(),
+            workflows: vec![Workflow::parse(BUNDLED.as_bytes())?],
+        }
+    };
+    store.registries.insert(0, official);
+    Ok(())
+}
+
 pub fn load(directory: &Path) -> Result<Store, String> {
     let path = directory.join("workflow-store.json");
     if path.exists() {
         let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-        let store: Store = serde_json::from_slice(&bytes)
+        let mut store: Store = serde_json::from_slice(&bytes)
             .map_err(|_| "本地工作流配置无法读取，请保留文件并联系开发者")?;
         if store.schema_version != 1 {
             return Err("本地工作流配置版本不兼容".into());
@@ -111,6 +131,7 @@ pub fn load(directory: &Path) -> Result<Store, String> {
         for item in &store.installed {
             item.workflow.validate()?;
         }
+        keep_official_first(&mut store)?;
         return Ok(store);
     }
     let workflow = Workflow::parse(BUNDLED.as_bytes())?;
@@ -285,6 +306,24 @@ pub fn sync(
         .registries
         .retain(|r| r.url != url || r.reference != reference);
     store.registries.push(registry);
+    keep_official_first(&mut store)?;
+    save(directory, &store)?;
+    Ok(store)
+}
+
+pub fn remove(directory: &Path, input_url: &str, reference: &str) -> Result<Store, String> {
+    let (url, _, _) = repository(input_url)?;
+    if url.eq_ignore_ascii_case(DEFAULT_URL) && reference == "main" {
+        return Err("官方工作流来源常驻，无法移除".into());
+    }
+    let mut store = load(directory)?;
+    let count = store.registries.len();
+    store
+        .registries
+        .retain(|r| r.url != url || r.reference != reference);
+    if store.registries.len() == count {
+        return Err("此工作流来源不存在，请刷新后重试".into());
+    }
     save(directory, &store)?;
     Ok(store)
 }
@@ -319,6 +358,44 @@ pub fn install(directory: &Path, url: &str, reference: &str, id: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn official_registry_is_pinned_and_custom_removal_preserves_installed_workflows() {
+        let dir = std::env::temp_dir().join(format!(
+            "por-auto-registry-removal-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let mut store = load(&dir).unwrap();
+        let mut custom = store.registries[0].clone();
+        custom.url = "https://github.com/example/workflows".into();
+        custom.name = "Custom workflows".into();
+        store.registries.insert(0, custom.clone());
+        save(&dir, &store).unwrap();
+        assert_eq!(load(&dir).unwrap().registries[0].url, DEFAULT_URL);
+
+        install(&dir, &custom.url, "main", "wechat-nickname").unwrap();
+        let before = fs::read(dir.join("workflow-store.json")).unwrap();
+        for url in [DEFAULT_URL, "https://github.com/GuyGuBaby/POR-AUTO.git"] {
+            assert!(remove(&dir, url, "main").is_err());
+        }
+        assert_eq!(fs::read(dir.join("workflow-store.json")).unwrap(), before);
+        let removed = remove(&dir, &custom.url, "main").unwrap();
+        assert_eq!(removed.registries.len(), 1);
+        assert_eq!(removed.registries[0].url, DEFAULT_URL);
+        assert_eq!(removed.installed.len(), 2);
+        assert!(load(&dir)
+            .unwrap()
+            .installed
+            .iter()
+            .any(|w| w.registry_url == custom.url));
+
+        let mut missing = load(&dir).unwrap();
+        missing.registries.clear();
+        save(&dir, &missing).unwrap();
+        assert_eq!(load(&dir).unwrap().registries[0].url, DEFAULT_URL);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     #[ignore = "requires an authorized GitHub token and the published default registry"]

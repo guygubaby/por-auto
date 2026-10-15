@@ -17,3 +17,8 @@ work/platform-tools-*.zip
 .env.*
 *.log
 src-tauri/gen/
+*.key
+release-artifacts/
+release-assets/
+release-state.json
+release-notes.md

@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import { storeToRefs } from 'pinia';
 import WorkflowStore from '../components/WorkflowStore.vue';
-import { useConnectionStore } from '../useConnection';
-definePage({ meta: { title: '工作流商店', description: '添加 GitHub Registry，安装与更新工作流。所有配置保存在本机。' } });
-const connection = useConnectionStore();
-const { storeRef, busyRef } = storeToRefs(connection);
+definePage({ meta: { title: '工作流商店', description: '选择一个工作流来源，探索并安装你需要的工作流。' } });
 </script>
-<template><WorkflowStore :store="storeRef" :busy="busyRef" @sync="connection.syncRegistry" @install="connection.installWorkflow" /></template>
+<template><WorkflowStore /></template>
