@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #080a0f;
+  --color-sidebar: #0b0e15;
+  --color-surface: #10141d;
+  --color-surface-raised: #151a25;
+  --color-surface-soft: #191f2c;
+  --color-line: #252c3b;
+  --color-ink: #f7f8fa;
+  --color-ink-secondary: #a8b0c0;
+  --color-ink-muted: #8993a6;
+  --color-brand: #6d7cff;
+  --color-brand-strong: #8792ff;
+  --color-brand-soft: #202747;
+  --color-success: #48d9a0;
+  --color-success-soft: #102c25;
+  --color-warning: #f2b766;
+  --color-warning-soft: #302519;
+  --color-danger: #ff8996;
+  --color-danger-soft: #321a22;
+  --font-sans: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  --radius-card: 1.25rem;
+  --radius-control: 0.75rem;
+}
+
+:root { color-scheme: dark; font-family: var(--font-sans); color: var(--color-ink); background: var(--color-canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; min-width: 360px; height: 100%; }
+body { background: radial-gradient(ellipse at 70% 0%, #6d7cff09, transparent 60%), var(--color-canvas); }
+button, input, select { font: inherit; }
+button:not(:disabled), select:not(:disabled) { cursor: pointer; }
+:where(button, a, input, select):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 4px; }
+::selection { background: #6d7cff60; color: white; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #a8b0c038; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

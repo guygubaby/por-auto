@@ -1,0 +1,35 @@
+{
+  "template_version": 2,
+  "task_id": "daily-drama-forward",
+  "runtime": "autojs6",
+  "device": {
+    "local_device_id": "phone-001",
+    "account_alias": "示例业务账号"
+  },
+  "schedule": {
+    "timezone": "Asia/Shanghai",
+    "daily_at": "18:00",
+    "finish_by": "19:00",
+    "max_start_lateness_minutes": 10
+  },
+  "source": {
+    "conversation_name": "示例素材源群",
+    "sender_names": ["示例素材发布人"],
+    "message_kind": "card",
+    "preview_contains": "示例短剧",
+    "window_anchor": "scheduled_start",
+    "lookback_minutes": 15,
+    "require_unique_match": true
+  },
+  "targets": [
+    { "id": "group-001", "conversation_name": "示例推广群一" },
+    { "id": "group-002", "conversation_name": "示例推广群二" },
+    { "id": "group-003", "conversation_name": "示例推广群三" }
+  ],
+  "delivery": {
+    "mode": "native_forward",
+    "verify_target_before_send": true,
+    "verify_message_after_send": true,
+    "on_uncertain_result": "pause_for_review"
+  }
+}

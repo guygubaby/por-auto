@@ -1,0 +1,454 @@
+use crate::android;
+use roxmltree::Document;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+    thread,
+    time::Duration,
+};
+
+pub const ENGINE_VERSION: u32 = 1;
+pub const BUNDLED: &str = include_str!("../../workflows/wechat-nickname/workflow.json");
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Workflow {
+    pub schema_version: u32,
+    pub min_engine: u32,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub package: String,
+    pub steps: Vec<Step>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    pub name: String,
+    pub action: Action,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Action {
+    Wake,
+    Launch {
+        activity: String,
+    },
+    Wait {
+        ms: u64,
+    },
+    Tap {
+        selector: Selector,
+        #[serde(default)]
+        skip_if: Vec<Selector>,
+        #[serde(default)]
+        recover_back: u8,
+    },
+    Back,
+    ReadRow {
+        page: String,
+        labels: Vec<String>,
+        output: String,
+    },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selector {
+    #[serde(default)]
+    pub text: Vec<String>,
+    #[serde(default)]
+    pub prefix: Vec<String>,
+    #[serde(default)]
+    pub bottom: bool,
+    #[serde(default)]
+    pub peers: Vec<String>,
+}
+
+pub fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 80
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-_".contains(&c))
+}
+
+fn valid_android_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 200
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._".contains(&c))
+}
+
+fn short_text(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 500 && !value.contains('\0')
+}
+
+impl Selector {
+    fn validate(&self) -> Result<(), String> {
+        if self.text.len() + self.prefix.len() == 0
+            || self.text.len() + self.prefix.len() > 10
+            || self.peers.len() > 10
+            || !self
+                .text
+                .iter()
+                .chain(&self.prefix)
+                .chain(&self.peers)
+                .all(|v| short_text(v))
+        {
+            return Err("工作流页面选择器无效".into());
+        }
+        Ok(())
+    }
+}
+
+impl Workflow {
+    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
+        let value: Self =
+            serde_json::from_slice(bytes).map_err(|e| format!("工作流格式错误：{e}"))?;
+        value.validate()?;
+        Ok(value)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != 1 || self.min_engine != ENGINE_VERSION {
+            return Err("此工作流需要其他版本的执行引擎，请更新客户端".into());
+        }
+        if !valid_id(&self.id)
+            || !short_text(&self.name)
+            || !short_text(&self.version)
+            || self.description.len() > 2000
+            || !valid_android_name(&self.package)
+            || !(1..=40).contains(&self.steps.len())
+        {
+            return Err("工作流名称、标识、目标应用或步骤数量无效".into());
+        }
+        let mut total_wait = 0;
+        let mut outputs = BTreeSet::new();
+        for step in &self.steps {
+            if !short_text(&step.name) {
+                return Err("工作流步骤名称无效".into());
+            }
+            match &step.action {
+                Action::Launch { activity } if !valid_android_name(activity) => {
+                    return Err("工作流应用入口无效".into())
+                }
+                Action::Wait { ms } => {
+                    if *ms > 10000 {
+                        return Err("单步等待不能超过 10 秒".into());
+                    }
+                    total_wait += ms;
+                }
+                Action::Tap {
+                    selector,
+                    skip_if,
+                    recover_back,
+                } => {
+                    selector.validate()?;
+                    if *recover_back > 3 || skip_if.len() > 5 {
+                        return Err("工作流页面恢复次数超出限制".into());
+                    }
+                    for selector in skip_if {
+                        selector.validate()?;
+                    }
+                }
+                Action::ReadRow {
+                    page,
+                    labels,
+                    output,
+                } => {
+                    if !short_text(page)
+                        || labels.is_empty()
+                        || labels.len() > 10
+                        || !labels.iter().all(|s| short_text(s))
+                        || !valid_id(output)
+                        || !outputs.insert(output)
+                    {
+                        return Err("工作流输出字段无效或重复".into());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if total_wait > 30000 {
+            return Err("工作流总等待时间不能超过 30 秒".into());
+        }
+        Ok(())
+    }
+}
+
+fn node_bounds(node: roxmltree::Node<'_, '_>) -> Option<[i32; 4]> {
+    let values: Vec<i32> = node
+        .attribute("bounds")?
+        .split(['[', ']', ','])
+        .filter(|v| !v.is_empty())
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let bounds: [i32; 4] = values.try_into().ok()?;
+    (bounds[0] >= 0
+        && bounds[1] >= 0
+        && bounds[2] > bounds[0]
+        && bounds[3] > bounds[1]
+        && bounds[2] <= 20000
+        && bounds[3] <= 20000)
+        .then_some(bounds)
+}
+
+fn node_label<'a>(node: roxmltree::Node<'a, '_>) -> &'a str {
+    node.attribute("text")
+        .filter(|v| !v.is_empty())
+        .or_else(|| node.attribute("content-desc"))
+        .unwrap_or("")
+}
+
+pub fn select(xml: &str, selector: &Selector) -> Result<Vec<(i32, i32)>, String> {
+    let doc = Document::parse(xml).map_err(|_| "无法解析手机界面")?;
+    let height = doc
+        .descendants()
+        .filter_map(node_bounds)
+        .map(|b| b[3])
+        .max()
+        .unwrap_or(0);
+    let mut matches = BTreeSet::new();
+    for node in doc.descendants() {
+        let label = node_label(node);
+        if !selector.text.iter().any(|v| v == label)
+            && !selector.prefix.iter().any(|v| label.starts_with(v))
+        {
+            continue;
+        }
+        let Some([left, top, right, bottom]) = node_bounds(node) else {
+            continue;
+        };
+        if selector.bottom && top * 4 < height * 3 {
+            continue;
+        }
+        let y = (top + bottom) / 2;
+        if !selector.peers.iter().all(|peer| {
+            doc.descendants().any(|n| {
+                node_label(n) == peer
+                    && node_bounds(n).is_some_and(|b| ((b[1] + b[3]) / 2 - y).abs() * 50 <= height)
+            })
+        }) {
+            continue;
+        }
+        matches.insert(((left + right) / 2, y));
+    }
+    Ok(matches.into_iter().collect())
+}
+
+fn has_label(xml: &str, selector: &Selector) -> bool {
+    Document::parse(xml).is_ok_and(|doc| {
+        doc.descendants().any(|n| {
+            selector.text.iter().any(|v| v == node_label(n))
+                || selector.prefix.iter().any(|v| node_label(n).starts_with(v))
+        })
+    })
+}
+
+pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, String> {
+    let doc = Document::parse(xml).map_err(|_| "手机页面结构无法解析")?;
+    if !doc.descendants().any(|n| n.attribute("text") == Some(page)) {
+        return Err(format!("未进入「{page}」页面"));
+    }
+    let mut candidates = BTreeSet::new();
+    for label in doc.descendants().filter(|n| {
+        n.attribute("text")
+            .is_some_and(|v| labels.iter().any(|l| l == v))
+    }) {
+        for row in label.ancestors().skip(1) {
+            let values: Vec<_> = row
+                .descendants()
+                .filter(|n| *n != label)
+                .filter_map(|n| n.attribute("text"))
+                .filter(|v| !v.trim().is_empty())
+                .collect();
+            if !values.is_empty() {
+                if values.len() == 1 && values[0] != page && !labels.iter().any(|v| v == values[0])
+                {
+                    candidates.insert(values[0].to_string());
+                }
+                break;
+            }
+        }
+    }
+    if candidates.len() != 1 {
+        return Err("无法唯一读取目标字段，请检查手机页面及工作流版本".into());
+    }
+    Ok(candidates.into_iter().next().unwrap())
+}
+
+fn screen(adb: &Path, serial: &str, package: &str, folder: &Path) -> Result<String, String> {
+    let xml = android::dump(adb, serial)?;
+    fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
+    let doc = Document::parse(&xml).map_err(|e| e.to_string())?;
+    if !doc
+        .descendants()
+        .any(|n| n.attribute("package") == Some(package))
+    {
+        return Err("目标应用不在可操作的前台，请解锁手机、关闭弹窗后重试".into());
+    }
+    Ok(xml)
+}
+
+pub fn execute(
+    workflow: &Workflow,
+    adb: &Path,
+    serial: &str,
+    folder: &Path,
+    mut report: impl FnMut(usize, usize, &str),
+) -> Result<BTreeMap<String, String>, String> {
+    workflow.validate()?;
+    let devices = android::parse_devices(&android::text(adb, &["devices", "-l"])?);
+    if !devices
+        .iter()
+        .any(|d| d.serial == serial && d.state == "device")
+    {
+        return Err("手机已断开或尚未授权，请检查数据线及 USB 调试授权".into());
+    }
+    let package = android::text(
+        adb,
+        &["-s", serial, "shell", "pm", "path", &workflow.package],
+    )?;
+    if !package.starts_with("package:") {
+        return Err(format!("手机未安装目标应用 {}", workflow.package));
+    }
+    let mut outputs = BTreeMap::new();
+    for (index, step) in workflow.steps.iter().enumerate() {
+        report(index + 1, workflow.steps.len(), &step.name);
+        match &step.action {
+            Action::Wake => {
+                android::text(
+                    adb,
+                    &["-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+                )?;
+            }
+            Action::Launch { activity } => {
+                let output = android::text(
+                    adb,
+                    &[
+                        "-s",
+                        serial,
+                        "shell",
+                        "am",
+                        "start",
+                        "-n",
+                        &format!("{}/{activity}", workflow.package),
+                    ],
+                )?;
+                if output.contains("Error") || output.contains("Exception") {
+                    return Err("无法打开目标应用，请先解锁手机并手动打开后重试".into());
+                }
+            }
+            Action::Wait { ms } => thread::sleep(Duration::from_millis(*ms)),
+            Action::Back => {
+                android::text(
+                    adb,
+                    &["-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"],
+                )?;
+                thread::sleep(Duration::from_millis(700));
+            }
+            Action::Tap {
+                selector,
+                skip_if,
+                recover_back,
+            } => {
+                let mut done = false;
+                for attempt in 0..=*recover_back {
+                    let xml = screen(adb, serial, &workflow.package, folder)?;
+                    if skip_if.iter().any(|s| has_label(&xml, s)) {
+                        done = true;
+                        break;
+                    }
+                    let matches = select(&xml, selector)?;
+                    if matches.len() == 1 {
+                        android::tap(adb, serial, matches[0])?;
+                        done = true;
+                        break;
+                    }
+                    if matches.len() > 1 {
+                        return Err(format!("「{}」匹配到多个目标，已停止", step.name));
+                    }
+                    if attempt < *recover_back {
+                        android::text(
+                            adb,
+                            &["-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"],
+                        )?;
+                        thread::sleep(Duration::from_millis(700));
+                    }
+                }
+                if !done {
+                    return Err(format!(
+                        "「{}」找不到目标，请回到应用主界面后重试",
+                        step.name
+                    ));
+                }
+            }
+            Action::ReadRow {
+                page,
+                labels,
+                output,
+            } => {
+                outputs.insert(
+                    output.clone(),
+                    read_row(
+                        &screen(adb, serial, &workflow.package, folder)?,
+                        page,
+                        labels,
+                    )?,
+                );
+            }
+        }
+    }
+    Ok(outputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_workflow_validates_and_rejects_unknown_operations() {
+        let workflow = Workflow::parse(BUNDLED.as_bytes()).unwrap();
+        assert_eq!(workflow.id, "wechat-nickname");
+        let invalid = BUNDLED.replace("\"wake\"", "\"shell\"");
+        assert!(Workflow::parse(invalid.as_bytes()).is_err());
+        let invalid = BUNDLED.replace("com.tencent.mm\"", "com.tencent.mm;reboot\"");
+        assert!(Workflow::parse(invalid.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn selectors_require_unique_bottom_target_and_peer_row() {
+        let xml = r#"<hierarchy><node bounds="[0,0][1080,1920]"><node text="我" bounds="[0,100][100,150]"/><node text="通讯录" bounds="[300,1800][400,1840]"/><node text="发现" bounds="[600,1800][700,1840]"/><node text="我" bounds="[900,1800][980,1840]"/></node></hierarchy>"#;
+        let selector = Selector {
+            text: vec!["我".into()],
+            bottom: true,
+            peers: vec!["通讯录".into(), "发现".into()],
+            ..Default::default()
+        };
+        assert_eq!(select(xml, &selector).unwrap(), vec![(940, 1820)]);
+        assert!(select(&xml.replace("发现", "其他"), &selector)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn reads_row_without_guessing_missing_or_ambiguous_value() {
+        let xml = r#"<hierarchy><node text="个人信息"/><node><node><node text="昵称"/></node><node text="测试 🌱"/></node><node><node text="微信号"/><node text="wxid_test"/></node></hierarchy>"#;
+        let labels = vec!["昵称".into(), "名字".into()];
+        assert_eq!(read_row(xml, "个人信息", &labels).unwrap(), "测试 🌱");
+        assert!(read_row(
+            r#"<hierarchy><node text="个人信息"/><node text="昵称"/></hierarchy>"#,
+            "个人信息",
+            &labels
+        )
+        .is_err());
+    }
+}
