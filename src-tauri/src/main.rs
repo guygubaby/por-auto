@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod android;
+mod history;
 mod registry;
 mod workflow;
 
@@ -16,6 +17,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 type Reply<T> = Result<T, String>;
 #[derive(Default)]
@@ -209,7 +211,7 @@ async fn initialize_environment(app: AppHandle) -> Reply<Environment> {
 
 fn progress(app: &AppHandle, step: usize, total: usize, message: &str) {
     let _ = app.emit(
-        "read-progress",
+        "workflow-progress",
         Progress {
             step,
             total,
@@ -282,14 +284,39 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
             .as_millis() as u64;
         let folder = data_dir(&app)?.join("runs").join(timestamp.to_string());
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let mut summary = history::Summary {
+            id: timestamp.to_string(),
+            workflow_name: installed.workflow.name.clone(),
+            workflow_version: installed.workflow.version.clone(),
+            serial: serial.clone(),
+            timestamp,
+            status: "running".into(),
+            error: None,
+        };
+        history::save_summary(&folder, &summary)?;
+        fs::write(
+            folder.join("workflow.json"),
+            serde_json::to_vec_pretty(&installed.workflow).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        history::log(&folder, 0, "started", "工作流开始，检查设备与目标应用")?;
         let total = installed.workflow.steps.len();
         let read = workflow::execute(
             &installed.workflow,
             &adb,
             &serial,
             &folder,
-            |step, count, message| progress(&app, step, count, message),
+            |step, count, message, status| {
+                history::log(&folder, step, status, message)?;
+                if status == "started" {
+                    progress(&app, step, count, message);
+                }
+                Ok(())
+            },
         );
+        if let Err(error) = &read {
+            history::log(&folder, 0, "failed", error)?;
+        }
         let screenshot = android::run(&adb, &["-s", &serial, "exec-out", "screencap", "-p"])
             .and_then(|bytes| {
                 if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -299,6 +326,9 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
                 Ok(STANDARD.encode(bytes))
             });
         let warning = screenshot.as_ref().err().cloned();
+        if let Some(message) = &warning {
+            history::log(&folder, 0, "warning", message)?;
+        }
         let result = RunResult {
             nickname: read
                 .as_ref()
@@ -321,6 +351,24 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
             serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
         )
         .map_err(|e| format!("保存结果失败：{e}"))?;
+        summary.status = if result.error.is_some() {
+            "failed"
+        } else {
+            "completed"
+        }
+        .into();
+        summary.error = result.error.clone();
+        history::log(
+            &folder,
+            0,
+            &summary.status,
+            if result.error.is_some() {
+                "工作流执行失败"
+            } else {
+                "工作流执行完成"
+            },
+        )?;
+        history::save_summary(&folder, &summary)?;
         progress(
             &app,
             if result.error.is_some() { 0 } else { total + 1 },
@@ -351,8 +399,55 @@ async fn open_results(app: AppHandle) -> Reply<()> {
     .await
 }
 
+#[tauri::command]
+async fn list_runs(app: AppHandle) -> Reply<Vec<history::Summary>> {
+    blocking(move || history::list(&data_dir(&app)?.join("runs"))).await
+}
+
+#[tauri::command]
+async fn run_details(app: AppHandle, id: String) -> Reply<serde_json::Value> {
+    blocking(move || history::details(&data_dir(&app)?.join("runs"), &id)).await
+}
+
+#[tauri::command]
+async fn delete_runs(app: AppHandle, ids: Vec<String>) -> Reply<()> {
+    blocking(move || {
+        let state = app.state::<Jobs>();
+        let _guard = state.0.try_lock().map_err(|_| "任务运行期间不能清理记录")?;
+        history::delete(&data_dir(&app)?.join("runs"), &ids)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn export_runs(app: AppHandle, ids: Vec<String>) -> Reply<Option<String>> {
+    blocking(move || {
+        let state = app.state::<Jobs>();
+        let _guard = state.0.try_lock().map_err(|_| "请等待当前操作完成后导出")?;
+        let value = history::export(&data_dir(&app)?.join("runs"), &ids)?;
+        let file = app
+            .dialog()
+            .file()
+            .set_file_name(format!("por-auto-debug-{}.json", history::now()))
+            .add_filter("JSON 调试记录", &["json"])
+            .blocking_save_file();
+        let Some(file) = file else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|e| e.to_string())?;
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("导出失败：{e}"))?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Jobs::default())
         .invoke_handler(tauri::generate_handler![
             check_environment,
@@ -361,8 +456,12 @@ fn main() {
             sync_registry,
             install_workflow,
             run_workflow,
-            open_results
+            open_results,
+            list_runs,
+            run_details,
+            delete_runs,
+            export_runs
         ])
         .run(tauri::generate_context!())
-        .expect("无法启动微信连接助手");
+        .expect("无法启动Por Auto");
 }

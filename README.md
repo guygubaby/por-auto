@@ -1,6 +1,6 @@
 # por-auto
 
-Tauri 2 + Vue 3 + TypeScript + Tailwind CSS v4 的 Android 自动化桌面工具。界面参考 VoxRelay 的深色侧栏与状态卡片。当前提供手机环境初始化、ADB 设备发现、微信昵称读取、截图结果，以及 GitHub 工作流商店。
+Tauri 2 + Vue 3 + Vue Router 文件路由 + Pinia + TypeScript + Tailwind CSS v4 的 Android 自动化桌面工具。界面参考 VoxRelay 的深色侧栏与状态卡片。当前提供手机环境初始化、ADB 设备发现、微信昵称读取、截图结果，以及 GitHub 工作流商店。
 
 **不需要后端服务。** 桌面 Rust 代码直接连接手机及 GitHub；所有配置、已安装工作流和执行结果保存在用户本地。客户无须安装 Python、Node.js、Rust、Git 或 Android Studio。
 
@@ -48,7 +48,8 @@ pnpm build:windows           # Windows 本机或已配置的 macOS 交叉构建
 ## 源码结构
 
 ```text
-src/                         Vue 界面、工作流商店、手机连接与结果
+src/pages/                   文件路由页面：设备、结果、记录、商店、指引
+src/                         Vue 组件与共享 Pinia 状态
 src-tauri/src/android.rs      ADB 调用、设备与 UI 树
 src-tauri/src/workflow.rs     JSON 工作流校验与执行
 src-tauri/src/registry.rs     GitHub 源同步、校验、本地安装快照
@@ -61,3 +62,9 @@ wechat_demo.py               早期 Python 命令行原型，桌面端不依赖�
 Windows 配置与运行记录位于 `%LOCALAPPDATA%/com.por.wechatreader/`；macOS 位于系统分配的应用用户数据目录。`workflow-store.json` 保存工作流源和安装快照，`runs/<时间戳>/` 保存结果；设备与工作流选择保存在本机 WebView 存储中。GitHub 令牌不写入上述位置。
 
 当前读取流程仅适配简体中文原版微信；页面不同、同名节点歧义、未登录或锁屏时会停止并尽力保留证据。真实手机兼容性须按客户手机验证，单元测试和界面预览不等于真机成功。
+
+## 运行日志与调试导出
+
+每次执行会立即保存工作流快照和运行元数据，按步骤追加 `events.jsonl`，记录开始/完成时间、错误与截图提示。结束后写入 `result.json`；进程意外退出时，已写入的日志仍保留，列表显示“未完成 / 中断”。
+
+「运行记录」页面可查看逐步日志、多选记录、导出调试 JSON、删除所选或清空记录。删除前确认，日志、截图与页面结构一并清理。每次导出最多 100 条，通过系统保存对话框选择文件；JSON 包含日志、错误、工作流快照/版本、Git 提交和已有截图/页面结构，不包含 GitHub 令牌。全部操作在本机完成。

@@ -1,35 +1,30 @@
 <script setup lang="ts">
-import { ArrowRight, Cable, Check, CircleHelp, Download, Play, RefreshCw, ShieldCheck, Smartphone, Usb } from '@lucide/vue';
-import { useConnection } from '../useConnection';
+import { ArrowRight, Cable, Check, Download, Play, RefreshCw, ShieldCheck, Smartphone, Usb } from '@lucide/vue';
+import { storeToRefs } from 'pinia';
+import { RouterLink } from 'vue-router';
+import { useConnectionStore } from '../useConnection';
 import AppButton from './AppButton.vue';
 import StatusPill from './StatusPill.vue';
-import ResultPanel from './ResultPanel.vue';
-import WorkflowStore from './WorkflowStore.vue';
 
-const { desktop, environmentRef, selectedRef, busyRef, readingRef, errorRef, noticeRef, progressRef, resultRef, readyDevicesRef, selectedDeviceRef, storeRef, workflowKeyRef, selectedWorkflowRef, syncRegistry, installWorkflow, refresh, initialize, readNickname, openResults } = useConnection();
+const connection = useConnectionStore();
+const { environmentRef, selectedRef, busyRef, runningRef, progressRef, resultRef, readyDevicesRef, selectedDeviceRef, storeRef, workflowKeyRef, selectedWorkflowRef } = storeToRefs(connection);
+const { refresh, initialize, runWorkflow } = connection;
 const stateLabels: Record<string, string> = { device: '可以使用', unauthorized: '等待手机授权', offline: '设备离线', recovery: '恢复模式', sideload: '刷机模式', no: '连接权限不足' };
 </script>
 
 <template>
   <div class="space-y-5">
-    <div v-if="!desktop" class="rounded-control border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning">界面预览 · 手机操作请使用安装后的桌面客户端</div>
-    <div class="sticky top-0 z-10 flex min-h-6 items-center rounded-control bg-canvas py-2 text-sm" aria-live="polite" aria-atomic="true">
-      <p v-if="errorRef" class="break-words text-danger">{{ errorRef }}</p>
-      <p v-else-if="noticeRef" class="text-success">{{ noticeRef }}</p>
-      <p v-else class="text-ink-muted">首次使用先准备连接组件，再用 USB 数据线连接 Android 手机。</p>
-    </div>
-
     <section id="connect" class="scroll-mt-6 rounded-card border border-line bg-surface p-5">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <div class="grid size-10 place-items-center rounded-control bg-brand-soft text-brand-strong"><ShieldCheck :size="20" aria-hidden="true" /></div>
-          <div><h2 class="text-sm font-semibold">连接环境</h2><p class="mt-1 text-xs text-ink-muted">组件随软件附带，无需额外安装 Python</p></div>
+          <div><h2 class="text-sm font-semibold">连接环境</h2><p class="mt-1 text-xs text-ink-muted">连接组件随软件提供，初始化后即可使用</p></div>
         </div>
         <StatusPill :tone="environmentRef?.ready ? 'success' : 'warning'">{{ environmentRef?.ready ? '组件已就绪' : '待初始化' }}</StatusPill>
       </div>
       <div class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-control border border-line bg-canvas/50 px-4 py-3">
         <div class="flex items-center gap-3 text-sm"><Usb :size="18" class="text-ink-muted" aria-hidden="true" /><span>Android 连接组件</span><span v-if="environmentRef" class="text-xs text-ink-muted">{{ environmentRef.version }}</span></div>
-        <AppButton :variant="environmentRef?.ready ? 'secondary' : 'primary'" :loading="busyRef && !readingRef" :disabled="readingRef" @click="initialize"><Check v-if="environmentRef?.ready" :size="15" aria-hidden="true" /><Download v-else :size="15" aria-hidden="true" />{{ environmentRef?.ready ? '重新初始化' : '初始化连接组件' }}</AppButton>
+        <AppButton :variant="environmentRef?.ready ? 'secondary' : 'primary'" :loading="busyRef && !runningRef" :disabled="runningRef" @click="initialize"><Check v-if="environmentRef?.ready" :size="15" aria-hidden="true" /><Download v-else :size="15" aria-hidden="true" />{{ environmentRef?.ready ? '重新初始化' : '初始化连接组件' }}</AppButton>
       </div>
     </section>
 
@@ -58,28 +53,16 @@ const stateLabels: Record<string, string> = { device: '可以使用', unauthoriz
             <option v-for="device in readyDevicesRef" :key="device.serial" :value="device.serial">{{ device.model }} · {{ device.serial }}</option>
           </select>
         </div>
-        <AppButton :loading="readingRef" :disabled="busyRef || !selectedDeviceRef || !selectedWorkflowRef" @click="readNickname"><Play v-if="!readingRef" :size="15" aria-hidden="true" />{{ readingRef ? '正在执行…' : '运行工作流' }}</AppButton>
+        <AppButton :loading="runningRef" :disabled="busyRef || !selectedDeviceRef || !selectedWorkflowRef" @click="runWorkflow"><Play v-if="!runningRef" :size="15" aria-hidden="true" />{{ runningRef ? '正在执行…' : '运行工作流' }}</AppButton>
       </div>
       <div class="mt-5 rounded-control bg-canvas/60 px-4 py-3">
         <ol class="flex flex-wrap items-center gap-2 text-xs text-ink-muted" role="list">
-          <li v-for="(step, index) in selectedWorkflowRef?.workflow.steps" :key="index" class="flex items-center gap-2" :class="{ 'text-success': progressRef.step > index + 1, 'text-brand-strong': readingRef && progressRef.step === index + 1 }"><Check v-if="progressRef.step > index + 1" :size="13" aria-hidden="true" />{{ step.name }}<ArrowRight v-if="index < (selectedWorkflowRef?.workflow.steps.length ?? 0) - 1" :size="12" class="text-ink-muted" aria-hidden="true" /></li>
+          <li v-for="(step, index) in selectedWorkflowRef?.workflow.steps" :key="index" class="flex items-center gap-2" :class="{ 'text-success': progressRef.step > index + 1, 'text-brand-strong': runningRef && progressRef.step === index + 1 }"><Check v-if="progressRef.step > index + 1" :size="13" aria-hidden="true" />{{ step.name }}<ArrowRight v-if="index < (selectedWorkflowRef?.workflow.steps.length ?? 0) - 1" :size="12" class="text-ink-muted" aria-hidden="true" /></li>
         </ol>
-        <p v-if="readingRef" class="mt-3 text-xs text-brand-strong">{{ progressRef.message }} · 请暂时不要操作手机</p>
+        <p v-if="runningRef" class="mt-3 text-xs text-brand-strong">{{ progressRef.message }} · 请暂时不要操作手机</p>
       </div>
     </section>
 
-    <ResultPanel :result="resultRef" :busy="busyRef" @open-results="openResults" />
-
-    <WorkflowStore :store="storeRef" :busy="busyRef" @sync="syncRegistry" @install="installWorkflow" />
-
-    <section id="guide" class="scroll-mt-6 rounded-card border border-line bg-surface p-5">
-      <h2 class="flex items-center gap-2 text-sm font-semibold"><CircleHelp :size="17" class="text-ink-muted" aria-hidden="true" />连接前需要做什么</h2>
-      <ol class="mt-4 grid gap-4 text-xs leading-6 text-ink-secondary sm:grid-cols-3" role="list">
-        <li><span class="mb-2 block font-medium text-ink">1. 开启 USB 调试</span>手机设置 → 开发者选项 → USB 调试。连接电脑后，在手机上点击「允许」。</li>
-        <li><span class="mb-2 block font-medium text-ink">2. 准备微信</span>解锁手机，登录简体中文原版微信。遇到弹窗时先关闭，再回到微信主界面。</li>
-        <li><span class="mb-2 block font-medium text-ink">3. 运行工作流</span>选择「读取微信昵称」并运行，核对软件里的昵称与手机「我 → 个人信息」页是否一致。</li>
-      </ol>
-      <p class="mt-4 border-t border-line pt-4 text-xs leading-6 text-ink-muted">仍找不到手机？换一根能传输数据的数据线或 USB 接口。Windows 部分手机需要先安装品牌官方 USB 驱动。</p>
-    </section>
+    <RouterLink v-if="resultRef && !runningRef" to="/results" class="block rounded-control border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand-strong">{{ resultRef.error ? '工作流未完成，查看结果与错误详情' : '工作流已完成，查看运行结果' }}</RouterLink>
   </div>
 </template>

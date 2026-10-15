@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WeChat Link",
+  "productName": "Por Auto",
   "version": "0.1.0",
   "identifier": "com.por.wechatreader",
   "build": {
@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [{
-      "title": "微信连接助手",
+      "title": "Por Auto",
       "width": 1120,
       "height": 800,
       "minWidth": 820,

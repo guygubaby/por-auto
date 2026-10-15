@@ -10,12 +10,12 @@ defineEmits<{ openResults: [] }>();
 <template>
   <section id="result" class="scroll-mt-6 rounded-card border border-line bg-surface">
     <div class="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
-      <h2 class="text-sm font-semibold">读取结果</h2>
+      <h2 class="text-sm font-semibold">运行结果</h2>
       <AppButton variant="ghost" :disabled="busy || !result" @click="$emit('openResults')"><FolderOpen :size="15" aria-hidden="true" />打开结果目录</AppButton>
     </div>
     <div v-if="!result" class="flex min-h-52 flex-col items-center justify-center gap-3 p-7 text-center">
       <div class="grid size-12 place-items-center rounded-2xl border border-line bg-surface-raised"><ScanLine :size="23" class="text-ink-muted" aria-hidden="true" /></div>
-      <p class="text-sm text-ink-secondary">读取完成后，在这里查看昵称与手机截图</p>
+      <p class="text-sm text-ink-secondary">运行工作流后，在这里查看输出与手机截图</p>
       <p class="text-xs text-ink-muted">结果保存在这台电脑上</p>
     </div>
     <div v-else class="grid gap-6 p-5 sm:grid-cols-2">
@@ -27,14 +27,14 @@ defineEmits<{ openResults: [] }>();
         <p class="break-words text-2xl font-semibold">{{ result.nickname ?? (result.error ? '未取得结果' : '执行成功') }}</p>
         <dl class="mt-6 space-y-3 text-xs">
           <div><dt class="text-ink-muted">工作流</dt><dd class="mt-1 text-ink-secondary">{{ result.workflow_name }} · {{ result.workflow_version }}</dd></div>
-          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ field === 'nickname' ? '微信昵称' : field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
+          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ field === 'nickname' ? '昵称' : field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
           <div><dt class="text-ink-muted">手机序列号</dt><dd class="mt-1 break-all text-ink-secondary">{{ result.serial }}</dd></div>
           <div><dt class="text-ink-muted">执行时间</dt><dd class="mt-1 text-ink-secondary">{{ new Date(result.timestamp).toLocaleString('zh-CN') }}</dd></div>
         </dl>
-        <p v-if="result.warning" class="mt-5 text-xs leading-6 text-warning">昵称操作已结束，但截图未保存：{{ result.warning }}</p>
+        <p v-if="result.warning" class="mt-5 text-xs leading-6 text-warning">工作流已结束，但截图未保存：{{ result.warning }}</p>
       </div>
       <figure class="flex flex-col items-center rounded-2xl border border-line bg-canvas p-3">
-        <img v-if="result.screenshot" :src="`data:image/png;base64,${result.screenshot}`" class="max-h-96 max-w-full rounded-lg object-contain" alt="本次操作结束时的手机页面截图，可核对微信昵称" />
+        <img v-if="result.screenshot" :src="`data:image/png;base64,${result.screenshot}`" class="max-h-96 max-w-full rounded-lg object-contain" alt="本次工作流执行结束时的手机页面截图" />
         <p v-else class="py-12 text-sm text-ink-muted">未取得手机截图</p>
         <figcaption class="mt-3 text-xs text-ink-muted">本次操作截图</figcaption>
       </figure>

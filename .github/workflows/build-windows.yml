@@ -20,9 +20,6 @@ jobs:
           node-version: '24'
           cache: pnpm
       - uses: dtolnay/rust-toolchain@1.93.1
-      - uses: Swatin/rust-cache@v2
-        with:
-          workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm registry:check
       - run: pnpm prepare:adb windows

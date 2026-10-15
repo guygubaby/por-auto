@@ -1,4 +1,5 @@
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
+import { defineStore } from 'pinia';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import bundled from '../workflows/wechat-nickname/workflow.json';
@@ -13,12 +14,12 @@ export interface RunResult { nickname: string | null; outputs: Record<string, st
 interface Progress { step: number; total: number; message: string }
 export interface RegistryInput { url: string; reference: string; token: string }
 
-export function useConnection() {
+export const useConnectionStore = defineStore('connection', () => {
   const desktop = isTauri();
   const environmentRef = shallowRef<Environment | null>(null);
   const selectedRef = ref('');
   const busyRef = ref(false);
-  const readingRef = ref(false);
+  const runningRef = ref(false);
   const errorRef = ref('');
   const noticeRef = ref('');
   const progressRef = shallowRef<Progress>({ step: 0, total: 0, message: '等待开始' });
@@ -60,7 +61,7 @@ export function useConnection() {
       applyStore(await invoke<Store>('install_workflow', { url: registry.url, reference: registry.reference, id: workflow.id }));
       const item = storeRef.value.installed.find(item => item.registryUrl === registry.url && item.reference === registry.reference && item.workflow.id === workflow.id);
       if (item) workflowKeyRef.value = item.key;
-      noticeRef.value = `已安装 ${workflow.name} ${workflow.version}，可以在上方选择运行`;
+      noticeRef.value = `已安装 ${workflow.name} ${workflow.version}，可以在「设备与运行」中选择运行`;
     });
   }
 
@@ -88,17 +89,17 @@ export function useConnection() {
     });
   }
 
-  async function readNickname(): Promise<void> {
+  async function runWorkflow(): Promise<void> {
     if (!selectedDeviceRef.value || !selectedWorkflowRef.value) return;
     await operate(async () => {
       resultRef.value = null;
-      readingRef.value = true;
+      runningRef.value = true;
       progressRef.value = { step: 1, total: selectedWorkflowRef.value!.workflow.steps.length, message: '正在连接手机' };
       try {
         resultRef.value = await invoke<RunResult>('run_workflow', { serial: selectedRef.value, workflowKey: workflowKeyRef.value });
         if (resultRef.value.error) errorRef.value = resultRef.value.error;
-        else noticeRef.value = resultRef.value.nickname ? `读取完成，微信昵称是 ${resultRef.value.nickname}` : '工作流执行完成，请查看运行结果';
-      } finally { readingRef.value = false; }
+        else noticeRef.value = `工作流「${resultRef.value.workflow_name}」执行完成，请查看运行结果`;
+      } finally { runningRef.value = false; }
     });
   }
 
@@ -106,20 +107,21 @@ export function useConnection() {
     await operate(async () => { await invoke('open_results'); });
   }
 
-  onMounted(async () => {
+  async function initializeApp(): Promise<void> {
     if (!desktop) return;
     try {
-      const saved = JSON.parse(localStorage.getItem('selection') ?? '{}') as { serial?: string; workflow?: string };
+      let saved: { serial?: string; workflow?: string } = {};
+      try { saved = JSON.parse(localStorage.getItem('selection') ?? '{}'); } catch { /* Use defaults if local selections are incomplete. */ }
       selectedRef.value = saved.serial ?? '';
       workflowKeyRef.value = saved.workflow ?? '';
-      const stop = await listen<Progress>('read-progress', event => { progressRef.value = event.payload; });
+      const stop = await listen<Progress>('workflow-progress', event => { progressRef.value = event.payload; });
       if (disposed) { stop(); return; }
       unlisten = stop;
       applyStore(await invoke<Store>('workflow_store'));
       await refresh();
     } catch (error) { errorRef.value = String(error); }
-  });
-  onBeforeUnmount(() => { disposed = true; unlisten?.(); });
+  }
+  function dispose(): void { disposed = true; unlisten?.(); }
 
-  return { desktop, environmentRef, selectedRef, busyRef, readingRef, errorRef, noticeRef, progressRef, resultRef, readyDevicesRef, selectedDeviceRef, storeRef, workflowKeyRef, selectedWorkflowRef, syncRegistry, installWorkflow, refresh, initialize, readNickname, openResults };
-}
+  return { desktop, environmentRef, selectedRef, busyRef, runningRef, errorRef, noticeRef, progressRef, resultRef, readyDevicesRef, selectedDeviceRef, storeRef, workflowKeyRef, selectedWorkflowRef, syncRegistry, installWorkflow, refresh, initialize, runWorkflow, openResults, initializeApp, dispose };
+});

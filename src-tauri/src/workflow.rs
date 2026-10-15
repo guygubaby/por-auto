@@ -303,7 +303,7 @@ pub fn execute(
     adb: &Path,
     serial: &str,
     folder: &Path,
-    mut report: impl FnMut(usize, usize, &str),
+    mut report: impl FnMut(usize, usize, &str, &str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
     workflow.validate()?;
     let devices = android::parse_devices(&android::text(adb, &["devices", "-l"])?);
@@ -322,7 +322,7 @@ pub fn execute(
     }
     let mut outputs = BTreeMap::new();
     for (index, step) in workflow.steps.iter().enumerate() {
-        report(index + 1, workflow.steps.len(), &step.name);
+        report(index + 1, workflow.steps.len(), &step.name, "started")?;
         match &step.action {
             Action::Wake => {
                 android::text(
@@ -406,6 +406,7 @@ pub fn execute(
                 );
             }
         }
+        report(index + 1, workflow.steps.len(), &step.name, "completed")?;
     }
     Ok(outputs)
 }
