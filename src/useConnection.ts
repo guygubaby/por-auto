@@ -95,7 +95,9 @@ export const useConnectionStore = defineStore('connection', () => {
 
   async function refresh(): Promise<void> {
     await operate(async () => {
-      applyEnvironment(await invoke<Environment>('check_environment'));
+      const environment = await invoke<Environment>('check_environment');
+      applyEnvironment(environment);
+      if (!environment.ready) errorRef.value = '连接组件尚未初始化，请先点击「初始化连接组件」，完成后再刷新设备。';
     });
   }
 

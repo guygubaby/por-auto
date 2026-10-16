@@ -37,7 +37,7 @@ function focusContent(): void { document.getElementById('main-content')?.focus()
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-line/70 px-4 sm:px-5"><p class="flex shrink-0 items-center gap-2 text-sm text-ink-secondary"><Smartphone :size="17" class="text-brand-strong" aria-hidden="true" />Por Auto</p><div class="flex min-w-0 items-center gap-2"><AppUpdater :workflow-busy="busyRef" /><EnvironmentDoctor /></div></header>
       <nav class="flex flex-wrap gap-2 border-b border-line px-4 py-3 md:hidden" aria-label="页面"><RouterLink v-for="item in navigation" :key="item.to" :to="item.to" class="rounded-control px-3 py-2 text-xs text-ink-secondary [&.router-link-exact-active]:bg-brand-soft [&.router-link-exact-active]:text-brand-strong">{{ item.label }}</RouterLink></nav>
-      <main id="main-content" tabindex="-1" class="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-5">
+      <main id="main-content" tabindex="-1" class="min-h-0 flex-1 overflow-auto px-4 py-5 outline-none sm:px-5">
         <div class="mx-auto max-w-5xl">
           <div class="mb-4"><h1 class="text-2xl font-semibold tracking-tight">{{ route.meta.title }}</h1><p class="mt-2 text-sm leading-5 text-ink-secondary">{{ route.meta.description }}</p></div>
           <div v-if="!desktop" class="mb-4 rounded-control border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning">界面预览 · 手机操作请使用安装后的桌面客户端</div>

@@ -21,6 +21,11 @@ test('restores device selections and runs a frozen batch sequentially through fa
     if (command.startsWith('plugin:event|')) return 1;
     if (command === 'workflow_store') return { schemaVersion: 1, registries: [], installed: [{ key: 'installed', workflow }] };
     if (command === 'check_environment') return structuredClone(environment);
+    if (command === 'initialize_environment') {
+      environment.ready = true;
+      environment.devices = [...devices];
+      return structuredClone(environment);
+    }
     if (command !== 'run_workflow') throw new Error(`Unexpected command: ${command}`);
     calls.push({ ...args });
     concurrent++;
@@ -52,6 +57,18 @@ test('restores device selections and runs a frozen batch sequentially through fa
     await nextTick();
     assert.deepEqual(connection.selectedSerialsRef, ['A']);
     assert.deepEqual(JSON.parse(local.get('selection')).serials, ['A']);
+
+    environment.ready = false;
+    environment.devices = [];
+    await connection.refresh();
+    assert.equal(connection.environmentRef.ready, false);
+    assert.match(connection.errorRef, /请先点击「初始化连接组件」/);
+    assert.equal(connection.busyRef, false);
+    await connection.initialize();
+    assert.equal(connection.environmentRef.ready, true);
+    assert.equal(connection.errorRef, '');
+    await connection.refresh();
+    assert.equal(connection.errorRef, '');
 
     connection.selectedSerialsRef = [];
     await connection.refresh();
