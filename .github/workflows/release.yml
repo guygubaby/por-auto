@@ -65,6 +65,14 @@ jobs:
           pnpm test:updates
       - run: pnpm prepare:adb ${{ matrix.adb }}
       - run: pnpm prepare:u2
+      - name: Reproduce and verify Windows ADB resource paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $component = Join-Path $env:RUNNER_TEMP 'por-adb-path-test'
+          Expand-Archive src-tauri/resources/platform-tools.zip $component -Force
+          $env:POR_ADB_TEST_BINARY = Join-Path $component 'platform-tools/adb.exe'
+          pnpm test:adb-paths
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build signed installer and updater artifacts
         env:

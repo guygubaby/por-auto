@@ -51,6 +51,7 @@ pnpm tauri dev
 
 ```sh
 pnpm build                   # Vue / TypeScript 检查与前端构建
+pnpm test:adb-paths          # POR_ADB_TEST_BINARY 指向已解压的 ADB，无手机复现 Windows 路径问题
 pnpm test:devices            # 多设备选择迁移、最多 4 台并行、事件隔离与失败后继续
 pnpm test:schedules          # 定时任务界面状态、防重复提交与旧响应隔离
 pnpm test:updates            # 更新状态、版本与多平台发布清单

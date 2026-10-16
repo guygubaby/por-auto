@@ -64,7 +64,7 @@ pub struct Session {
 impl Session {
     pub fn start(adb: &Path, serial: &str, jar: &Path, folder: &Path) -> Result<Self, String> {
         verify(jar)?;
-        android::text(adb, &["-s", serial, "push", &jar.to_string_lossy(), REMOTE])?;
+        android::push(adb, serial, jar, REMOTE)?;
         let port = android::text(adb, &["-s", serial, "forward", "tcp:0", DEVICE_PORT])?;
         let port = port.trim().to_owned();
         if port.parse::<u16>().ok().filter(|p| *p > 0).is_none() {

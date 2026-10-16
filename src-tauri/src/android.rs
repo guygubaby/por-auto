@@ -49,8 +49,33 @@ pub fn parse_devices(text: &str) -> Vec<Device> {
 
 pub fn run(adb: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut command = Command::new(adb);
+    command.args(args);
+    run_command(&mut command)
+}
+
+fn push_command(adb: &Path, serial: &str, local: &Path, remote: &str) -> Result<Command, String> {
+    let directory = local
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or("自动化组件路径缺少目录")?;
+    let filename = local.file_name().ok_or("自动化组件路径缺少文件名")?;
+    let mut command = Command::new(adb);
+    // ADB cannot stat Windows verbatim paths; let the OS set cwd and pass a relative filename.
     command
-        .args(args)
+        .current_dir(directory)
+        .args(["-s", serial, "push"])
+        .arg(filename)
+        .arg(remote);
+    Ok(command)
+}
+
+pub fn push(adb: &Path, serial: &str, local: &Path, remote: &str) -> Result<(), String> {
+    run_command(&mut push_command(adb, serial, local, remote)?)?;
+    Ok(())
+}
+
+fn run_command(command: &mut Command) -> Result<Vec<u8>, String> {
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -108,6 +133,41 @@ pub fn text(adb: &Path, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn push_passes_only_filename_to_adb_and_keeps_native_parent_directory() {
+        let folder = std::env::temp_dir().join(format!("Por Auto 中文 {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("u2.jar");
+        std::fs::write(&file, b"verified component").unwrap();
+        let file = file.canonicalize().unwrap();
+        #[cfg(windows)]
+        assert!(file.to_string_lossy().starts_with(r"\\?\"));
+        let command = push_command(
+            Path::new("adb"),
+            "test-device",
+            &file,
+            "/data/local/tmp/u2.jar",
+        )
+        .unwrap();
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "-s",
+                "test-device",
+                "push",
+                "u2.jar",
+                "/data/local/tmp/u2.jar"
+            ]
+        );
+        assert_eq!(command.get_current_dir(), file.parent());
+        assert_eq!(
+            std::fs::read(command.get_current_dir().unwrap().join(args[3])).unwrap(),
+            b"verified component"
+        );
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 
     #[test]
     fn keeps_device_authorization_states_separate() {

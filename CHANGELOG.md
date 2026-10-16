@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- 修复 Windows 上传 uiautomator2 组件时报 `adb: cannot stat`：由系统设置组件目录，ADB 使用相对文件名，不再解析 Windows 特殊绝对路径。
+- 保留组件完整性校验；目录中的空格和中文无需更名或迁移。
+- Windows 发布前使用随包真实 ADB 复现旧错误，并检查修复后读取、传输的文件内容一致；测试使用本机模拟目标，不连接真实手机。
+
 ## 0.2.1
 
 - 接入 uiautomator2 官方 Android 服务，Rust 直接调用页面读取、点击与中文输入，客户无需安装 Python。
