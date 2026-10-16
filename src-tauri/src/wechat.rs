@@ -110,34 +110,38 @@ fn first_row(xml: &str) -> Result<(Chat, (i32, i32)), String> {
         .filter(|n| n.is_element())
         .find(|n| node_bounds(*n).is_some_and(|b| b[3] > list_bounds[1] && b[1] < list_bounds[3]))
         .ok_or("微信会话列表为空")?;
-    if !row
+    let row_bounds = node_bounds(row).ok_or("首个会话不可见")?;
+    let avatar = row
         .descendants()
-        .any(|n| n.attribute("class") == Some("android.widget.ImageView"))
-    {
-        return Err("列表第一项无法确认为聊天会话，已停止；不会跳过第一项给其他会话发送".into());
-    }
-    let mut names: Vec<_> = row
+        .filter(|n| n.attribute("class") == Some("android.widget.ImageView"))
+        .filter_map(node_bounds)
+        .filter(|b| b[0] < (row_bounds[0] + row_bounds[2]) / 2)
+        .min_by_key(|b| b[0])
+        .ok_or("列表第一项无法确认为聊天会话，已停止；不会跳过第一项给其他会话发送")?;
+    let names: BTreeSet<_> = row
         .descendants()
         .filter(|n| {
-            let text = label(*n);
             n.attribute("class") == Some("android.widget.TextView")
                 && enabled(*n)
-                && !text.trim().is_empty()
-                && !text.chars().all(|c| c.is_ascii_digit() || c == ':')
-                && !["昨天", "今天", "置顶", "免打扰"].contains(&text)
-                && !text.starts_with("星期")
-                && !text.starts_with("周")
+                && !label(*n).trim().is_empty()
+                && node_bounds(*n).is_some_and(|b| {
+                    b[0] >= avatar[2]
+                        && b[0] < (row_bounds[0] + row_bounds[2]) / 2
+                        && b[1] < (row_bounds[1] + row_bounds[3]) / 2
+                })
         })
-        .filter_map(|n| node_bounds(n).map(|b| (b[1], b[0], label(n))))
+        .map(label)
         .collect();
-    names.sort();
-    let (_, _, title) = names.first().ok_or("无法读取首个会话名称，已停止")?;
-    if ["订阅号消息", "服务通知", "折叠置顶聊天", "微信团队"].contains(title) {
+    if names.len() != 1 {
+        return Err("无法唯一读取头像旁的首个会话名称，已停止".into());
+    }
+    let title = names.into_iter().next().unwrap();
+    if ["订阅号消息", "服务通知", "折叠置顶聊天", "微信团队"].contains(&title) {
         return Err(format!("第一项「{title}」不是受支持的普通聊天会话，已停止"));
     }
     Ok((
         Chat {
-            title: (*title).into(),
+            title: title.into(),
         },
         center(row).ok_or("首个会话不可见")?,
     ))
@@ -439,6 +443,20 @@ mod tests {
         assert!(!title_matches("测试", "测试联系人"));
         assert!(first_row(&HOME.replace("android.widget.ImageView", "android.view.View")).is_err());
         assert!(first_row(&HOME.replace("测试联系人", "订阅号消息")).is_err());
+        for name in ["周先生", "123", "昨天", "星期四测试群"] {
+            assert_eq!(
+                first_row(&HOME.replace("测试联系人", name))
+                    .unwrap()
+                    .0
+                    .title,
+                name
+            );
+        }
+        let ambiguous = HOME.replace(
+            "text=\"上一条消息\" bounds=\"[180,280][800,325]\"",
+            "text=\"无法区分的另一个标题\" bounds=\"[180,230][800,270]\"",
+        );
+        assert!(first_row(&ambiguous).is_err());
         fs::remove_dir_all(folder).unwrap();
     }
 
