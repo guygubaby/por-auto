@@ -64,6 +64,7 @@ jobs:
           pnpm test:schedules
           pnpm test:updates
       - run: pnpm prepare:adb ${{ matrix.adb }}
+      - run: pnpm prepare:u2
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build signed installer and updater artifacts
         env:

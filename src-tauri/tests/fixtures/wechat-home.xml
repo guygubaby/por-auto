@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: geometry/semantics, not a real-device compatibility claim. -->
+<hierarchy><node package="com.tencent.mm" class="android.widget.FrameLayout" bounds="[0,0][1080,1920]">
+  <node package="com.tencent.mm" class="android.widget.ListView" resource-id="com.tencent.mm:id/conversations" scrollable="true" bounds="[0,180][1080,1760]">
+    <node package="com.tencent.mm" class="android.widget.LinearLayout" clickable="true" bounds="[0,180][1080,370]">
+      <node package="com.tencent.mm" class="android.widget.ImageView" content-desc="头像" bounds="[20,200][160,340]"/>
+      <node package="com.tencent.mm" class="android.widget.TextView" text="测试联系人" bounds="[180,205][500,255]"/>
+      <node package="com.tencent.mm" class="android.widget.TextView" text="09:30" bounds="[900,205][1050,255]"/>
+      <node package="com.tencent.mm" class="android.widget.TextView" text="上一条消息" bounds="[180,280][800,325]"/>
+    </node>
+    <node package="com.tencent.mm" class="android.widget.LinearLayout" clickable="true" bounds="[0,370][1080,560]">
+      <node package="com.tencent.mm" class="android.widget.ImageView" bounds="[20,390][160,530]"/>
+      <node package="com.tencent.mm" class="android.widget.TextView" text="第二个联系人" bounds="[180,395][600,445]"/>
+    </node>
+  </node>
+  <node package="com.tencent.mm" text="微信" bounds="[0,1800][270,1900]"/>
+  <node package="com.tencent.mm" text="通讯录" bounds="[270,1800][540,1900]"/>
+  <node package="com.tencent.mm" text="发现" bounds="[540,1800][810,1900]"/>
+  <node package="com.tencent.mm" text="我" bounds="[810,1800][1080,1900]"/>
+</node></hierarchy>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, CircleUserRound, FolderOpen, ScanLine, TriangleAlert } from '@lucide/vue';
+import { Check, FolderOpen, ScanLine, TriangleAlert } from '@lucide/vue';
 import type { RunResult } from '../useConnection';
 import AppButton from './AppButton.vue';
 
@@ -23,11 +23,10 @@ defineEmits<{ openResults: [] }>();
         <div class="mb-4 flex items-center gap-2 text-sm" :class="result.error ? 'text-warning' : 'text-success'">
           <TriangleAlert v-if="result.error" :size="18" aria-hidden="true" /><Check v-else :size="18" aria-hidden="true" />{{ result.error ? '本次执行未完成' : '工作流执行完成' }}
         </div>
-        <CircleUserRound :size="28" class="mb-3 text-brand-strong" aria-hidden="true" />
-        <p class="break-words text-2xl font-semibold">{{ result.nickname ?? (result.error ? '未取得结果' : '执行成功') }}</p>
+        <p class="break-words text-2xl font-semibold">{{ result.outputs.chat_title ?? result.nickname ?? (result.error ? '未取得结果' : '执行成功') }}</p>
         <dl class="mt-4 space-y-3 text-xs">
           <div><dt class="text-ink-muted">工作流</dt><dd class="mt-1 text-ink-secondary">{{ result.workflow_name }} · {{ result.workflow_version }}</dd></div>
-          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ field === 'nickname' ? '昵称' : field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
+          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ ({ nickname: '昵称', chat_title: '会话', message: '发送内容', send_status: '发送状态' } as Record<string, string>)[field] ?? field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
           <div><dt class="text-ink-muted">手机序列号</dt><dd class="mt-1 break-all text-ink-secondary">{{ result.serial }}</dd></div>
           <div><dt class="text-ink-muted">执行时间</dt><dd class="mt-1 text-ink-secondary">{{ new Date(result.timestamp).toLocaleString('zh-CN') }}</dd></div>
         </dl>

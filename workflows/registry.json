@@ -3,6 +3,11 @@
   "name": "Por Auto 官方工作流",
   "workflows": [
     {
+      "id": "wechat-first-chat",
+      "path": "workflows/wechat-first-chat/workflow.json",
+      "sha256": "5cb2b3db098729ea78a6e73c066e670cbfac1a0c3057cff06f9eaef93706c1cf"
+    },
+    {
       "id": "wechat-nickname",
       "path": "workflows/wechat-nickname/workflow.json",
       "sha256": "d0c1d7ae7766c5bff4c3aba4741e040e6f14eac133af468e0ea36fc21f0ed5c4"
@@ -11,6 +16,11 @@
       "id": "wechat-open",
       "path": "workflows/wechat-open/workflow.json",
       "sha256": "5507eeaa3f0310154efa474420549892719b72f8258e453250b180220a2ece02"
+    },
+    {
+      "id": "wechat-send-hello",
+      "path": "workflows/wechat-send-hello/workflow.json",
+      "sha256": "76e5e0936c8d6fb7f62a83f30885584a3a5833a3c1cda47d8fdd6d4fcb561d57"
     }
   ]
 }

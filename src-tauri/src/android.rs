@@ -1,4 +1,3 @@
-use roxmltree::Document;
 use serde::Serialize;
 use std::{
     io::Read,
@@ -104,32 +103,6 @@ pub fn run(adb: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
 
 pub fn text(adb: &Path, args: &[&str]) -> Result<String, String> {
     String::from_utf8(run(adb, args)?).map_err(|_| "手机返回了无法识别的文字".into())
-}
-
-pub fn dump(adb: &Path, serial: &str) -> Result<String, String> {
-    let path = "/data/local/tmp/por-wechat-ui.xml";
-    text(adb, &["-s", serial, "shell", "rm", "-f", path])?;
-    text(adb, &["-s", serial, "shell", "uiautomator", "dump", path])?;
-    let xml = text(adb, &["-s", serial, "exec-out", "cat", path])?;
-    Document::parse(&xml).map_err(|_| "无法读取手机界面，请解锁手机并关闭弹窗后重试")?;
-    Ok(xml)
-}
-
-pub fn tap(adb: &Path, serial: &str, point: (i32, i32)) -> Result<(), String> {
-    text(
-        adb,
-        &[
-            "-s",
-            serial,
-            "shell",
-            "input",
-            "tap",
-            &point.0.to_string(),
-            &point.1.to_string(),
-        ],
-    )?;
-    thread::sleep(Duration::from_millis(900));
-    Ok(())
 }
 
 #[cfg(test)]

@@ -197,8 +197,8 @@ pub async fn install_app_update(app: AppHandle) -> Reply<()> {
     crate::blocking(move || {
         let jobs = app.state::<Jobs>();
         let _guard = jobs
-            .0
-            .try_lock()
+            .maintenance
+            .try_write()
             .map_err(|_| "请等待工作流或维护操作结束后安装更新")?;
         if !app
             .state::<schedule::Scheduler>()

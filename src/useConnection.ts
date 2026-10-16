@@ -3,16 +3,21 @@ import { defineStore } from 'pinia';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import bundled from '../workflows/wechat-nickname/workflow.json';
+import openWorkflow from '../workflows/wechat-open/workflow.json';
+import firstChatWorkflow from '../workflows/wechat-first-chat/workflow.json';
+import sendHelloWorkflow from '../workflows/wechat-send-hello/workflow.json';
+
+const bundledWorkflows = [bundled, openWorkflow, firstChatWorkflow, sendHelloWorkflow];
 
 export interface Device { serial: string; state: string; model: string }
-interface Environment { ready: boolean; version: string; platform: string; devices: Device[] }
-export interface Workflow { id: string; name: string; version: string; description: string; package: string; steps: { name: string }[] }
+interface Environment { ready: boolean; version: string; platform: string; devices: Device[]; automation_version?: string }
+export interface Workflow { id: string; name: string; version: string; description: string; package: string; steps: { name: string; action?: { type: string; text?: string } }[] }
 export interface Registry { url: string; reference: string; name: string; commit: string; workflows: Workflow[] }
 export interface Installed { key: string; registryUrl: string; reference: string; commit: string; workflow: Workflow }
 export interface Store { schemaVersion: number; registries: Registry[]; installed: Installed[] }
 export interface RunResult { nickname: string | null; outputs: Record<string, string>; workflow_name: string; workflow_version: string; serial: string; timestamp: number; screenshot: string | null; error: string | null; warning: string | null; folder: string }
-export interface DeviceRun { serial: string; model: string; status: 'queued' | 'running' | 'completed' | 'failed'; result: RunResult | null; error: string | null }
-interface Progress { step: number; total: number; message: string }
+export interface DeviceRun { serial: string; model: string; status: 'queued' | 'running' | 'completed' | 'failed'; result: RunResult | null; error: string | null; progress?: Progress }
+export interface Progress { step: number; total: number; message: string }
 export interface RegistryInput { url: string; reference: string; token: string }
 
 export const DEFAULT_REGISTRY_URL = 'https://github.com/guygubaby/por-auto';
@@ -35,16 +40,17 @@ export const useConnectionStore = defineStore('connection', () => {
   const batchSummaryRef = computed(() => {
     const succeeded = deviceRunsRef.value.filter(run => run.status === 'completed').length;
     const failed = deviceRunsRef.value.filter(run => run.status === 'failed').length;
-    return { total: deviceRunsRef.value.length, succeeded, failed, done: succeeded + failed, current: deviceRunsRef.value.findIndex(run => run.status === 'running') + 1 };
+    return { total: deviceRunsRef.value.length, succeeded, failed, done: succeeded + failed, running: deviceRunsRef.value.filter(run => run.status === 'running').length, queued: deviceRunsRef.value.filter(run => run.status === 'queued').length, current: deviceRunsRef.value.findIndex(run => run.status === 'running') + 1 };
   });
   const defaultUrl = DEFAULT_REGISTRY_URL;
-  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: [bundled] }], installed: [{ key: 'preview', registryUrl: defaultUrl, reference: 'main', commit: 'bundled', workflow: bundled }] });
-  const workflowKeyRef = ref('preview');
+  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: bundledWorkflows }], installed: bundledWorkflows.map(workflow => ({ key: `preview-${workflow.id}`, registryUrl: defaultUrl, reference: 'main', commit: 'bundled', workflow })) });
+  const workflowKeyRef = ref('preview-wechat-nickname');
   const selectedWorkflowRef = computed(() => storeRef.value.installed.find(item => item.key === workflowKeyRef.value));
   const readyDevicesRef = computed(() => environmentRef.value?.devices.filter(device => device.state === 'device') ?? []);
   const selectedDevicesRef = computed(() => readyDevicesRef.value.filter(device => selectedSerialsRef.value.includes(device.serial)));
   let unlisten: UnlistenFn | undefined;
   let disposed = false;
+  let activeWorkflowKey = '';
 
   watch([selectedSerialsRef, workflowKeyRef], () => {
     if (desktop) localStorage.setItem('selection', JSON.stringify({ serials: selectedSerialsRef.value, workflow: workflowKeyRef.value }));
@@ -114,18 +120,23 @@ export const useConnectionStore = defineStore('connection', () => {
     if (!devices.length || !workflow) return;
     await operate(async () => {
       deviceRunsRef.value = devices.map(device => ({ serial: device.serial, model: device.model, status: 'queued', result: null, error: null }));
+      activeWorkflowKey = workflow.key;
       runningRef.value = true;
       try {
-        for (const [index, device] of devices.entries()) {
-          updateDeviceRun(index, { status: 'running' });
-          progressRef.value = { step: 1, total: workflow.workflow.steps.length, message: '正在连接手机' };
-          try {
-            const result = await invoke<RunResult>('run_workflow', { serial: device.serial, workflowKey: workflow.key });
-            updateDeviceRun(index, { status: result.error ? 'failed' : 'completed', result, error: result.error });
-          } catch (error) {
-            updateDeviceRun(index, { status: 'failed', error: String(error) });
+        let next = 0;
+        const worker = async (): Promise<void> => {
+          while (next < devices.length) {
+            const index = next++;
+            const device = devices[index]!;
+            try {
+              const result = await invoke<RunResult>('run_workflow', { serial: device.serial, workflowKey: workflow.key });
+              updateDeviceRun(index, { status: result.error ? 'failed' : 'completed', result, error: result.error });
+            } catch (error) {
+              updateDeviceRun(index, { status: 'failed', error: String(error) });
+            }
           }
-        }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, devices.length) }, worker));
         const { total, succeeded, failed } = batchSummaryRef.value;
         const summary = `工作流「${workflow.workflow.name}」执行结束：${total} 台手机，成功 ${succeeded} 台，失败 ${failed} 台，请查看运行结果`;
         if (failed) errorRef.value = summary;
@@ -153,7 +164,14 @@ export const useConnectionStore = defineStore('connection', () => {
           workflowKeyRef.value = typeof saved.workflow === 'string' ? saved.workflow : '';
         }
       } catch { /* Use defaults if local selections are incomplete. */ }
-      const stop = await listen<Progress>('workflow-progress', event => { progressRef.value = event.payload; });
+      const stop = await listen<Progress & { serial: string; workflow_key: string; scheduled: boolean }>('workflow-progress', event => {
+        const progress = event.payload;
+        if (progress.scheduled || !runningRef.value || progress.workflow_key !== activeWorkflowKey) return;
+        const index = deviceRunsRef.value.findIndex(run => run.serial === progress.serial);
+        if (index < 0 || !['queued', 'running'].includes(deviceRunsRef.value[index]!.status)) return;
+        updateDeviceRun(index, { progress, status: progress.step === 0 ? 'queued' : 'running' });
+        progressRef.value = progress;
+      });
       if (disposed) { stop(); return; }
       unlisten = stop;
       applyStore(await invoke<Store>('workflow_store'));

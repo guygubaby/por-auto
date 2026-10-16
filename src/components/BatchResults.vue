@@ -8,7 +8,7 @@ const props = defineProps<{ runs: DeviceRun[]; busy: boolean }>();
 defineEmits<{ openResults: [] }>();
 const selectedSerialRef = ref('');
 const activeRef = computed(() => props.runs.find(run => run.serial === selectedSerialRef.value) ?? props.runs[0]);
-const statusNames = { queued: '等待执行', running: '正在执行', completed: '已完成', failed: '失败' };
+const statusNames = { queued: '排队中', running: '正在执行', completed: '已完成', failed: '失败' };
 </script>
 
 <template>

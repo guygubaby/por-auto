@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "minEngine": 2,
+  "id": "wechat-first-chat",
+  "name": "打开微信首个会话",
+  "version": "1.0.0",
+  "description": "打开微信，将会话列表滚动到顶部，进入第一个会话（含置顶），记录会话名称和截图，不发送消息。适合先检查手机适配。需简体中文原版微信、已登录且手机已解锁。",
+  "package": "com.tencent.mm",
+  "steps": [
+    { "name": "唤醒手机", "action": { "type": "wake" } },
+    { "name": "打开微信", "action": { "type": "launch", "activity": "com.tencent.mm.ui.LauncherUI" } },
+    { "name": "等待页面显示", "action": { "type": "wait", "ms": 1600 } },
+    { "name": "进入并核对首个会话", "action": { "type": "wechat_first_chat", "output": "chat_title" } }
+  ]
+}

@@ -3,6 +3,7 @@ set -euo pipefail
 readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}"
 pnpm prepare:adb windows
+pnpm prepare:u2
 if [[ "$(uname -s)" == "Darwin" ]]; then
   readonly LLVM_BIN="$(brew --prefix llvm)/bin"
   readonly SYSROOT="$(rustc --print sysroot)"

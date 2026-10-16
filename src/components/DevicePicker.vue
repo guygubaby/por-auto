@@ -39,6 +39,6 @@ function toggleAll(): void {
       </ul>
       <p v-else class="px-3 py-5 text-sm text-ink-muted">暂无已授权手机，请连接手机并允许 USB 调试后刷新设备。</p>
     </div>
-    <p :id="helpId" class="mt-2 text-xs leading-5 text-ink-muted">可选择多台手机，工作流将依次执行。一台失败会继续处理其余手机。</p>
+    <p :id="helpId" class="mt-2 text-xs leading-5 text-ink-muted">可选择多台手机，最多同时运行 4 台，同一手机的任务依次执行。一台失败会继续处理其余手机。</p>
   </fieldset>
 </template>

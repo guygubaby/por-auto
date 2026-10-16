@@ -2,9 +2,12 @@
 
 mod android;
 mod history;
+mod jobs;
 mod registry;
 mod schedule;
+mod u2;
 mod updater;
+mod wechat;
 mod workflow;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -15,7 +18,6 @@ use std::{
     fs,
     io::{Cursor, Read},
     path::PathBuf,
-    sync::Mutex,
     thread,
     time::Duration,
 };
@@ -23,8 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 type Reply<T> = Result<T, String>;
-#[derive(Default)]
-struct Jobs(Mutex<()>);
+use jobs::Jobs;
 
 #[derive(Deserialize)]
 struct Manifest {
@@ -38,12 +39,16 @@ struct Environment {
     version: String,
     platform: String,
     devices: Vec<android::Device>,
+    automation_version: String,
 }
 #[derive(Clone, Serialize)]
 struct Progress {
     step: usize,
     total: usize,
     message: String,
+    serial: String,
+    workflow_key: String,
+    scheduled: bool,
 }
 #[derive(Serialize)]
 struct RunResult {
@@ -131,6 +136,7 @@ fn environment(app: &AppHandle) -> Reply<Environment> {
         version: info.version,
         platform: info.platform,
         devices,
+        automation_version: u2::VERSION.into(),
     })
 }
 
@@ -150,10 +156,11 @@ async fn initialize_environment(app: AppHandle) -> Reply<Environment> {
     blocking(move || {
         let state = app.state::<Jobs>();
         let _guard = state
-            .0
-            .try_lock()
+            .maintenance
+            .try_write()
             .map_err(|_| "已有操作正在进行，请等待完成")?;
         let info = manifest(&app)?;
+        u2::verify(&resource(&app, "u2.jar")?)?;
         let archive = fs::read(resource(&app, "platform-tools.zip")?).map_err(|e| e.to_string())?;
         if format!("{:x}", Sha256::digest(&archive)) != info.sha256 {
             return Err("连接组件校验失败，请重新下载安装包".into());
@@ -212,13 +219,24 @@ async fn initialize_environment(app: AppHandle) -> Reply<Environment> {
     .await
 }
 
-fn progress(app: &AppHandle, step: usize, total: usize, message: &str) {
+fn progress(
+    app: &AppHandle,
+    scheduled: bool,
+    serial: &str,
+    workflow_key: &str,
+    step: usize,
+    total: usize,
+    message: &str,
+) {
     let _ = app.emit(
         "workflow-progress",
         Progress {
             step,
             total,
             message: message.into(),
+            serial: serial.into(),
+            workflow_key: workflow_key.into(),
+            scheduled,
         },
     );
 }
@@ -238,8 +256,8 @@ async fn sync_registry(
     blocking(move || {
         let state = app.state::<Jobs>();
         let _guard = state
-            .0
-            .try_lock()
+            .maintenance
+            .try_write()
             .map_err(|_| "已有操作正在进行，请等待完成")?;
         registry::sync(&data_dir(&app)?, &url, &reference, &token)
     })
@@ -251,8 +269,8 @@ async fn remove_registry(app: AppHandle, url: String, reference: String) -> Repl
     blocking(move || {
         let state = app.state::<Jobs>();
         let _guard = state
-            .0
-            .try_lock()
+            .maintenance
+            .try_write()
             .map_err(|_| "已有操作正在进行，请等待完成")?;
         registry::remove(&data_dir(&app)?, &url, &reference)
     })
@@ -269,8 +287,8 @@ async fn install_workflow(
     blocking(move || {
         let state = app.state::<Jobs>();
         let _guard = state
-            .0
-            .try_lock()
+            .maintenance
+            .try_write()
             .map_err(|_| "已有操作正在进行，请等待完成")?;
         registry::install(&data_dir(&app)?, &url, &reference, &id)
     })
@@ -280,11 +298,6 @@ async fn install_workflow(
 #[tauri::command]
 async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> Reply<RunResult> {
     blocking(move || {
-        let state = app.state::<Jobs>();
-        let _guard = state
-            .0
-            .try_lock()
-            .map_err(|_| "已有操作正在进行，请等待完成")?;
         if !schedule::valid_serial(&serial) {
             return Err("请选择有效的手机设备".into());
         }
@@ -304,6 +317,17 @@ fn run_installed(
     installed: registry::Installed,
     dispatch: Option<&schedule::Dispatch>,
 ) -> Reply<RunResult> {
+    progress(
+        app,
+        dispatch.is_some(),
+        &serial,
+        &installed.key,
+        0,
+        installed.workflow.steps.len(),
+        "等待此手机的任务队列",
+    );
+    let jobs = app.state::<Jobs>();
+    let _permit = jobs.acquire(&serial)?;
     let adb = adb_path(app)?;
     let (id, folder) = history::create_folder(&data_dir(app)?.join("runs"))?;
     let timestamp = history::now();
@@ -331,11 +355,20 @@ fn run_installed(
         &installed.workflow,
         &adb,
         &serial,
+        &resource(app, "u2.jar")?,
         &folder,
         |step, count, message, status| {
             history::log(&folder, step, status, message)?;
             if status == "started" {
-                progress(app, step, count, message);
+                progress(
+                    app,
+                    dispatch.is_some(),
+                    &serial,
+                    &installed.key,
+                    step.max(1),
+                    count,
+                    message,
+                );
             }
             Ok(())
         },
@@ -365,7 +398,7 @@ fn run_installed(
         workflow_version: installed.workflow.version,
         workflow_key: installed.key,
         commit: installed.commit,
-        serial,
+        serial: serial.clone(),
         timestamp,
         screenshot: screenshot.ok(),
         error: read.err(),
@@ -397,6 +430,9 @@ fn run_installed(
     history::save_summary(&folder, &summary)?;
     progress(
         app,
+        dispatch.is_some(),
+        &serial,
+        &result.workflow_key,
         if result.error.is_some() { 0 } else { total + 1 },
         total,
         if result.error.is_some() {
@@ -437,7 +473,10 @@ async fn run_details(app: AppHandle, id: String) -> Reply<serde_json::Value> {
 async fn delete_runs(app: AppHandle, ids: Vec<String>) -> Reply<()> {
     blocking(move || {
         let state = app.state::<Jobs>();
-        let _guard = state.0.try_lock().map_err(|_| "任务运行期间不能清理记录")?;
+        let _guard = state
+            .maintenance
+            .try_write()
+            .map_err(|_| "任务运行期间不能清理记录")?;
         history::delete(&data_dir(&app)?.join("runs"), &ids)
     })
     .await
@@ -447,7 +486,10 @@ async fn delete_runs(app: AppHandle, ids: Vec<String>) -> Reply<()> {
 async fn export_runs(app: AppHandle, ids: Vec<String>) -> Reply<Option<String>> {
     blocking(move || {
         let state = app.state::<Jobs>();
-        let _guard = state.0.try_lock().map_err(|_| "请等待当前操作完成后导出")?;
+        let _guard = state
+            .maintenance
+            .try_write()
+            .map_err(|_| "请等待当前操作完成后导出")?;
         let value = history::export(&data_dir(&app)?.join("runs"), &ids)?;
         let file = app
             .dialog()
@@ -523,6 +565,13 @@ async fn run_schedule_now(app: AppHandle, id: String) -> Reply<schedule::View> {
 }
 
 fn run_schedule_logged(app: &AppHandle, dispatch: &schedule::Dispatch) -> Reply<(String, String)> {
+    let jobs = app.state::<Jobs>();
+    let Ok(_batch) = jobs.maintenance.try_read() else {
+        return Ok((
+            "skipped".into(),
+            "维护操作进行中，本轮跳过；原因保存在定时任务状态中".into(),
+        ));
+    };
     let (id, folder) = history::create_folder(&data_dir(app)?.join("runs"))?;
     let task = &dispatch.task;
     let mut summary = history::Summary {
@@ -552,49 +601,57 @@ fn run_schedule_logged(app: &AppHandle, dispatch: &schedule::Dispatch) -> Reply<
             task.name, dispatch.trigger, dispatch.scheduled_at
         ),
     )?;
-    let jobs = app.state::<Jobs>();
-    let guard = jobs.0.try_lock();
-    let skip = dispatch.skip_reason.clone().or_else(|| {
-        guard
-            .as_ref()
-            .err()
-            .map(|_| "其他运行或维护操作尚未完成，本轮跳过".to_string())
-    });
     let mut results = Vec::new();
-    let (status, message) = if let Some(reason) = skip {
+    let (status, message) = if let Some(reason) = dispatch.skip_reason.clone() {
         ("skipped".to_string(), reason)
     } else {
         let mut succeeded = 0;
-        for (index, serial) in task.serials.iter().enumerate() {
-            history::log(
-                &folder,
-                index + 1,
-                "started",
-                &format!("开始执行设备 {serial}"),
-            )?;
-            let result = run_installed(app, serial.clone(), task.snapshot.clone(), Some(dispatch));
-            let error = match &result {
-                Ok(run) => run.error.clone(),
-                Err(error) => Some(error.clone()),
-            };
-            if error.is_none() {
-                succeeded += 1;
+        for serials in task.serials.chunks(4) {
+            let outcomes = thread::scope(|scope| {
+                serials
+                    .iter()
+                    .map(|serial| {
+                        scope.spawn(move || {
+                            run_installed(
+                                app,
+                                serial.clone(),
+                                task.snapshot.clone(),
+                                Some(dispatch),
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|worker| {
+                        worker
+                            .join()
+                            .unwrap_or_else(|_| Err("设备任务意外中断，请检查手机与日志".into()))
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for (serial, result) in serials.iter().zip(outcomes) {
+                let error = match &result {
+                    Ok(run) => run.error.clone(),
+                    Err(error) => Some(error.clone()),
+                };
+                if error.is_none() {
+                    succeeded += 1;
+                }
+                history::log(
+                    &folder,
+                    results.len() + 1,
+                    if error.is_some() {
+                        "failed"
+                    } else {
+                        "completed"
+                    },
+                    &format!("{serial}：{}", error.as_deref().unwrap_or("完成")),
+                )?;
+                results.push(serde_json::json!({
+                    "serial": serial, "error": error,
+                    "runId": result.as_ref().ok().and_then(|r| std::path::Path::new(&r.folder).file_name()).map(|s| s.to_string_lossy().into_owned())
+                }));
             }
-            history::log(
-                &folder,
-                index + 1,
-                if error.is_some() {
-                    "failed"
-                } else {
-                    "completed"
-                },
-                &format!("{serial}：{}", error.as_deref().unwrap_or("完成")),
-            )?;
-            results.push(serde_json::json!({
-                "serial": serial,
-                "error": error,
-                "runId": result.as_ref().ok().and_then(|r| std::path::Path::new(&r.folder).file_name()).map(|s| s.to_string_lossy().into_owned())
-            }));
         }
         let status = if succeeded == task.serials.len() {
             "completed"

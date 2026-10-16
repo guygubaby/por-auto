@@ -32,6 +32,7 @@ const choicesRef = computed(() => {
   if (props.task && !choices.some(w => w.key === props.task?.snapshot.key)) choices.unshift(props.task.snapshot);
   return choices;
 });
+const selectedWorkflowRef = computed(() => choicesRef.value.find(item => item.key === workflowKeyRef.value)?.workflow);
 const devicesRef = computed(() => [
   ...props.devices,
   ...(props.task?.serials ?? []).filter(serial => !props.devices.some(d => d.serial === serial))
@@ -104,6 +105,7 @@ async function submit(): Promise<void> {
         <div><label for="schedule-name" class="mb-2 block text-xs text-ink-secondary">任务名称</label><input id="schedule-name" v-model="nameRef" required autofocus maxlength="60" class="min-h-9 w-full rounded-control border border-line bg-surface-soft px-3 text-sm pointer-coarse:min-h-11" placeholder="例如：每日设备检查" /></div>
         <div><label for="schedule-workflow" class="mb-2 block text-xs text-ink-secondary">工作流</label><select id="schedule-workflow" v-model="workflowKeyRef" required class="min-h-9 w-full rounded-control border border-line bg-surface-soft px-3 text-sm pointer-coarse:min-h-11"><option value="" disabled>请选择已安装的工作流</option><option v-for="item in choicesRef" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }}</option></select>
           <p class="mt-2 text-xs leading-5 text-ink-muted">保存时固定工作流快照，商店更新不会自动改变此任务。</p>
+          <p v-if="selectedWorkflowRef" class="mt-2 text-xs leading-5 text-ink-secondary">{{ selectedWorkflowRef.description }}</p>
           <p v-if="task && workflowKeyRef === task.snapshot.key" class="text-xs leading-5 text-ink-secondary">当前固定版本：{{ task.snapshot.workflow.version }} · {{ task.snapshot.commit.slice(0, 8) }}</p>
           <label v-if="newerRef" class="mt-2 flex items-center gap-2 text-xs text-warning"><input v-model="updateWorkflowRef" type="checkbox" class="size-4 accent-brand" />将快照更新为当前已安装版本（保存后生效）</label>
         </div>

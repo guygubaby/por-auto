@@ -147,8 +147,22 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
             .map_err(|e| e.to_string())
     };
     let hierarchy = fs::read_to_string(path.join("hierarchy.xml")).ok();
+    let diagnostics: serde_json::Map<String, Value> = [
+        "u2-server.log",
+        "chat-list.xml",
+        "chat-open.xml",
+        "before-send.xml",
+        "after-send.xml",
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        fs::read_to_string(path.join(name))
+            .ok()
+            .map(|text| (name.into(), json!(text)))
+    })
+    .collect();
     Ok(
-        json!({ "summary": summary, "logs": logs, "result": load_json("result.json")?, "workflow": load_json("workflow.json")?, "hierarchy": hierarchy }),
+        json!({ "summary": summary, "logs": logs, "result": load_json("result.json")?, "workflow": load_json("workflow.json")?, "hierarchy": hierarchy, "diagnostics": diagnostics }),
     )
 }
 
@@ -209,12 +223,22 @@ mod tests {
             .unwrap();
             log(&folder, 1, "started", "准备操作").unwrap();
             log(&folder, 1, "failed", "手机断开").unwrap();
+            fs::write(folder.join("before-send.xml"), "<hierarchy/> ").unwrap();
+            fs::write(folder.join("u2-server.log"), "uiautomator2 starting").unwrap();
         }
         assert_eq!(list(&root).unwrap()[0].id, "200");
         let ids = vec!["100".into(), "200".into()];
         let exported = export(&root, &ids).unwrap();
         assert_eq!(exported["records"].as_array().unwrap().len(), 2);
         assert_eq!(exported["records"][0]["logs"][1]["status"], "failed");
+        assert_eq!(
+            exported["records"][0]["diagnostics"]["before-send.xml"],
+            "<hierarchy/> "
+        );
+        assert!(exported["records"][0]["diagnostics"]["u2-server.log"]
+            .as_str()
+            .unwrap()
+            .contains("uiautomator2"));
         assert!(delete(&root, &["../100".into()]).is_err());
         assert_eq!(list(&root).unwrap().len(), 2);
         delete(&root, &ids).unwrap();

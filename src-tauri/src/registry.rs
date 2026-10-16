@@ -1,4 +1,4 @@
-use crate::workflow::{valid_id, Workflow, BUNDLED};
+use crate::workflow::{valid_id, Workflow, BUNDLED_WORKFLOWS};
 use reqwest::{blocking::Client, header, redirect::Policy, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -112,9 +112,29 @@ fn keep_official_first(store: &mut Store) -> Result<(), String> {
             reference: "main".into(),
             name: "Por Auto 官方工作流".into(),
             commit: "bundled".into(),
-            workflows: vec![Workflow::parse(BUNDLED.as_bytes())?],
+            workflows: bundled_workflows()?,
         }
     };
+    let mut official = official;
+    for workflow in bundled_workflows()? {
+        if !official.workflows.iter().any(|w| w.id == workflow.id) {
+            official.workflows.push(workflow.clone());
+        }
+        // Add new bundled examples without replacing user-installed snapshots.
+        if !store
+            .installed
+            .iter()
+            .any(|w| w.key == key(DEFAULT_URL, "main", &workflow.id))
+        {
+            store.installed.push(Installed {
+                key: key(DEFAULT_URL, "main", &workflow.id),
+                registry_url: DEFAULT_URL.into(),
+                reference: "main".into(),
+                commit: "bundled".into(),
+                workflow,
+            });
+        }
+    }
     store.registries.insert(0, official);
     Ok(())
 }
@@ -134,24 +154,20 @@ pub fn load(directory: &Path) -> Result<Store, String> {
         keep_official_first(&mut store)?;
         return Ok(store);
     }
-    let workflow = Workflow::parse(BUNDLED.as_bytes())?;
-    Ok(Store {
+    let mut store = Store {
         schema_version: 1,
-        registries: vec![Registry {
-            url: DEFAULT_URL.into(),
-            reference: "main".into(),
-            name: "Por Auto 官方工作流".into(),
-            commit: "bundled".into(),
-            workflows: vec![workflow.clone()],
-        }],
-        installed: vec![Installed {
-            key: key(DEFAULT_URL, "main", &workflow.id),
-            registry_url: DEFAULT_URL.into(),
-            reference: "main".into(),
-            commit: "bundled".into(),
-            workflow,
-        }],
-    })
+        registries: vec![],
+        installed: vec![],
+    };
+    keep_official_first(&mut store)?;
+    Ok(store)
+}
+
+fn bundled_workflows() -> Result<Vec<Workflow>, String> {
+    BUNDLED_WORKFLOWS
+        .iter()
+        .map(|source| Workflow::parse(source.as_bytes()))
+        .collect()
 }
 
 pub fn save(directory: &Path, store: &Store) -> Result<(), String> {
@@ -383,7 +399,7 @@ mod tests {
         let removed = remove(&dir, &custom.url, "main").unwrap();
         assert_eq!(removed.registries.len(), 1);
         assert_eq!(removed.registries[0].url, DEFAULT_URL);
-        assert_eq!(removed.installed.len(), 2);
+        assert_eq!(removed.installed.len(), BUNDLED_WORKFLOWS.len() + 1);
         assert!(load(&dir)
             .unwrap()
             .installed
@@ -413,7 +429,7 @@ mod tests {
         assert_eq!(remote.commit.len(), 40);
         assert!(remote.workflows.iter().any(|w| w.id == "wechat-open"));
         let installed = install(&directory, DEFAULT_URL, "main", "wechat-open").unwrap();
-        assert_eq!(installed.installed.len(), 2);
+        assert_eq!(installed.installed.len(), BUNDLED_WORKFLOWS.len());
         let persisted = fs::read_to_string(directory.join("workflow-store.json")).unwrap();
         assert!(!persisted.contains(&token));
         assert!(load(&directory)
@@ -458,9 +474,30 @@ mod tests {
         save(&dir, &store).unwrap();
         assert_eq!(load(&dir).unwrap().installed[0].workflow.version, "1.0.0");
         let updated = install(&dir, DEFAULT_URL, "main", "wechat-nickname").unwrap();
-        assert_eq!(updated.installed[0].workflow.version, "1.0.1");
-        assert_eq!(updated.installed[0].key, original.key);
-        assert_eq!(updated.installed.len(), 1);
+        let updated_item = updated
+            .installed
+            .iter()
+            .find(|w| w.key == original.key)
+            .unwrap();
+        assert_eq!(updated_item.workflow.version, "1.0.1");
+        assert_eq!(updated.installed.len(), BUNDLED_WORKFLOWS.len());
+        // A previous one-workflow installation gains examples without changing its pinned version.
+        let mut legacy = updated;
+        legacy.installed.retain(|w| w.key == original.key);
+        legacy.registries[0].workflows.truncate(1);
+        save(&dir, &legacy).unwrap();
+        let migrated = load(&dir).unwrap();
+        assert_eq!(migrated.installed.len(), BUNDLED_WORKFLOWS.len());
+        assert_eq!(
+            migrated
+                .installed
+                .iter()
+                .find(|w| w.key == original.key)
+                .unwrap()
+                .workflow
+                .version,
+            "1.0.1"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

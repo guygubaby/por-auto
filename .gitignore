@@ -6,6 +6,8 @@ dist/
 src-tauri/target/
 src-tauri/resources/platform-tools.zip
 src-tauri/resources/adb-manifest.json
+src-tauri/resources/u2.jar
+work/u2-source/
 deliverables/*
 !deliverables/客户试用说明.md
 .DS_Store

@@ -71,8 +71,8 @@ function open(): void {
       </section>
 
       <section class="rounded-control border border-line bg-canvas/40 p-3" aria-labelledby="doctor-component">
-        <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="doctor-component" class="flex items-center gap-2 text-sm font-medium"><ShieldCheck :size="17" class="text-ink-muted" aria-hidden="true" />Android 连接组件</h3><StatusPill :tone="environmentRef?.ready ? 'success' : 'warning'">{{ componentStatusRef }}</StatusPill></div>
-        <p class="mt-2 text-xs leading-5 text-ink-secondary">{{ environmentRef ? `ADB ${environmentRef.version} · ${environmentRef.platform === 'windows' ? 'Windows' : 'macOS'}` : '检测组件是否已安装并能够正常运行。' }}</p>
+        <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="doctor-component" class="flex items-center gap-2 text-sm font-medium"><ShieldCheck :size="17" class="text-ink-muted" aria-hidden="true" />Android 连接与自动化组件</h3><StatusPill :tone="environmentRef?.ready ? 'success' : 'warning'">{{ componentStatusRef }}</StatusPill></div>
+        <p class="mt-2 text-xs leading-5 text-ink-secondary">{{ environmentRef ? `ADB ${environmentRef.version} · 自动化 ${environmentRef.automation_version ?? '0.4.0'} · ${environmentRef.platform === 'windows' ? 'Windows' : 'macOS'}` : '检测组件是否已安装并能够正常运行。' }}</p>
         <p v-if="environmentRef && !environmentRef.ready" class="mt-2 text-xs leading-5 text-warning">点击下方「初始化组件」，从软件内安装连接组件。</p>
         <div class="mt-3"><AppButton variant="secondary" :loading="actionRef === 'initialize'" :disabled="busyRef || !connection.desktop" @click="check(true)"><Download v-if="actionRef !== 'initialize'" :size="15" aria-hidden="true" />{{ environmentRef?.ready ? '重新初始化组件' : '初始化组件' }}</AppButton></div>
       </section>

@@ -1,7 +1,7 @@
 {
   "name": "wechat-connection-demo",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
@@ -16,7 +16,8 @@
     "registry:index": "node scripts/registry-index.mjs",
     "registry:check": "node scripts/registry-index.mjs --check",
     "build:windows": "bash scripts/build-windows.sh",
-    "build:mac": "pnpm prepare:adb macos && tauri build --bundles app,dmg"
+    "build:mac": "pnpm prepare:adb macos && pnpm prepare:u2 && tauri build --bundles app,dmg",
+    "prepare:u2": "node scripts/prepare-u2.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.57.0",

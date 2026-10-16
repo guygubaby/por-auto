@@ -1,4 +1,8 @@
-use crate::android;
+use crate::{
+    android,
+    u2::{Automation, Session},
+    wechat,
+};
 use roxmltree::Document;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,8 +13,14 @@ use std::{
     time::Duration,
 };
 
-pub const ENGINE_VERSION: u32 = 1;
+pub const ENGINE_VERSION: u32 = 2;
 pub const BUNDLED: &str = include_str!("../../workflows/wechat-nickname/workflow.json");
+pub const BUNDLED_WORKFLOWS: &[&str] = &[
+    BUNDLED,
+    include_str!("../../workflows/wechat-open/workflow.json"),
+    include_str!("../../workflows/wechat-first-chat/workflow.json"),
+    include_str!("../../workflows/wechat-send-hello/workflow.json"),
+];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -50,6 +60,12 @@ pub enum Action {
         recover_back: u8,
     },
     Back,
+    WechatFirstChat {
+        output: String,
+    },
+    WechatSendText {
+        text: String,
+    },
     ReadRow {
         page: String,
         labels: Vec<String>,
@@ -117,7 +133,7 @@ impl Workflow {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != 1 || self.min_engine != ENGINE_VERSION {
+        if self.schema_version != 1 || self.min_engine == 0 || self.min_engine > ENGINE_VERSION {
             return Err("此工作流需要其他版本的执行引擎，请更新客户端".into());
         }
         if !valid_id(&self.id)
@@ -131,11 +147,42 @@ impl Workflow {
         }
         let mut total_wait = 0;
         let mut outputs = BTreeSet::new();
+        let mut first_chat = false;
+        let mut sends = 0;
         for step in &self.steps {
             if !short_text(&step.name) {
                 return Err("工作流步骤名称无效".into());
             }
+            if !matches!(
+                step.action,
+                Action::WechatFirstChat { .. }
+                    | Action::WechatSendText { .. }
+                    | Action::Wait { .. }
+            ) {
+                first_chat = false;
+            }
             match &step.action {
+                Action::WechatFirstChat { output } => {
+                    if self.min_engine < 2
+                        || self.package != "com.tencent.mm"
+                        || !valid_id(output)
+                        || !outputs.insert(output)
+                    {
+                        return Err("微信首个会话动作需要引擎 2 和唯一输出字段".into());
+                    }
+                    first_chat = true;
+                }
+                Action::WechatSendText { text } => {
+                    sends += 1;
+                    if self.min_engine < 2
+                        || self.package != "com.tencent.mm"
+                        || !first_chat
+                        || !short_text(text)
+                        || sends > 1
+                    {
+                        return Err("发送文字需要先确认首个会话，每个工作流最多发送一次且内容不超过 500 字节".into());
+                    }
+                }
                 Action::Launch { activity } if !valid_android_name(activity) => {
                     return Err("工作流应用入口无效".into())
                 }
@@ -183,7 +230,7 @@ impl Workflow {
     }
 }
 
-fn node_bounds(node: roxmltree::Node<'_, '_>) -> Option<[i32; 4]> {
+pub(crate) fn node_bounds(node: roxmltree::Node<'_, '_>) -> Option<[i32; 4]> {
     let values: Vec<i32> = node
         .attribute("bounds")?
         .split(['[', ']', ','])
@@ -285,8 +332,8 @@ pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, Stri
     Ok(candidates.into_iter().next().unwrap())
 }
 
-fn screen(adb: &Path, serial: &str, package: &str, folder: &Path) -> Result<String, String> {
-    let xml = android::dump(adb, serial)?;
+fn screen(device: &impl Automation, package: &str, folder: &Path) -> Result<String, String> {
+    let xml = device.dump()?;
     fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
     let doc = Document::parse(&xml).map_err(|e| e.to_string())?;
     if !doc
@@ -302,6 +349,7 @@ pub fn execute(
     workflow: &Workflow,
     adb: &Path,
     serial: &str,
+    jar: &Path,
     folder: &Path,
     mut report: impl FnMut(usize, usize, &str, &str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
@@ -320,6 +368,9 @@ pub fn execute(
     if !package.starts_with("package:") {
         return Err(format!("手机未安装目标应用 {}", workflow.package));
     }
+    report(0, workflow.steps.len(), "准备手机自动化服务", "started")?;
+    let device = Session::start(adb, serial, jar, folder)?;
+    let mut chat = None;
     let mut outputs = BTreeMap::new();
     for (index, step) in workflow.steps.iter().enumerate() {
         report(index + 1, workflow.steps.len(), &step.name, "started")?;
@@ -355,6 +406,17 @@ pub fn execute(
                 )?;
                 thread::sleep(Duration::from_millis(700));
             }
+            Action::WechatFirstChat { output } => {
+                let target = wechat::open_first(&device, folder)?;
+                outputs.insert(output.clone(), target.title.clone());
+                chat = Some(target);
+            }
+            Action::WechatSendText { text } => {
+                let target = chat.as_ref().ok_or("尚未确认首个会话，禁止发送")?;
+                let status = wechat::send_text(&device, target, text, folder)?;
+                outputs.insert("message".into(), text.clone());
+                outputs.insert("send_status".into(), status);
+            }
             Action::Tap {
                 selector,
                 skip_if,
@@ -362,14 +424,15 @@ pub fn execute(
             } => {
                 let mut done = false;
                 for attempt in 0..=*recover_back {
-                    let xml = screen(adb, serial, &workflow.package, folder)?;
+                    let xml = screen(&device, &workflow.package, folder)?;
                     if skip_if.iter().any(|s| has_label(&xml, s)) {
                         done = true;
                         break;
                     }
                     let matches = select(&xml, selector)?;
                     if matches.len() == 1 {
-                        android::tap(adb, serial, matches[0])?;
+                        device.click(matches[0].0, matches[0].1)?;
+                        device.settle();
                         done = true;
                         break;
                     }
@@ -398,11 +461,7 @@ pub fn execute(
             } => {
                 outputs.insert(
                     output.clone(),
-                    read_row(
-                        &screen(adb, serial, &workflow.package, folder)?,
-                        page,
-                        labels,
-                    )?,
+                    read_row(&screen(&device, &workflow.package, folder)?, page, labels)?,
                 );
             }
         }
@@ -423,6 +482,27 @@ mod tests {
         assert!(Workflow::parse(invalid.as_bytes()).is_err());
         let invalid = BUNDLED.replace("com.tencent.mm\"", "com.tencent.mm;reboot\"");
         assert!(Workflow::parse(invalid.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn engine_two_workflows_require_target_before_a_single_bounded_send() {
+        for source in BUNDLED_WORKFLOWS {
+            Workflow::parse(source.as_bytes()).unwrap();
+        }
+        let source = BUNDLED_WORKFLOWS[3];
+        for invalid in [
+            source.replace("\"minEngine\": 2", "\"minEngine\": 1"),
+            source.replace("\"text\": \"你好\"", "\"text\": \"\""),
+            source.replace("com.tencent.mm", "com.example.other"),
+        ] {
+            assert!(Workflow::parse(invalid.as_bytes()).is_err());
+        }
+        let mut workflow = Workflow::parse(source.as_bytes()).unwrap();
+        workflow.steps.remove(3);
+        assert!(workflow.validate().is_err());
+        let mut workflow = Workflow::parse(source.as_bytes()).unwrap();
+        workflow.steps.push(workflow.steps.last().unwrap().clone());
+        assert!(workflow.validate().is_err());
     }
 
     #[test]
