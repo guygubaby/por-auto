@@ -60,7 +60,7 @@ fn push_command(adb: &Path, serial: &str, local: &Path, remote: &str) -> Result<
         .ok_or("自动化组件路径缺少目录")?;
     let filename = local.file_name().ok_or("自动化组件路径缺少文件名")?;
     let mut command = Command::new(adb);
-    // ADB cannot stat Windows verbatim paths; let the OS set cwd and pass a relative filename.
+    // Avoid Windows verbatim-path compatibility differences in ADB by passing only the filename.
     command
         .current_dir(directory)
         .args(["-s", serial, "push"])

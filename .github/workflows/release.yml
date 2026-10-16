@@ -65,7 +65,7 @@ jobs:
           pnpm test:updates
       - run: pnpm prepare:adb ${{ matrix.adb }}
       - run: pnpm prepare:u2
-      - name: Reproduce and verify Windows ADB resource paths
+      - name: Verify Windows ADB resource paths
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
