@@ -146,6 +146,10 @@ test('rejects traversal, duplicate paths, oversized packages and unsupported lau
   assert.throws(() => manager.importBundle(oversized), /大小无效/);
   const unsupported = structuredClone(p.bundle); unsupported.catalog.workflows[0].minLauncher = 2;
   assert.match(manager.importBundle(unsupported).errors[0].message, /新版启动器/);
+  manager.importBundle(p.bundle);
+  const renamed = structuredClone(p.bundle); renamed.catalog.workflows[0].id = 'HELLO'; renamed.files[0].id = 'HELLO';
+  assert.match(manager.importBundle(renamed).errors[0].message, /大小写/);
+  assert.equal(manager.list().installed.length, 1);
 }));
 
 test('an unfinished run is exported as interrupted without changing or replaying the saved task', async () => fixture((env, manager) => {

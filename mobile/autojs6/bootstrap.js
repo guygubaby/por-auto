@@ -103,6 +103,7 @@ function create(io, root, inputSource) {
   function install(p, readFile) {
     compatible(p);
     var current = state();
+    if (current.installed.some(function (item) { return item.id !== p.id && item.id.toLowerCase() === p.id.toLowerCase(); })) fail('脚本 ID 的大小写与已安装脚本冲突');
     var previous = current.installed.filter(function (item) { return item.id === p.id; })[0];
     if (!previous && current.installed.length >= 32) fail('每个来源最多安装 32 个脚本');
     if (previous && p.versionCode < previous.versionCode) fail('拒绝降级脚本：' + p.name);
