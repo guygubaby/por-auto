@@ -1,0 +1,37 @@
+name: AutoJs6 script packages
+
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', 'mobile-workflows/**', 'scripts/mobile-scripts.mjs', 'scripts/test-mobile-updater.mjs', '.github/workflows/mobile-scripts.yml', 'package.json', 'pnpm-lock.yaml']
+  pull_request:
+    paths: ['mobile/**', 'mobile-workflows/**', 'scripts/mobile-scripts.mjs', 'scripts/test-mobile-updater.mjs', '.github/workflows/mobile-scripts.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm mobile:check
+      - run: pnpm test:mobile
+      - run: pnpm mobile:bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: por-auto-autojs6-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            deliverables/PorAuto-AutoJs6-bootstrap.js
+            deliverables/PorAuto-mobile-scripts.json

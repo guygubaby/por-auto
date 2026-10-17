@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "Por Auto 手机脚本",
+  "workflows": [
+    {
+      "id": "demo-hello",
+      "name": "手机脚本更新测试",
+      "description": "只显示你好并记录运行次数，不打开微信、不发送消息。用于验证安装、版本更新、配置保留和日志。",
+      "version": "1.0.0",
+      "versionCode": 1,
+      "minLauncher": 1,
+      "minAutoJs6": "6.7.0",
+      "entry": "main.js",
+      "files": [
+        {
+          "path": "lib/message.js",
+          "size": 99,
+          "sha256": "2e574061cf08bc158f46b3ae6619cf557e5a0ca89db3afdaa1a7097ea63a9670"
+        },
+        {
+          "path": "main.js",
+          "size": 341,
+          "sha256": "3901374a4d60174cc9f66aeab55d3f9279ee6682f071aef6eb8d10d3a8c23948"
+        }
+      ]
+    }
+  ]
+}

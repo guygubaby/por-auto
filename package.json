@@ -18,7 +18,10 @@
     "build:windows": "bash scripts/build-windows.sh",
     "build:mac": "pnpm prepare:adb macos && pnpm prepare:u2 && tauri build --bundles app,dmg",
     "prepare:u2": "node scripts/prepare-u2.mjs",
-    "test:adb-paths": "node scripts/test-adb-paths.mjs"
+    "test:adb-paths": "node scripts/test-adb-paths.mjs",
+    "mobile:bundle": "node scripts/mobile-scripts.mjs bundle",
+    "mobile:check": "node scripts/mobile-scripts.mjs check",
+    "test:mobile": "node --test scripts/test-mobile-updater.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.57.0",

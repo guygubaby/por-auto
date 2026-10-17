@@ -25,6 +25,14 @@ Windows 10/11 x64 安装包生成后位于 `deliverables/`。使用步骤见 [�
 
 完整格式、支持动作、限制和目录约定见 [工作流开发说明](workflows/README.md)。当前附带 `wechat-nickname`（昵称）、`wechat-open`（打开微信）、`wechat-first-chat`（打开首个会话）和 `wechat-send-hello`（发送你好）。
 
+## AutoJs6 手机脚本更新
+
+手机可使用官方 AutoJs6 6.7.0+ 独立运行 JS。导入 [固定启动器](mobile/autojs6/bootstrap.js) 后，启动时检查 GitHub 脚本目录，也可手动更新、安装或导入离线包。启动器内置不操作微信的测试示例；业务脚本更新不需要重新安装 AutoJs6 或 PC 软件。
+
+脚本位于 `mobile-workflows/<id>/src/`。修改后增加 `workflow.json` 的 `versionCode`，执行 `pnpm mobile:bundle`、`pnpm test:mobile` 和 `pnpm mobile:check`，提交生成文件后发布。下载按单个 Git 提交固定来源，逐文件校验 SHA-256，完整写入新版本目录后原子切换；配置和日志独立保存。运行与更新互斥，失败不自动重试业务任务。
+
+构建同时生成 `deliverables/PorAuto-AutoJs6-bootstrap.js` 与 `deliverables/PorAuto-mobile-scripts.json`，后者可由 PC 传到手机离线导入。私有仓库令牌仅在当前启动器会话使用。完整使用、脚本入口约定及限制见 [手机脚本说明](mobile-workflows/README.md)。本轮未添加 PC 图形化安装/同步按钮或 PC→AutoJs6 任务通信。
+
 ## 首个会话发送示例（0.2.1 / 引擎 2）
 
 1. 升级到 0.2.1，在「设备与运行」选择一台测试手机。新流程内置，无需联网同步商店。

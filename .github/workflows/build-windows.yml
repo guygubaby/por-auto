@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths-ignore: ['outputs/**', 'work/**', '**/*.md']
+    paths-ignore: ['outputs/**', 'work/**', 'mobile/**', 'mobile-workflows/**', 'scripts/mobile-scripts.mjs', 'scripts/test-mobile-updater.mjs', '.github/workflows/mobile-scripts.yml', '**/*.md']
 
 permissions:
   contents: read
