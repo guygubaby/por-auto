@@ -74,6 +74,10 @@ jobs:
           $env:POR_ADB_TEST_BINARY = Join-Path $component 'platform-tools/adb.exe'
           pnpm test:adb-paths
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Verify native screenshot text recognition
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\scripts\test-windows-ocr.ps1
       - name: Build signed installer and updater artifacts
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

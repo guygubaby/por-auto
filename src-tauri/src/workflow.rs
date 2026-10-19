@@ -35,14 +35,14 @@ pub struct Workflow {
     pub steps: Vec<Step>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
     pub name: String,
     pub action: Action,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     Wake,
@@ -73,7 +73,7 @@ pub enum Action {
     },
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Selector {
     #[serde(default)]
@@ -255,6 +255,14 @@ fn node_label<'a>(node: roxmltree::Node<'a, '_>) -> &'a str {
         .unwrap_or("")
 }
 
+fn same_label(actual: &str, expected: &str) -> bool {
+    actual == expected
+        || matches!(
+            (actual, expected),
+            ("个人资料", "个人信息") | ("个人信息", "个人资料")
+        )
+}
+
 pub fn select(xml: &str, selector: &Selector) -> Result<Vec<(i32, i32)>, String> {
     let doc = Document::parse(xml).map_err(|_| "无法解析手机界面")?;
     let height = doc
@@ -266,7 +274,7 @@ pub fn select(xml: &str, selector: &Selector) -> Result<Vec<(i32, i32)>, String>
     let mut matches = BTreeSet::new();
     for node in doc.descendants() {
         let label = node_label(node);
-        if !selector.text.iter().any(|v| v == label)
+        if !selector.text.iter().any(|v| same_label(label, v))
             && !selector.prefix.iter().any(|v| label.starts_with(v))
         {
             continue;
@@ -294,7 +302,7 @@ pub fn select(xml: &str, selector: &Selector) -> Result<Vec<(i32, i32)>, String>
 fn has_label(xml: &str, selector: &Selector) -> bool {
     Document::parse(xml).is_ok_and(|doc| {
         doc.descendants().any(|n| {
-            selector.text.iter().any(|v| v == node_label(n))
+            selector.text.iter().any(|v| same_label(node_label(n), v))
                 || selector.prefix.iter().any(|v| node_label(n).starts_with(v))
         })
     })
@@ -302,7 +310,10 @@ fn has_label(xml: &str, selector: &Selector) -> bool {
 
 pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, String> {
     let doc = Document::parse(xml).map_err(|_| "手机页面结构无法解析")?;
-    if !doc.descendants().any(|n| n.attribute("text") == Some(page)) {
+    if !doc.descendants().any(|n| {
+        n.attribute("text")
+            .is_some_and(|text| same_label(text, page))
+    }) {
         return Err(format!("未进入「{page}」页面"));
     }
     let mut candidates = BTreeSet::new();
@@ -318,7 +329,9 @@ pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, Stri
                 .filter(|v| !v.trim().is_empty())
                 .collect();
             if !values.is_empty() {
-                if values.len() == 1 && values[0] != page && !labels.iter().any(|v| v == values[0])
+                if values.len() == 1
+                    && !same_label(values[0], page)
+                    && !labels.iter().any(|v| v == values[0])
                 {
                     candidates.insert(values[0].to_string());
                 }
@@ -332,15 +345,44 @@ pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, Stri
     Ok(candidates.into_iter().next().unwrap())
 }
 
-fn screen(device: &impl Automation, package: &str, folder: &Path) -> Result<String, String> {
-    let xml = device.dump()?;
-    fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
-    let doc = Document::parse(&xml).map_err(|e| e.to_string())?;
-    if !doc
+pub(crate) fn page_document<'a>(xml: &'a str, package: &str) -> Result<Document<'a>, String> {
+    let doc = Document::parse(xml).map_err(|_| "手机页面结构无法解析")?;
+    let mut nodes = doc
         .descendants()
-        .any(|n| n.attribute("package") == Some(package))
-    {
+        .filter(|n| n.attribute("package") == Some(package))
+        .peekable();
+    if nodes.peek().is_none() {
         return Err("目标应用不在可操作的前台，请解锁手机、关闭弹窗后重试".into());
+    }
+    if !nodes.any(|n| {
+        n.attribute("visible-to-user") != Some("false")
+            && n.attribute("class").is_some_and(|class| !class.is_empty())
+            && node_bounds(n).is_some()
+    }) {
+        return Err("目标应用的页面控件不可读取（返回空节点），已停止操作。请在手机上开启可信的无障碍服务（如 AutoJs6）后重试；仍失败时检查应用版本兼容性".into());
+    }
+    Ok(doc)
+}
+
+fn screen(
+    device: &impl Automation,
+    package: &str,
+    folder: &Path,
+    visual: Option<(&Path, &str)>,
+) -> Result<String, String> {
+    let mut xml = device.dump()?;
+    fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
+    if let Err(error) = page_document(&xml, package) {
+        if let Some((adb, serial)) = visual.filter(|_| error.contains("返回空节点")) {
+            if !folder.join("native-hierarchy.xml").exists() {
+                fs::write(folder.join("native-hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
+            }
+            xml = crate::ocr::hierarchy(adb, serial, folder)?;
+            fs::write(folder.join("ocr-hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
+            fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
+        } else {
+            return Err(error);
+        }
     }
     Ok(xml)
 }
@@ -354,6 +396,12 @@ pub fn execute(
     mut report: impl FnMut(usize, usize, &str, &str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
     workflow.validate()?;
+    let nickname = Workflow::parse(BUNDLED.as_bytes())?;
+    // Visual input is limited to our exact read-only nickname steps; send workflows never fall back to OCR.
+    let visual = (workflow.id == nickname.id
+        && workflow.package == nickname.package
+        && workflow.steps == nickname.steps)
+        .then_some((adb, serial));
     let devices = android::parse_devices(&android::text(adb, &["devices", "-l"])?);
     if !devices
         .iter()
@@ -397,6 +445,21 @@ pub fn execute(
                 if output.contains("Error") || output.contains("Exception") {
                     return Err("无法打开目标应用，请先解锁手机并手动打开后重试".into());
                 }
+                fs::write(folder.join("launch.txt"), &output).map_err(|e| e.to_string())?;
+                let deadline = std::time::Instant::now() + Duration::from_secs(6);
+                loop {
+                    let windows = android::text(
+                        adb,
+                        &["-s", serial, "shell", "dumpsys", "window", "windows"],
+                    )?;
+                    if android::focused_package(&windows) == Some(workflow.package.as_str()) {
+                        break;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err("目标应用未切换到前台，请解锁手机、关闭系统弹窗后重试".into());
+                    }
+                    thread::sleep(Duration::from_millis(250));
+                }
             }
             Action::Wait { ms } => thread::sleep(Duration::from_millis(*ms)),
             Action::Back => {
@@ -423,8 +486,13 @@ pub fn execute(
                 recover_back,
             } => {
                 let mut done = false;
-                for attempt in 0..=*recover_back {
-                    let xml = screen(&device, &workflow.package, folder)?;
+                let attempts = if visual.is_some() {
+                    (*recover_back).max(2)
+                } else {
+                    *recover_back
+                };
+                for attempt in 0..=attempts {
+                    let xml = screen(&device, &workflow.package, folder, visual)?;
                     if skip_if.iter().any(|s| has_label(&xml, s)) {
                         done = true;
                         break;
@@ -439,12 +507,24 @@ pub fn execute(
                     if matches.len() > 1 {
                         return Err(format!("「{}」匹配到多个目标，已停止", step.name));
                     }
+                    if folder.join("ocr-hierarchy.xml").is_file() {
+                        if attempt < attempts {
+                            device.settle();
+                            continue;
+                        }
+                        return Err(format!(
+                            "截图识别未能确认「{}」，请回到微信主界面后重试",
+                            step.name
+                        ));
+                    }
                     if attempt < *recover_back {
                         android::text(
                             adb,
                             &["-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"],
                         )?;
                         thread::sleep(Duration::from_millis(700));
+                    } else if attempt < attempts {
+                        device.settle();
                     }
                 }
                 if !done {
@@ -459,13 +539,39 @@ pub fn execute(
                 labels,
                 output,
             } => {
-                outputs.insert(
-                    output.clone(),
-                    read_row(&screen(&device, &workflow.package, folder)?, page, labels)?,
-                );
+                let mut value = None;
+                for attempt in 0..=2 {
+                    match read_row(
+                        &screen(&device, &workflow.package, folder, visual)?,
+                        page,
+                        labels,
+                    ) {
+                        Ok(found) => {
+                            value = Some(found);
+                            break;
+                        }
+                        Err(_) if attempt < 2 && folder.join("ocr-hierarchy.xml").is_file() => {
+                            device.settle()
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                outputs.insert(output.clone(), value.ok_or("无法读取昵称")?);
             }
         }
         report(index + 1, workflow.steps.len(), &step.name, "completed")?;
+    }
+    if folder.join("ocr-hierarchy.xml").is_file() {
+        outputs.insert(
+            "读取方式".into(),
+            "本机截图文字识别，请结合截图核对昵称；表情等特殊字符可能无法识别".into(),
+        );
+        report(
+            workflow.steps.len(),
+            workflow.steps.len(),
+            "使用本机截图文字识别读取昵称，请结合截图核对",
+            "warning",
+        )?;
     }
     Ok(outputs)
 }
@@ -473,6 +579,27 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_app_nodes_stop_before_navigation_instead_of_returning_to_the_launcher() {
+        struct EmptyPage;
+        impl Automation for EmptyPage {
+            fn rpc(&self, method: &str, _: serde_json::Value) -> Result<serde_json::Value, String> {
+                assert_eq!(
+                    method, "dumpWindowHierarchy",
+                    "an unreadable page must not trigger input"
+                );
+                Ok(serde_json::json!(
+                    r#"<hierarchy><node package="com.android.systemui" class="android.widget.FrameLayout" bounds="[0,0][1080,80]"/><node package="com.tencent.mm" class="" text="" enabled="false" visible-to-user="false" bounds="[0,0][0,0]"/></hierarchy>"#
+                ))
+            }
+        }
+        let folder = std::env::temp_dir().join(format!("por-empty-page-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let result = screen(&EmptyPage, "com.tencent.mm", &folder, None);
+        fs::remove_dir_all(&folder).unwrap();
+        assert!(result.is_err_and(|error| error.contains("页面控件")));
+    }
 
     #[test]
     fn bundled_workflow_validates_and_rejects_unknown_operations() {
@@ -525,6 +652,15 @@ mod tests {
         let xml = r#"<hierarchy><node text="个人信息"/><node><node><node text="昵称"/></node><node text="测试 🌱"/></node><node><node text="微信号"/><node text="wxid_test"/></node></hierarchy>"#;
         let labels = vec!["昵称".into(), "名字".into()];
         assert_eq!(read_row(xml, "个人信息", &labels).unwrap(), "测试 🌱");
+        let updated = xml.replace("个人信息", "个人资料").replace("昵称", "名字");
+        assert_eq!(read_row(&updated, "个人信息", &labels).unwrap(), "测试 🌱");
+        assert!(has_label(
+            &updated,
+            &Selector {
+                text: vec!["个人信息".into()],
+                ..Default::default()
+            }
+        ));
         assert!(read_row(
             r#"<hierarchy><node text="个人信息"/><node text="昵称"/></hierarchy>"#,
             "个人信息",

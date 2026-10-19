@@ -74,7 +74,7 @@ pub fn push(adb: &Path, serial: &str, local: &Path, remote: &str) -> Result<(), 
     Ok(())
 }
 
-fn run_command(command: &mut Command) -> Result<Vec<u8>, String> {
+pub(crate) fn run_command(command: &mut Command) -> Result<Vec<u8>, String> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -130,9 +130,35 @@ pub fn text(adb: &Path, args: &[&str]) -> Result<String, String> {
     String::from_utf8(run(adb, args)?).map_err(|_| "手机返回了无法识别的文字".into())
 }
 
+pub fn focused_package(windows: &str) -> Option<&str> {
+    windows
+        .lines()
+        .find(|line| line.contains("mCurrentFocus="))?
+        .split_whitespace()
+        .find_map(|word| word.split_once('/').map(|(package, _)| package))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focused_package_uses_the_current_window_instead_of_a_background_activity() {
+        let windows = "mCurrentFocus=Window{7d7f3f5 u0 com.bbk.launcher2/com.bbk.launcher2.Launcher}\nmFocusedApp=AppWindowToken{com.tencent.mm/.ui.LauncherUI}";
+        assert_eq!(focused_package(windows), Some("com.bbk.launcher2"));
+        assert_eq!(
+            focused_package(
+                "mCurrentFocus=Window{c284b24 u0 com.tencent.mm/com.tencent.mm.ui.LauncherUI}"
+            ),
+            Some("com.tencent.mm")
+        );
+        assert_eq!(
+            focused_package(
+                "mCurrentFocus=null\nmFocusedApp=AppWindowToken{com.tencent.mm/.ui.LauncherUI}"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn push_passes_only_filename_to_adb_and_keeps_native_parent_directory() {

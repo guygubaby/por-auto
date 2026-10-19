@@ -153,6 +153,10 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
         "chat-open.xml",
         "before-send.xml",
         "after-send.xml",
+        "native-hierarchy.xml",
+        "ocr-hierarchy.xml",
+        "ocr-words.json",
+        "launch.txt",
     ]
     .into_iter()
     .filter_map(|name| {

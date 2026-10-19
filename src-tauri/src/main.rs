@@ -3,6 +3,7 @@
 mod android;
 mod history;
 mod jobs;
+mod ocr;
 mod registry;
 mod schedule;
 mod u2;

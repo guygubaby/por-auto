@@ -1,4 +1,8 @@
-use crate::{history, u2::Automation, workflow::node_bounds};
+use crate::{
+    history,
+    u2::Automation,
+    workflow::{node_bounds, page_document},
+};
 use roxmltree::{Document, Node};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -28,14 +32,7 @@ fn center(node: Node<'_, '_>) -> Option<(i32, i32)> {
 }
 
 fn document(xml: &str) -> Result<Document<'_>, String> {
-    let doc = Document::parse(xml).map_err(|_| "微信页面结构无法解析")?;
-    if !doc
-        .descendants()
-        .any(|n| n.attribute("package") == Some(PACKAGE))
-    {
-        return Err("微信不在前台，请解锁手机、关闭弹窗并登录微信".into());
-    }
-    Ok(doc)
+    page_document(xml, PACKAGE)
 }
 
 fn snapshot(device: &impl Automation, folder: &Path, name: &str) -> Result<String, String> {
@@ -408,6 +405,17 @@ mod tests {
             "text=\"\" resource-id=\"com.tencent.mm:id/input\"",
             "text=\"你好\" resource-id=\"com.tencent.mm:id/input\"",
         )
+    }
+
+    #[test]
+    fn empty_wechat_tree_never_falls_back_to_visual_input_for_chat_workflows() {
+        let device = fake(vec![r#"<hierarchy><node package="com.tencent.mm" class="" visible-to-user="false" bounds="[0,0][0,0]"/></hierarchy>"#.into()], false);
+        let root = folder();
+        assert!(open_first(&device, &root).unwrap_err().contains("页面控件"));
+        let calls = device.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "dumpWindowHierarchy");
+        fs::remove_dir_all(root).unwrap();
     }
     fn sent() -> String {
         CHAT.replace("<!-- messages -->", r#"<node package="com.tencent.mm" class="android.widget.TextView" text="你好" bounds="[800,900][950,980]"/>"#)
