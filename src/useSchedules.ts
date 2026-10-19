@@ -28,6 +28,11 @@ export interface ScheduleInput {
 }
 interface ScheduleView { tasks: Schedule[]; runningIds: string[]; error: string | null }
 
+export function snapshotChanged(current: Installed, saved: Installed): boolean {
+  const state = (item: Installed) => [item.key, item.workflow.version, item.commit, item.input ?? null, item.hooks ?? { beforeRun: null, afterRun: null }];
+  return JSON.stringify(state(current)) !== JSON.stringify(state(saved));
+}
+
 export function formatScheduleTime(timestamp: number | null, timezone: string): string {
   if (!timestamp) return '—';
   const date = new Date(timestamp);

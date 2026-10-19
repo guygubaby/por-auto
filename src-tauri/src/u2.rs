@@ -123,6 +123,8 @@ impl Session {
                 .and_then(|r| r.text())
                 .is_ok_and(|s| s == "pong")
             {
+                // Preserve user-enabled accessibility services needed by some apps.
+                session.rpc("setConfigurator", json!([{"uiAutomationFlags":1}]))?;
                 session.rpc("deviceInfo", json!([]))?;
                 return Ok(session);
             }

@@ -31,6 +31,8 @@ pub struct Event {
     pub step: usize,
     pub status: String,
     pub message: String,
+    #[serde(default, rename = "stepId", skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
 }
 
 pub fn now() -> u64 {
@@ -54,11 +56,21 @@ pub fn create_folder(root: &Path) -> Result<(String, PathBuf), String> {
 }
 
 pub fn log(folder: &Path, step: usize, status: &str, message: &str) -> Result<(), String> {
+    log_step(folder, step, None, status, message)
+}
+pub fn log_step(
+    folder: &Path,
+    step: usize,
+    step_id: Option<&str>,
+    status: &str,
+    message: &str,
+) -> Result<(), String> {
     let event = Event {
         timestamp: now(),
         step,
         status: status.into(),
         message: message.into(),
+        step_id: step_id.map(str::to_owned),
     };
     let mut file = OpenOptions::new()
         .create(true)
@@ -67,7 +79,7 @@ pub fn log(folder: &Path, step: usize, status: &str, message: &str) -> Result<()
         .map_err(|e| e.to_string())?;
     serde_json::to_writer(&mut file, &event).map_err(|e| e.to_string())?;
     file.write_all(b"\n")
-        .and_then(|_| file.flush())
+        .and_then(|_| file.sync_all())
         .map_err(|e| format!("保存运行日志失败：{e}"))
 }
 
@@ -147,6 +159,48 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
             .map_err(|e| e.to_string())
     };
     let hierarchy = fs::read_to_string(path.join("hierarchy.xml")).ok();
+    let mut targets = load_json("targets.json")?;
+    if let Some(items) = targets.as_array_mut() {
+        let last_sent = items.iter().rposition(|item| item["status"] == "sent");
+        for (index, item) in items.iter_mut().enumerate() {
+            if item["status"] == "sending" {
+                item["status"] = json!("uncertain");
+                item["error"] = json!("运行中断，发送结果待人工核对；未自动重发");
+            }
+            if index == 0
+                || Some(index) == last_sent
+                || ["failed", "uncertain"].iter().any(|s| item["status"] == *s)
+            {
+                let child = path.join(format!("target-{:04}", index + 1));
+                if fs::symlink_metadata(&child)
+                    .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                {
+                    let evidence: serde_json::Map<String, Value> = [
+                        "events.jsonl",
+                        "chat-open.xml",
+                        "before-send.xml",
+                        "after-send.xml",
+                    ]
+                    .into_iter()
+                    .filter_map(|name| {
+                        let file = child.join(name);
+                        let metadata = fs::symlink_metadata(&file).ok()?;
+                        if !metadata.is_file() || metadata.file_type().is_symlink() {
+                            return None;
+                        }
+                        let text = if metadata.len() > 1_048_576 {
+                            "[页面证据超过 1 MiB，请查看本机运行目录]".into()
+                        } else {
+                            fs::read_to_string(file).ok()?
+                        };
+                        Some((name.into(), json!(text)))
+                    })
+                    .collect();
+                    item["evidence"] = json!(evidence);
+                }
+            }
+        }
+    }
     let diagnostics: serde_json::Map<String, Value> = [
         "u2-server.log",
         "chat-list.xml",
@@ -166,7 +220,7 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
     })
     .collect();
     Ok(
-        json!({ "summary": summary, "logs": logs, "result": load_json("result.json")?, "workflow": load_json("workflow.json")?, "hierarchy": hierarchy, "diagnostics": diagnostics }),
+        json!({ "summary": summary, "logs": logs, "result": load_json("result.json")?, "workflow": load_json("workflow.json")?, "input":load_json("input.json")?, "targets":targets, "hierarchy": hierarchy, "diagnostics": diagnostics }),
     )
 }
 
@@ -174,10 +228,18 @@ pub fn export(root: &Path, ids: &[String]) -> Result<Value, String> {
     if ids.is_empty() || ids.len() > 100 {
         return Err("每次请选择 1 至 100 条记录导出".into());
     }
-    let records = ids
-        .iter()
-        .map(|id| details(root, id))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut records = Vec::new();
+    let mut size = 0;
+    for id in ids {
+        let record = details(root, id)?;
+        size += serde_json::to_vec(&record)
+            .map_err(|e| e.to_string())?
+            .len();
+        if size > 64 * 1024 * 1024 {
+            return Err("所选日志超过导出大小限制，请减少记录数量后分批导出".into());
+        }
+        records.push(record);
+    }
     Ok(
         json!({ "schemaVersion": 1, "appVersion": env!("CARGO_PKG_VERSION"), "exportedAt": now(), "records": records }),
     )
@@ -229,12 +291,24 @@ mod tests {
             log(&folder, 1, "failed", "手机断开").unwrap();
             fs::write(folder.join("before-send.xml"), "<hierarchy/> ").unwrap();
             fs::write(folder.join("u2-server.log"), "uiautomator2 starting").unwrap();
+            fs::write(
+                folder.join("targets.json"),
+                r#"[{"title":"测试群","status":"sending"}]"#,
+            )
+            .unwrap();
+            fs::create_dir_all(folder.join("target-0001")).unwrap();
+            fs::write(folder.join("target-0001/before-send.xml"), "<hierarchy/>").unwrap();
         }
         assert_eq!(list(&root).unwrap()[0].id, "200");
         let ids = vec!["100".into(), "200".into()];
         let exported = export(&root, &ids).unwrap();
         assert_eq!(exported["records"].as_array().unwrap().len(), 2);
         assert_eq!(exported["records"][0]["logs"][1]["status"], "failed");
+        assert_eq!(exported["records"][0]["targets"][0]["status"], "uncertain");
+        assert_eq!(
+            exported["records"][0]["targets"][0]["evidence"]["before-send.xml"],
+            "<hierarchy/>"
+        );
         assert_eq!(
             exported["records"][0]["diagnostics"]["before-send.xml"],
             "<hierarchy/> "

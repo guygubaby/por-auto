@@ -21,6 +21,8 @@ pub struct Registry {
     pub name: String,
     pub commit: String,
     pub workflows: Vec<Workflow>,
+    #[serde(default)]
+    pub bundled_ids: BTreeSet<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -31,6 +33,10 @@ pub struct Installed {
     pub reference: String,
     pub commit: String,
     pub workflow: Workflow,
+    #[serde(default)]
+    pub input: Option<crate::send_input::SendInput>,
+    #[serde(default)]
+    pub hooks: crate::send_input::Hooks,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -39,6 +45,8 @@ pub struct Store {
     pub schema_version: u32,
     pub registries: Vec<Registry>,
     pub installed: Vec<Installed>,
+    #[serde(default)]
+    pub uninstalled_keys: BTreeSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -113,18 +121,28 @@ fn keep_official_first(store: &mut Store) -> Result<(), String> {
             name: "Por Auto 官方工作流".into(),
             commit: "bundled".into(),
             workflows: bundled_workflows()?,
+            bundled_ids: BTreeSet::new(),
         }
     };
     let mut official = official;
     for workflow in bundled_workflows()? {
+        if official.commit == "bundled" {
+            if let Some(index) = official.workflows.iter().position(|w| w.id == workflow.id) {
+                official.workflows[index] = workflow.clone();
+            }
+        }
         if !official.workflows.iter().any(|w| w.id == workflow.id) {
+            official.bundled_ids.insert(workflow.id.clone());
             official.workflows.push(workflow.clone());
         }
         // Add new bundled examples without replacing user-installed snapshots.
         if !store
-            .installed
-            .iter()
-            .any(|w| w.key == key(DEFAULT_URL, "main", &workflow.id))
+            .uninstalled_keys
+            .contains(&key(DEFAULT_URL, "main", &workflow.id))
+            && !store
+                .installed
+                .iter()
+                .any(|w| w.key == key(DEFAULT_URL, "main", &workflow.id))
         {
             store.installed.push(Installed {
                 key: key(DEFAULT_URL, "main", &workflow.id),
@@ -132,6 +150,8 @@ fn keep_official_first(store: &mut Store) -> Result<(), String> {
                 reference: "main".into(),
                 commit: "bundled".into(),
                 workflow,
+                input: None,
+                hooks: Default::default(),
             });
         }
     }
@@ -158,6 +178,7 @@ pub fn load(directory: &Path) -> Result<Store, String> {
         schema_version: 1,
         registries: vec![],
         installed: vec![],
+        uninstalled_keys: BTreeSet::new(),
     };
     keep_official_first(&mut store)?;
     Ok(store)
@@ -317,6 +338,7 @@ pub fn sync(
         name: index.name,
         commit: commit.sha,
         workflows,
+        bundled_ids: BTreeSet::new(),
     };
     store
         .registries
@@ -358,15 +380,85 @@ pub fn install(directory: &Path, url: &str, reference: &str, id: &str) -> Result
         .ok_or("该工作流不在已同步的仓库中")?
         .clone();
     workflow.validate()?;
+    let item_key = key(url, reference, id);
+    let input = store
+        .installed
+        .iter()
+        .find(|w| w.key == item_key)
+        .and_then(|w| w.input.clone());
+    let hooks = store
+        .installed
+        .iter()
+        .find(|w| w.key == item_key)
+        .map(|w| w.hooks.clone())
+        .unwrap_or_default();
     let item = Installed {
-        key: key(url, reference, id),
+        key: item_key,
         registry_url: url.into(),
         reference: reference.into(),
-        commit: registry.commit.clone(),
+        commit: if registry.bundled_ids.contains(id) {
+            "bundled".into()
+        } else {
+            registry.commit.clone()
+        },
         workflow,
+        input,
+        hooks,
     };
+    store.uninstalled_keys.remove(&item.key);
     store.installed.retain(|w| w.key != item.key);
     store.installed.push(item);
+    save(directory, &store)?;
+    Ok(store)
+}
+
+pub fn uninstall(directory: &Path, installed_key: &str) -> Result<Store, String> {
+    let mut store = load(directory)?;
+    if !store.installed.iter().any(|w| w.key == installed_key) {
+        return Err("工作流尚未安装".into());
+    }
+    store.installed.retain(|w| w.key != installed_key);
+    store.uninstalled_keys.insert(installed_key.into());
+    save(directory, &store)?;
+    Ok(store)
+}
+
+pub fn configure(
+    directory: &Path,
+    installed_key: &str,
+    mut input: Option<crate::send_input::SendInput>,
+    mut hooks: crate::send_input::Hooks,
+    secrets: &std::collections::BTreeMap<String, String>,
+) -> Result<Store, String> {
+    hooks.validate()?;
+    if let Some(input) = &input {
+        input.validate()?;
+    }
+    if input
+        .as_ref()
+        .is_some_and(|v| matches!(v.message, crate::send_input::Message::BeforeRun))
+        && hooks
+            .before_run
+            .as_ref()
+            .is_none_or(|h| matches!(h.response, crate::send_input::Response::Ignore))
+    {
+        return Err("请配置前置 Hook，并解析为文本或 JSON 字符串".into());
+    }
+    let mut store = load(directory)?;
+    let item = store
+        .installed
+        .iter_mut()
+        .find(|w| w.key == installed_key)
+        .ok_or("请先安装工作流")?;
+    if item.workflow.configurable() != input.is_some() {
+        return Err("此工作流的发送参数缺失或不适用".into());
+    }
+    if let Some(input) = &mut input {
+        input.save_secret(secrets.get("message").map(String::as_str))?;
+    }
+    hooks.save_secrets(secrets)?;
+    item.input = input;
+    item.hooks = hooks;
     save(directory, &store)?;
     Ok(store)
 }
@@ -374,6 +466,96 @@ pub fn install(directory: &Path, url: &str, reference: &str, id: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_published_workflow_matches_the_registry_and_native_contract() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let index: Index =
+            serde_json::from_slice(&fs::read(root.join(INDEX_PATH)).unwrap()).unwrap();
+        assert_eq!(index.schema_version, 1);
+        let mut ids = BTreeSet::new();
+        for entry in index.workflows {
+            assert!(valid_path(&entry.path, &entry.id) && ids.insert(entry.id.clone()));
+            let bytes = fs::read(root.join(&entry.path)).unwrap();
+            assert_eq!(entry.sha256, format!("{:x}", Sha256::digest(&bytes)));
+            assert_eq!(Workflow::parse(&bytes).unwrap().id, entry.id);
+        }
+        assert!(ids.contains("wechat-broadcast"));
+    }
+
+    #[test]
+    fn input_and_hooks_belong_to_installation_and_survive_updates() {
+        use crate::send_input::*;
+        let dir = std::env::temp_dir().join(format!("por-inputs-{}", uuid::Uuid::new_v4()));
+        let store = load(&dir).unwrap();
+        let item = store
+            .installed
+            .iter()
+            .find(|i| i.workflow.id == "wechat-broadcast")
+            .unwrap();
+        let input = SendInput {
+            message: Message::Manual { text: "Ok".into() },
+            recipients: Recipients {
+                scope: Scope::Conversations,
+                mode: Selection::Selected,
+                names: vec!["文件传输助手".into()],
+            },
+            interval_ms: 1000,
+        };
+        let request = Request {
+            url: "https://example.com/hook".into(),
+            method: "POST".into(),
+            query: vec![],
+            headers: vec![],
+            auth: Auth::None,
+            body: Some(serde_json::json!({"status":"{{run.status}}"})),
+            response: Response::Ignore,
+            timeout_seconds: 5,
+        };
+        configure(
+            &dir,
+            &item.key,
+            Some(input.clone()),
+            Hooks {
+                before_run: None,
+                after_run: Some(request.clone()),
+            },
+            &Default::default(),
+        )
+        .unwrap();
+        let installed = install(&dir, DEFAULT_URL, "main", "wechat-broadcast").unwrap();
+        let updated = installed
+            .installed
+            .iter()
+            .find(|i| i.key == item.key)
+            .unwrap();
+        assert_eq!(updated.input, Some(input));
+        assert_eq!(updated.hooks.after_run, Some(request));
+        assert!(!serde_json::to_string(&installed.registries)
+            .unwrap()
+            .contains("example.com/hook"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn uninstall_survives_reload_and_reinstall_clears_tombstone() {
+        let dir = std::env::temp_dir().join(format!("por-uninstall-{}", uuid::Uuid::new_v4()));
+        let original = load(&dir).unwrap();
+        let key = original.installed[0].key.clone();
+        let id = original.installed[0].workflow.id.clone();
+        uninstall(&dir, &key).unwrap();
+        assert!(!load(&dir).unwrap().installed.iter().any(|w| w.key == key));
+        let mut store = load(&dir).unwrap();
+        keep_official_first(&mut store).unwrap();
+        save(&dir, &store).unwrap();
+        assert!(!load(&dir).unwrap().installed.iter().any(|w| w.key == key));
+        assert!(install(&dir, DEFAULT_URL, "main", &id)
+            .unwrap()
+            .installed
+            .iter()
+            .any(|w| w.key == key));
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn official_registry_is_pinned_and_custom_removal_preserves_installed_workflows() {
@@ -472,7 +654,10 @@ mod tests {
         store.registries[0].workflows[0].version = "1.0.1".into();
         store.registries[0].commit = "a".repeat(40);
         save(&dir, &store).unwrap();
-        assert_eq!(load(&dir).unwrap().installed[0].workflow.version, "1.0.0");
+        assert_eq!(
+            load(&dir).unwrap().installed[0].workflow.version,
+            original.workflow.version
+        );
         let updated = install(&dir, DEFAULT_URL, "main", "wechat-nickname").unwrap();
         let updated_item = updated
             .installed

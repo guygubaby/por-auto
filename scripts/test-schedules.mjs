@@ -53,7 +53,11 @@ test('schedule controller rejects double submissions and ignores stale refreshes
   });
   let app;
   try {
-    const { useSchedules, formatScheduleTime } = await server.ssrLoadModule('/src/useSchedules.ts');
+    const { useSchedules, formatScheduleTime, snapshotChanged } = await server.ssrLoadModule('/src/useSchedules.ts');
+    const installed = { key: 'test', commit: 'bundled', workflow: { version: '1.0.0' } };
+    assert.equal(snapshotChanged(installed, { ...installed, input: null, hooks: { beforeRun: null, afterRun: null } }), false);
+    assert.equal(snapshotChanged({ ...installed, input: { message: { type: 'manual', text: 'Ok' } } }, installed), true);
+    assert.equal(snapshotChanged({ ...installed, hooks: { beforeRun: { url: 'https://example.com' }, afterRun: null } }, installed), true);
     let controller;
     app = renderer.createApp({ setup() { controller = useSchedules(); return () => null; } });
     app.mount({});

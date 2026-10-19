@@ -26,11 +26,11 @@ defineEmits<{ openResults: [] }>();
         <p class="break-words text-2xl font-semibold">{{ result.outputs.chat_title ?? result.nickname ?? (result.error ? '未取得结果' : '执行成功') }}</p>
         <dl class="mt-4 space-y-3 text-xs">
           <div><dt class="text-ink-muted">工作流</dt><dd class="mt-1 text-ink-secondary">{{ result.workflow_name }} · {{ result.workflow_version }}</dd></div>
-          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ ({ nickname: '昵称', chat_title: '会话', message: '发送内容', send_status: '发送状态' } as Record<string, string>)[field] ?? field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
+          <div v-for="(value, field) in result.outputs" :key="field"><dt class="text-ink-muted">{{ ({ nickname: '昵称', chat_title: '会话', message: '发送内容', send_status: '发送状态', before_hook: '运行前数据', after_hook: '运行后回调', recipient_source: '接收范围' } as Record<string, string>)[field] ?? field }}</dt><dd class="mt-1 break-words text-ink-secondary">{{ value }}</dd></div>
           <div><dt class="text-ink-muted">手机序列号</dt><dd class="mt-1 break-all text-ink-secondary">{{ result.serial }}</dd></div>
           <div><dt class="text-ink-muted">执行时间</dt><dd class="mt-1 text-ink-secondary">{{ new Date(result.timestamp).toLocaleString('zh-CN') }}</dd></div>
         </dl>
-        <p v-if="result.warning" class="mt-4 text-xs leading-5 text-warning">工作流已结束，但截图未保存：{{ result.warning }}</p>
+        <p v-if="result.warning" class="mt-4 text-xs leading-5 text-warning">运行提示：{{ result.warning }}</p>
       </div>
       <figure class="flex flex-col items-center rounded-2xl border border-line bg-canvas p-3">
         <img v-if="result.screenshot" :src="`data:image/png;base64,${result.screenshot}`" class="max-h-96 max-w-full rounded-lg object-contain" alt="本次工作流执行结束时的手机页面截图" />

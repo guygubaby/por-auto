@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Condvar, Mutex, RwLock, RwLockReadGuard},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex, RwLock, RwLockReadGuard,
+    },
 };
 
 #[derive(Default)]
@@ -14,12 +17,14 @@ pub struct Jobs {
 struct Queue {
     tickets: Mutex<(u64, u64)>,
     ready: Condvar,
+    generation: AtomicU64,
 }
 
 pub struct Permit<'a> {
     jobs: &'a Jobs,
     queue: Arc<Queue>,
     _maintenance: RwLockReadGuard<'a, ()>,
+    generation: u64,
 }
 
 impl Jobs {
@@ -36,6 +41,7 @@ impl Jobs {
             .or_default()
             .clone();
         let mut tickets = queue.tickets.lock().map_err(|_| "设备队列不可用")?;
+        let generation = queue.generation.load(Ordering::SeqCst);
         if tickets.0 - tickets.1 >= 16 {
             return Err("此手机等待任务过多，请稍后重试".into());
         }
@@ -54,7 +60,28 @@ impl Jobs {
             jobs: self,
             queue,
             _maintenance: maintenance,
+            generation,
         })
+    }
+    pub fn cancel(&self, serial: &str) -> Result<(), String> {
+        if let Some(queue) = self
+            .devices
+            .lock()
+            .map_err(|_| "设备队列不可用")?
+            .get(serial)
+        {
+            queue.generation.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+impl Permit<'_> {
+    pub fn check(&self) -> Result<(), String> {
+        if self.queue.generation.load(Ordering::SeqCst) != self.generation {
+            Err("用户已停止此手机的任务；已发送内容与待核对结果均已保留".into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -81,6 +108,18 @@ mod tests {
         },
         thread,
     };
+    #[test]
+    fn cancellation_is_per_device_and_does_not_cancel_new_runs() {
+        let jobs = Jobs::default();
+        let a = jobs.acquire("A").unwrap();
+        let b = jobs.acquire("B").unwrap();
+        jobs.cancel("A").unwrap();
+        assert!(a.check().is_err());
+        assert!(b.check().is_ok());
+        drop(a);
+        let next = jobs.acquire("A").unwrap();
+        assert!(next.check().is_ok());
+    }
 
     #[test]
     fn devices_run_in_parallel_but_same_device_waits_and_maintenance_is_exclusive() {

@@ -258,6 +258,22 @@ impl Scheduler {
                     .find(|w| w.key == input.workflow_key)
                     .ok_or("请先安装并选择工作流")?,
             };
+            snapshot.hooks.validate()?;
+            if input.enabled
+                && !registry::load(&self.root)?
+                    .installed
+                    .iter()
+                    .any(|w| w.key == snapshot.key)
+            {
+                return Err("工作流已卸载，请先重新安装再启用此任务".into());
+            }
+            if snapshot.workflow.configurable() {
+                snapshot
+                    .input
+                    .as_ref()
+                    .ok_or("请先在工作流商店配置消息和接收会话，再创建定时任务")?
+                    .validate()?;
+            }
             let mut task = Task {
                 id: old
                     .as_ref()
@@ -303,7 +319,32 @@ impl Scheduler {
                 .find(|t| t.id == id)
                 .ok_or("定时任务不存在")?;
             task.enabled = enabled;
+            if enabled
+                && !registry::load(&self.root)?
+                    .installed
+                    .iter()
+                    .any(|w| w.key == task.snapshot.key)
+            {
+                return Err("工作流已卸载，请先重新安装再启用此定时任务".into());
+            }
             task.next_run_at = next(task, history::now())?;
+            Ok(())
+        })
+    }
+
+    pub fn pause_workflow(&self, key: &str) -> Reply<()> {
+        self.edit(|tasks, running| {
+            if tasks
+                .iter()
+                .any(|t| t.snapshot.key == key && running.contains(&t.id))
+            {
+                return Err("此工作流有定时任务正在运行，请结束后卸载".into());
+            }
+            for task in tasks.iter_mut().filter(|t| t.snapshot.key == key) {
+                task.enabled = false;
+                task.next_run_at = None;
+                task.last_message = Some("绑定的工作流已卸载，任务已暂停".into());
+            }
             Ok(())
         })
     }
@@ -335,6 +376,13 @@ impl Scheduler {
             .iter_mut()
             .find(|t| t.id == id)
             .ok_or("定时任务不存在")?;
+        if !registry::load(&self.root)?
+            .installed
+            .iter()
+            .any(|w| w.key == task.snapshot.key)
+        {
+            return Err("工作流已卸载，请先重新安装再执行此任务".into());
+        }
         task.last_run_at = Some(history::now());
         task.last_status = Some("running".into());
         task.last_message = Some("手动触发，准备执行".into());
@@ -583,8 +631,9 @@ mod tests {
         let scheduler = scheduler();
         let task = scheduler.view().unwrap().tasks[0].clone();
         let mut store = registry::load(&scheduler.root).unwrap();
-        store.installed[0].workflow.version = "2.0.0".into();
+        store.installed[0].workflow.version = "3.0.0".into();
         store.installed[0].commit = "updated-commit".into();
+        store.installed[0].hooks=serde_json::from_value(serde_json::json!({"beforeRun":null,"afterRun":{"url":"https://example.com/result","method":"POST","auth":{"type":"none"},"body":{"status":"{{run.status}}"},"response":{"type":"ignore"}}})).unwrap();
         registry::save(&scheduler.root, &store).unwrap();
         let input = |update_workflow| Input {
             id: Some(task.id.clone()),
@@ -603,12 +652,43 @@ mod tests {
             task.snapshot.workflow.version
         );
         assert_eq!(unchanged.serials, task.serials);
+        assert!(unchanged.snapshot.hooks.after_run.is_none());
         scheduler.save(input(true)).unwrap();
         assert_eq!(
             scheduler.view().unwrap().tasks[0].snapshot.workflow.version,
-            "2.0.0"
+            "3.0.0"
         );
+        assert!(scheduler.view().unwrap().tasks[0]
+            .snapshot
+            .hooks
+            .after_run
+            .is_some());
         assert!(validate_fields("重复设备", &["A".into(), "A".into()]).is_err());
+        fs::remove_dir_all(scheduler.root).unwrap();
+    }
+
+    #[test]
+    fn uninstalled_workflow_cannot_be_reenabled_or_run_through_a_snapshot() {
+        let scheduler = scheduler();
+        let task = scheduler.view().unwrap().tasks[0].clone();
+        scheduler.pause_workflow(&task.snapshot.key).unwrap();
+        registry::uninstall(&scheduler.root, &task.snapshot.key).unwrap();
+        assert!(!scheduler.view().unwrap().tasks[0].enabled);
+        assert!(scheduler.claim_now(&task.id).is_err());
+        assert!(scheduler.enable(&task.id, true).is_err());
+        assert!(scheduler
+            .save(Input {
+                id: Some(task.id.clone()),
+                name: task.name,
+                enabled: true,
+                cron: task.cron,
+                timezone: task.timezone,
+                serials: task.serials,
+                workflow_key: task.snapshot.key,
+                update_workflow: false
+            })
+            .is_err());
+        assert!(!scheduler.view().unwrap().tasks[0].enabled);
         fs::remove_dir_all(scheduler.root).unwrap();
     }
 

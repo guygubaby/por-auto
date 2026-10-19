@@ -1,5 +1,6 @@
 use crate::{
     android,
+    send_input::SendInput,
     u2::{Automation, Session},
     wechat,
 };
@@ -13,13 +14,14 @@ use std::{
     time::Duration,
 };
 
-pub const ENGINE_VERSION: u32 = 2;
+pub const ENGINE_VERSION: u32 = 3;
 pub const BUNDLED: &str = include_str!("../../workflows/wechat-nickname/workflow.json");
 pub const BUNDLED_WORKFLOWS: &[&str] = &[
     BUNDLED,
     include_str!("../../workflows/wechat-open/workflow.json"),
     include_str!("../../workflows/wechat-first-chat/workflow.json"),
     include_str!("../../workflows/wechat-send-hello/workflow.json"),
+    include_str!("../../workflows/wechat-broadcast/workflow.json"),
 ];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,11 +35,15 @@ pub struct Workflow {
     pub description: String,
     pub package: String,
     pub steps: Vec<Step>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub name: String,
     pub action: Action,
 }
@@ -60,6 +66,12 @@ pub enum Action {
         recover_back: u8,
     },
     Back,
+    WechatHome,
+    WechatOpenChat {
+        target: String,
+        output: String,
+    },
+    WechatBroadcast,
     WechatFirstChat {
         output: String,
     },
@@ -125,6 +137,11 @@ impl Selector {
 }
 
 impl Workflow {
+    pub fn configurable(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s.action, Action::WechatBroadcast))
+    }
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         let value: Self =
             serde_json::from_slice(bytes).map_err(|e| format!("工作流格式错误：{e}"))?;
@@ -138,7 +155,8 @@ impl Workflow {
         }
         if !valid_id(&self.id)
             || !short_text(&self.name)
-            || !short_text(&self.version)
+            || self.version.len() > 80
+            || semver::Version::parse(&self.version).is_err()
             || self.description.len() > 2000
             || !valid_android_name(&self.package)
             || !(1..=40).contains(&self.steps.len())
@@ -146,22 +164,59 @@ impl Workflow {
             return Err("工作流名称、标识、目标应用或步骤数量无效".into());
         }
         let mut total_wait = 0;
-        let mut outputs = BTreeSet::new();
+        let mut outputs = BTreeSet::<&str>::new();
         let mut first_chat = false;
         let mut sends = 0;
+        let mut ids = BTreeSet::new();
+        if self.input_schema.is_some()
+            && (!self.configurable()
+                || self.input_schema
+                    != Some(serde_json::json!({"$ref":"por-auto://schemas/wechat-send-input/v1"})))
+        {
+            return Err("工作流输入 Schema 不受此引擎支持".into());
+        }
+        if self.configurable() && self.input_schema.is_none() {
+            return Err("消息工作流必须声明输入 Schema".into());
+        }
         for step in &self.steps {
+            if let Some(id) = &step.id {
+                if !valid_id(id) || !ids.insert(id) {
+                    return Err("步骤 ID 无效或重复".into());
+                }
+            }
             if !short_text(&step.name) {
                 return Err("工作流步骤名称无效".into());
             }
             if !matches!(
                 step.action,
                 Action::WechatFirstChat { .. }
+                    | Action::WechatOpenChat { .. }
                     | Action::WechatSendText { .. }
                     | Action::Wait { .. }
             ) {
                 first_chat = false;
             }
             match &step.action {
+                Action::WechatHome | Action::WechatOpenChat { .. } | Action::WechatBroadcast
+                    if self.min_engine < 3 || self.package != "com.tencent.mm" =>
+                {
+                    return Err("此微信动作需要引擎 3".into())
+                }
+                Action::WechatOpenChat { target, output } => {
+                    if !short_text(target) || !valid_id(output) || !outputs.insert(output) {
+                        return Err("指定会话与输出字段无效".into());
+                    }
+                    first_chat = true;
+                }
+                Action::WechatBroadcast => {
+                    sends += 1;
+                    if sends > 1
+                        || !outputs.insert("send_status")
+                        || !outputs.insert("recipient_source")
+                    {
+                        return Err("每个工作流只能有一个发送动作".into());
+                    }
+                }
                 Action::WechatFirstChat { output } => {
                     if self.min_engine < 2
                         || self.package != "com.tencent.mm"
@@ -179,8 +234,13 @@ impl Workflow {
                         || !first_chat
                         || !short_text(text)
                         || sends > 1
+                        || !outputs.insert("message")
+                        || !outputs.insert("send_status")
                     {
-                        return Err("发送文字需要先确认首个会话，每个工作流最多发送一次且内容不超过 500 字节".into());
+                        return Err(
+                            "发送文字需要先确认会话，每个工作流最多发送一次且内容不超过 500 字节"
+                                .into(),
+                        );
                     }
                 }
                 Action::Launch { activity } if !valid_android_name(activity) => {
@@ -222,6 +282,9 @@ impl Workflow {
                 }
                 _ => {}
             }
+        }
+        if outputs.contains("before_hook") || outputs.contains("after_hook") {
+            return Err("before_hook 和 after_hook 为生命周期保留输出字段".into());
         }
         if total_wait > 30000 {
             return Err("工作流总等待时间不能超过 30 秒".into());
@@ -359,36 +422,21 @@ pub(crate) fn page_document<'a>(xml: &'a str, package: &str) -> Result<Document<
             && n.attribute("class").is_some_and(|class| !class.is_empty())
             && node_bounds(n).is_some()
     }) {
-        return Err("目标应用的页面控件不可读取（返回空节点），已停止操作。请在手机上开启可信的无障碍服务（如 AutoJs6）后重试；仍失败时检查应用版本兼容性".into());
+        return Err("当前微信未提供可读取的页面控件（空节点），已停止操作。请保持手机解锁；若已开启无障碍服务仍然失败，请导出本次记录以核对微信与手机版本兼容性".into());
     }
     Ok(doc)
 }
 
-fn screen(
-    device: &impl Automation,
-    package: &str,
-    folder: &Path,
-    visual: Option<(&Path, &str)>,
-) -> Result<String, String> {
-    let mut xml = device.dump()?;
+fn screen(device: &impl Automation, package: &str, folder: &Path) -> Result<String, String> {
+    let xml = device.dump()?;
     fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
-    if let Err(error) = page_document(&xml, package) {
-        if let Some((adb, serial)) = visual.filter(|_| error.contains("返回空节点")) {
-            if !folder.join("native-hierarchy.xml").exists() {
-                fs::write(folder.join("native-hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
-            }
-            xml = crate::ocr::hierarchy(adb, serial, folder)?;
-            fs::write(folder.join("ocr-hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
-            fs::write(folder.join("hierarchy.xml"), &xml).map_err(|e| e.to_string())?;
-        } else {
-            return Err(error);
-        }
-    }
+    page_document(&xml, package)?;
     Ok(xml)
 }
 
-pub fn execute(
+pub fn execute_with_input(
     workflow: &Workflow,
+    input: Option<&SendInput>,
     adb: &Path,
     serial: &str,
     jar: &Path,
@@ -396,12 +444,9 @@ pub fn execute(
     mut report: impl FnMut(usize, usize, &str, &str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
     workflow.validate()?;
-    let nickname = Workflow::parse(BUNDLED.as_bytes())?;
-    // Visual input is limited to our exact read-only nickname steps; send workflows never fall back to OCR.
-    let visual = (workflow.id == nickname.id
-        && workflow.package == nickname.package
-        && workflow.steps == nickname.steps)
-        .then_some((adb, serial));
+    if workflow.configurable() {
+        input.ok_or("请先配置消息内容与接收会话")?.validate()?;
+    }
     let devices = android::parse_devices(&android::text(adb, &["devices", "-l"])?);
     if !devices
         .iter()
@@ -474,6 +519,31 @@ pub fn execute(
                 outputs.insert(output.clone(), target.title.clone());
                 chat = Some(target);
             }
+            Action::WechatHome => {
+                wechat::home(&device, folder)?;
+                chat = None;
+            }
+            Action::WechatOpenChat { target, output } => {
+                let target = wechat::open_named(&device, folder, target)?;
+                outputs.insert(output.clone(), target.title.clone());
+                chat = Some(target);
+            }
+            Action::WechatBroadcast => {
+                let config = input.ok_or("缺少发送配置")?;
+                fs::write(
+                    folder.join("input.json"),
+                    serde_json::to_vec_pretty(&config.redacted()).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                let context = serde_json::json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running"}});
+                outputs.extend(wechat::broadcast(
+                    &device,
+                    folder,
+                    config,
+                    &context,
+                    |message| report(index + 1, workflow.steps.len(), message, "started"),
+                )?);
+            }
             Action::WechatSendText { text } => {
                 let target = chat.as_ref().ok_or("尚未确认首个会话，禁止发送")?;
                 let status = wechat::send_text(&device, target, text, folder)?;
@@ -486,13 +556,8 @@ pub fn execute(
                 recover_back,
             } => {
                 let mut done = false;
-                let attempts = if visual.is_some() {
-                    (*recover_back).max(2)
-                } else {
-                    *recover_back
-                };
-                for attempt in 0..=attempts {
-                    let xml = screen(&device, &workflow.package, folder, visual)?;
+                for attempt in 0..=*recover_back {
+                    let xml = screen(&device, &workflow.package, folder)?;
                     if skip_if.iter().any(|s| has_label(&xml, s)) {
                         done = true;
                         break;
@@ -507,24 +572,12 @@ pub fn execute(
                     if matches.len() > 1 {
                         return Err(format!("「{}」匹配到多个目标，已停止", step.name));
                     }
-                    if folder.join("ocr-hierarchy.xml").is_file() {
-                        if attempt < attempts {
-                            device.settle();
-                            continue;
-                        }
-                        return Err(format!(
-                            "截图识别未能确认「{}」，请回到微信主界面后重试",
-                            step.name
-                        ));
-                    }
                     if attempt < *recover_back {
                         android::text(
                             adb,
                             &["-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"],
                         )?;
                         thread::sleep(Duration::from_millis(700));
-                    } else if attempt < attempts {
-                        device.settle();
                     }
                 }
                 if !done {
@@ -539,39 +592,13 @@ pub fn execute(
                 labels,
                 output,
             } => {
-                let mut value = None;
-                for attempt in 0..=2 {
-                    match read_row(
-                        &screen(&device, &workflow.package, folder, visual)?,
-                        page,
-                        labels,
-                    ) {
-                        Ok(found) => {
-                            value = Some(found);
-                            break;
-                        }
-                        Err(_) if attempt < 2 && folder.join("ocr-hierarchy.xml").is_file() => {
-                            device.settle()
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                outputs.insert(output.clone(), value.ok_or("无法读取昵称")?);
+                outputs.insert(
+                    output.clone(),
+                    read_row(&screen(&device, &workflow.package, folder)?, page, labels)?,
+                );
             }
         }
         report(index + 1, workflow.steps.len(), &step.name, "completed")?;
-    }
-    if folder.join("ocr-hierarchy.xml").is_file() {
-        outputs.insert(
-            "读取方式".into(),
-            "本机截图文字识别，请结合截图核对昵称；表情等特殊字符可能无法识别".into(),
-        );
-        report(
-            workflow.steps.len(),
-            workflow.steps.len(),
-            "使用本机截图文字识别读取昵称，请结合截图核对",
-            "warning",
-        )?;
     }
     Ok(outputs)
 }
@@ -596,7 +623,7 @@ mod tests {
         }
         let folder = std::env::temp_dir().join(format!("por-empty-page-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
-        let result = screen(&EmptyPage, "com.tencent.mm", &folder, None);
+        let result = screen(&EmptyPage, "com.tencent.mm", &folder);
         fs::remove_dir_all(&folder).unwrap();
         assert!(result.is_err_and(|error| error.contains("页面控件")));
     }
@@ -618,8 +645,8 @@ mod tests {
         }
         let source = BUNDLED_WORKFLOWS[3];
         for invalid in [
-            source.replace("\"minEngine\": 2", "\"minEngine\": 1"),
-            source.replace("\"text\": \"你好\"", "\"text\": \"\""),
+            source.replace("\"minEngine\": 3", "\"minEngine\": 1"),
+            source.replace("\"text\": \"1\"", "\"text\": \"\""),
             source.replace("com.tencent.mm", "com.example.other"),
         ] {
             assert!(Workflow::parse(invalid.as_bytes()).is_err());

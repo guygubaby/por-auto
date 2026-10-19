@@ -1,32 +1,105 @@
 {
   "schemaVersion": 1,
-  "minEngine": 1,
+  "minEngine": 3,
   "id": "wechat-nickname",
   "name": "读取微信昵称",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "打开手机上的微信，进入「我 → 个人信息」，读取昵称并保存截图。请先登录简体中文原版微信。",
   "package": "com.tencent.mm",
   "steps": [
-    { "name": "唤醒手机", "action": { "type": "wake" } },
-    { "name": "打开微信", "action": { "type": "launch", "activity": "com.tencent.mm.ui.LauncherUI" } },
-    { "name": "等待微信页面", "action": { "type": "wait", "ms": 1600 } },
+    {
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      },
+      "id": "step-1"
+    },
+    {
+      "name": "打开微信",
+      "action": {
+        "type": "launch",
+        "activity": "com.tencent.mm.ui.LauncherUI"
+      },
+      "id": "step-2"
+    },
+    {
+      "name": "等待微信页面",
+      "action": {
+        "type": "wait",
+        "ms": 1600
+      },
+      "id": "step-3"
+    },
+    {
+      "name": "回到微信会话列表",
+      "action": {
+        "type": "wechat_home"
+      },
+      "id": "step-4"
+    },
     {
       "name": "进入「我」页面",
       "action": {
         "type": "tap",
-        "selector": { "text": ["我"], "bottom": true, "peers": ["通讯录", "发现"] },
-        "skip_if": [{ "prefix": ["微信号：", "微信号:"] }, { "text": ["个人信息"] }],
+        "selector": {
+          "text": [
+            "我"
+          ],
+          "bottom": true,
+          "peers": [
+            "通讯录",
+            "发现"
+          ]
+        },
+        "skip_if": [
+          {
+            "prefix": [
+              "微信号：",
+              "微信号:"
+            ]
+          },
+          {
+            "text": [
+              "个人信息"
+            ]
+          }
+        ],
         "recover_back": 3
-      }
+      },
+      "id": "step-5"
     },
     {
       "name": "打开个人信息",
       "action": {
         "type": "tap",
-        "selector": { "prefix": ["微信号：", "微信号:"] },
-        "skip_if": [{ "text": ["个人信息"] }]
-      }
+        "selector": {
+          "prefix": [
+            "微信号：",
+            "微信号:"
+          ]
+        },
+        "skip_if": [
+          {
+            "text": [
+              "个人信息"
+            ]
+          }
+        ]
+      },
+      "id": "step-6"
     },
-    { "name": "读取微信昵称", "action": { "type": "read_row", "page": "个人信息", "labels": ["昵称", "名字"], "output": "nickname" } }
+    {
+      "name": "读取微信昵称",
+      "action": {
+        "type": "read_row",
+        "page": "个人信息",
+        "labels": [
+          "昵称",
+          "名字"
+        ],
+        "output": "nickname"
+      },
+      "id": "step-7"
+    }
   ]
 }

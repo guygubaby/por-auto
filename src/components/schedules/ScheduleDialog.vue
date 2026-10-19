@@ -3,7 +3,7 @@ import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { X } from '@lucide/vue';
 import type { Device, Installed } from '../../useConnection';
-import { formatScheduleTime, type Schedule, type ScheduleInput } from '../../useSchedules';
+import { formatScheduleTime, snapshotChanged, type Schedule, type ScheduleInput } from '../../useSchedules';
 import AppButton from '../AppButton.vue';
 import DevicePicker from '../DevicePicker.vue';
 
@@ -42,7 +42,7 @@ const newerRef = computed(() => {
   const task = props.task;
   const installed = props.workflows.find(w => w.key === workflowKeyRef.value);
   return task && installed && installed.key === task.snapshot.key
-    && (installed.workflow.version !== task.snapshot.workflow.version || installed.commit !== task.snapshot.commit);
+    && snapshotChanged(installed, task.snapshot);
 });
 
 watch(() => props.open, open => {
@@ -104,10 +104,10 @@ async function submit(): Promise<void> {
         <div class="grid items-start gap-4 sm:grid-cols-2">
         <div><label for="schedule-name" class="mb-2 block text-xs text-ink-secondary">任务名称</label><input id="schedule-name" v-model="nameRef" required autofocus maxlength="60" class="min-h-9 w-full rounded-control border border-line bg-surface-soft px-3 text-sm pointer-coarse:min-h-11" placeholder="例如：每日设备检查" /></div>
         <div><label for="schedule-workflow" class="mb-2 block text-xs text-ink-secondary">工作流</label><select id="schedule-workflow" v-model="workflowKeyRef" required class="min-h-9 w-full rounded-control border border-line bg-surface-soft px-3 text-sm pointer-coarse:min-h-11"><option value="" disabled>请选择已安装的工作流</option><option v-for="item in choicesRef" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }}</option></select>
-          <p class="mt-2 text-xs leading-5 text-ink-muted">保存时固定工作流快照，商店更新不会自动改变此任务。</p>
+          <p class="mt-2 text-xs leading-5 text-ink-muted">保存时固定工作流版本、输入和 Hook 配置，商店或配置更新不会自动改变此任务。</p>
           <p v-if="selectedWorkflowRef" class="mt-2 text-xs leading-5 text-ink-secondary">{{ selectedWorkflowRef.description }}</p>
           <p v-if="task && workflowKeyRef === task.snapshot.key" class="text-xs leading-5 text-ink-secondary">当前固定版本：{{ task.snapshot.workflow.version }} · {{ task.snapshot.commit.slice(0, 8) }}</p>
-          <label v-if="newerRef" class="mt-2 flex items-center gap-2 text-xs text-warning"><input v-model="updateWorkflowRef" type="checkbox" class="size-4 accent-brand" />将快照更新为当前已安装版本（保存后生效）</label>
+          <label v-if="newerRef" class="mt-2 flex items-center gap-2 text-xs text-warning"><input v-model="updateWorkflowRef" type="checkbox" class="size-4 accent-brand" />更新为当前已安装版本及输入、Hook 配置（保存后生效）</label>
         </div>
         </div>
         <div class="grid gap-4 sm:grid-cols-2">

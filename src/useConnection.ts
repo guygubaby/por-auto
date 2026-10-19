@@ -6,14 +6,16 @@ import bundled from '../workflows/wechat-nickname/workflow.json';
 import openWorkflow from '../workflows/wechat-open/workflow.json';
 import firstChatWorkflow from '../workflows/wechat-first-chat/workflow.json';
 import sendHelloWorkflow from '../workflows/wechat-send-hello/workflow.json';
+import broadcastWorkflow from '../workflows/wechat-broadcast/workflow.json';
+import type { Hooks, SendInput } from './workflowInput';
 
-const bundledWorkflows = [bundled, openWorkflow, firstChatWorkflow, sendHelloWorkflow];
+const bundledWorkflows = [bundled, openWorkflow, firstChatWorkflow, sendHelloWorkflow, broadcastWorkflow];
 
 export interface Device { serial: string; state: string; model: string }
 interface Environment { ready: boolean; version: string; platform: string; devices: Device[]; automation_version?: string }
-export interface Workflow { id: string; name: string; version: string; description: string; package: string; steps: { name: string; action?: { type: string; text?: string } }[] }
+export interface Workflow { id: string; name: string; version: string; description: string; package: string; inputSchema?: { $ref: string }; steps: { id?: string; name: string; action?: { type: string; text?: string } }[] }
 export interface Registry { url: string; reference: string; name: string; commit: string; workflows: Workflow[] }
-export interface Installed { key: string; registryUrl: string; reference: string; commit: string; workflow: Workflow }
+export interface Installed { key: string; registryUrl: string; reference: string; commit: string; workflow: Workflow; input?: SendInput | null; hooks?: Hooks }
 export interface Store { schemaVersion: number; registries: Registry[]; installed: Installed[] }
 export interface RunResult { nickname: string | null; outputs: Record<string, string>; workflow_name: string; workflow_version: string; serial: string; timestamp: number; screenshot: string | null; error: string | null; warning: string | null; folder: string }
 export interface DeviceRun { serial: string; model: string; status: 'queued' | 'running' | 'completed' | 'failed'; result: RunResult | null; error: string | null; progress?: Progress }
@@ -31,6 +33,7 @@ export const useConnectionStore = defineStore('connection', () => {
   const selectedSerialsRef = shallowRef<string[]>([]);
   const busyRef = ref(false);
   const runningRef = ref(false);
+  const stoppingRef = ref(false);
   const errorRef = ref('');
   const noticeRef = ref('');
   const progressRef = shallowRef<Progress>({ step: 0, total: 0, message: '等待开始' });
@@ -89,6 +92,20 @@ export const useConnectionStore = defineStore('connection', () => {
     });
   }
 
+  async function uninstallWorkflow(item: Installed): Promise<boolean> {
+    return operate(async () => {
+      applyStore(await invoke<Store>('uninstall_workflow', { key: item.key }));
+      noticeRef.value = `已卸载「${item.workflow.name}」，相关定时任务已暂停，运行记录保留`;
+    });
+  }
+
+  async function configureWorkflow(item: Installed, input: SendInput | null, hooks: Hooks, secrets: Record<string, string>): Promise<boolean> {
+    return operate(async () => {
+      applyStore(await invoke<Store>('configure_workflow', { key: item.key, input, hooks, secrets }));
+      noticeRef.value = '配置已保存在本机。已有定时任务需勾选更新快照后保存，才会使用新配置。';
+    });
+  }
+
   async function operate(job: () => Promise<void>): Promise<boolean> {
     if (busyRef.value) return false;
     if (!desktop) { errorRef.value = '当前是界面预览。请打开安装后的桌面客户端执行此操作。'; return false; }
@@ -122,10 +139,11 @@ export const useConnectionStore = defineStore('connection', () => {
       deviceRunsRef.value = devices.map(device => ({ serial: device.serial, model: device.model, status: 'queued', result: null, error: null }));
       activeWorkflowKey = workflow.key;
       runningRef.value = true;
+      stoppingRef.value = false;
       try {
         let next = 0;
         const worker = async (): Promise<void> => {
-          while (next < devices.length) {
+          while (next < devices.length && !stoppingRef.value) {
             const index = next++;
             const device = devices[index]!;
             try {
@@ -137,12 +155,20 @@ export const useConnectionStore = defineStore('connection', () => {
           }
         };
         await Promise.all(Array.from({ length: Math.min(4, devices.length) }, worker));
+        if (stoppingRef.value) deviceRunsRef.value = deviceRunsRef.value.map(run => run.status === 'queued' ? { ...run, status: 'failed', error: '用户已停止，未执行此手机任务' } : run);
         const { total, succeeded, failed } = batchSummaryRef.value;
         const summary = `工作流「${workflow.workflow.name}」执行结束：${total} 台手机，成功 ${succeeded} 台，失败 ${failed} 台，请查看运行结果`;
         if (failed) errorRef.value = summary;
         else noticeRef.value = summary;
-      } finally { runningRef.value = false; }
+      } finally { runningRef.value = false; stoppingRef.value = false; }
     });
+  }
+
+  async function stopWorkflows(): Promise<void> {
+    if (!runningRef.value || stoppingRef.value) return;
+    stoppingRef.value = true;
+    try { await invoke('cancel_device_tasks', { serials: deviceRunsRef.value.filter(run => ['queued', 'running'].includes(run.status)).map(run => run.serial) }); noticeRef.value = '已请求停止，当前操作校验完成后停止后续发送。'; }
+    catch (error) { stoppingRef.value = false; errorRef.value = String(error); }
   }
 
   function updateDeviceRun(index: number, patch: Partial<DeviceRun>): void {
@@ -180,5 +206,5 @@ export const useConnectionStore = defineStore('connection', () => {
   }
   function dispose(): void { disposed = true; unlisten?.(); }
 
-  return { desktop, environmentRef, selectedSerialsRef, busyRef, runningRef, errorRef, noticeRef, progressRef, resultRef, deviceRunsRef, activeRunRef, batchSummaryRef, readyDevicesRef, selectedDevicesRef, storeRef, workflowKeyRef, selectedWorkflowRef, syncRegistry, removeRegistry, installWorkflow, refresh, initialize, runWorkflow, openResults, initializeApp, dispose };
+  return { desktop, environmentRef, selectedSerialsRef, busyRef, runningRef, stoppingRef, errorRef, noticeRef, progressRef, resultRef, deviceRunsRef, activeRunRef, batchSummaryRef, readyDevicesRef, selectedDevicesRef, storeRef, workflowKeyRef, selectedWorkflowRef, syncRegistry, removeRegistry, installWorkflow, uninstallWorkflow, configureWorkflow, refresh, initialize, runWorkflow, stopWorkflows, openResults, initializeApp, dispose };
 });

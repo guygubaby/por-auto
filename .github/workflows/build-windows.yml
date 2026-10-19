@@ -14,9 +14,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify native screenshot text recognition
-        shell: powershell
-        run: .\scripts\test-windows-ocr.ps1
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -35,6 +32,8 @@ jobs:
           $env:POR_ADB_TEST_BINARY = Join-Path $component 'platform-tools/adb.exe'
           pnpm test:adb-paths
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Verify native credential storage
+        run: cargo test --manifest-path src-tauri/Cargo.toml desktop_credentials_are_not_serialized -- --ignored
       - run: pnpm tauri build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

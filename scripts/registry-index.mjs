@@ -13,7 +13,7 @@ for (const folder of (await readdir(directory, { withFileTypes: true })).sort((a
   assert.match(folder.name, /^[a-zA-Z0-9_-]{1,80}$/);
   assert.equal(workflow.id, folder.name);
   assert.equal(workflow.schemaVersion, 1);
-  assert.ok([1, 2].includes(workflow.minEngine));
+  assert.ok([1, 2, 3].includes(workflow.minEngine));
   assert.ok(Array.isArray(workflow.steps) && workflow.steps.length > 0 && workflow.steps.length <= 40);
   workflows.push({ id: workflow.id, path, sha256: createHash('sha256').update(bytes).digest('hex') });
 }

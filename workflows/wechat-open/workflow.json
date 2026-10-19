@@ -1,14 +1,41 @@
 {
   "schemaVersion": 1,
-  "minEngine": 1,
+  "minEngine": 3,
   "id": "wechat-open",
   "name": "打开微信",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "唤醒已解锁的手机并打开微信，保存完成时的截图。可用于检查基础连接流程。",
   "package": "com.tencent.mm",
   "steps": [
-    { "name": "唤醒手机", "action": { "type": "wake" } },
-    { "name": "打开微信", "action": { "type": "launch", "activity": "com.tencent.mm.ui.LauncherUI" } },
-    { "name": "等待页面显示", "action": { "type": "wait", "ms": 1600 } }
+    {
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      },
+      "id": "step-1"
+    },
+    {
+      "name": "打开微信",
+      "action": {
+        "type": "launch",
+        "activity": "com.tencent.mm.ui.LauncherUI"
+      },
+      "id": "step-2"
+    },
+    {
+      "name": "等待页面显示",
+      "action": {
+        "type": "wait",
+        "ms": 1600
+      },
+      "id": "step-3"
+    },
+    {
+      "name": "回到微信会话列表",
+      "action": {
+        "type": "wechat_home"
+      },
+      "id": "step-4"
+    }
   ]
 }

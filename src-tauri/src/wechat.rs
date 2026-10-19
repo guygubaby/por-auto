@@ -1,15 +1,24 @@
 use crate::{
     history,
+    send_input::{Scope, Selection, SendInput},
     u2::Automation,
     workflow::{node_bounds, page_document},
 };
 use roxmltree::{Document, Node};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Write,
+    path::Path,
+    thread,
+    time::Duration,
+};
 
 const PACKAGE: &str = "com.tencent.mm";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Chat {
     pub title: String,
 }
@@ -57,7 +66,9 @@ fn home_tab(xml: &str) -> Result<Option<(i32, i32)>, String> {
         .descendants()
         .filter(|n| {
             let text = label(*n);
-            (text == "微信" || (text.starts_with("微信(") && text.ends_with(')')))
+            (text == "微信"
+                || (text.starts_with("微信(") && text.ends_with(')'))
+                || (text.starts_with("微信（") && text.ends_with('）')))
                 && bottom(*n)
                 && enabled(*n)
         })
@@ -193,6 +204,30 @@ fn editor<'a, 'input>(doc: &'a Document<'input>) -> Result<Node<'a, 'input>, Str
 }
 
 pub fn open_first(device: &impl Automation, folder: &Path) -> Result<Chat, String> {
+    let mut xml = home(device, folder)?;
+    device.expect_true(
+        "scrollToBeginning",
+        json!([list_selector(&xml)?, true, 100, 20]),
+    )?;
+    device.settle();
+    xml = snapshot(device, folder, "chat-list.xml")?;
+    let (chat, (x, y)) = first_row(&xml)?;
+    history::log(
+        folder,
+        0,
+        "target",
+        &format!("本轮首个会话：{}", chat.title),
+    )?;
+    device.click(x, y)?;
+    device.settle();
+    check_title(
+        &document(&snapshot(device, folder, "chat-open.xml")?)?,
+        &chat,
+    )?;
+    Ok(chat)
+}
+
+pub fn home(device: &impl Automation, folder: &Path) -> Result<String, String> {
     let mut xml = snapshot(device, folder, "chat-list.xml")?;
     let mut found = false;
     for attempt in 0..=4 {
@@ -213,28 +248,393 @@ pub fn open_first(device: &impl Automation, folder: &Path) -> Result<Chat, Strin
     }
     device.settle();
     xml = snapshot(device, folder, "chat-list.xml")?;
-    // Scroll through the server, never guess a fixed screen coordinate.
-    device.expect_true(
-        "scrollToBeginning",
-        json!([list_selector(&xml)?, true, 30, 20]),
-    )?;
-    device.settle();
-    xml = snapshot(device, folder, "chat-list.xml")?;
     if home_tab(&xml)?.is_none() {
-        return Err("滚动后不在微信首页，已停止".into());
+        return Err("未回到微信首页，已停止".into());
     }
-    let (chat, (x, y)) = first_row(&xml)?;
-    history::log(
-        folder,
-        0,
-        "target",
-        &format!("本轮首个会话：{}（含置顶，按运行时列表顺序）", chat.title),
-    )?;
+    Ok(xml)
+}
+
+fn tap_label(
+    device: &impl Automation,
+    xml: &str,
+    labels: &[&str],
+    top: bool,
+) -> Result<(), String> {
+    let doc = document(xml)?;
+    let h = height(&doc);
+    let points: BTreeSet<_> = doc
+        .descendants()
+        .filter(|n| {
+            enabled(*n)
+                && (labels.contains(&label(*n))
+                    || labels.contains(&n.attribute("content-desc").unwrap_or("")))
+                && (!top || node_bounds(*n).is_some_and(|b| b[1] < h / 5))
+        })
+        .filter_map(center)
+        .collect();
+    if points.len() != 1 {
+        return Err(format!(
+            "无法唯一识别「{}」，未执行点击",
+            labels.join(" / ")
+        ));
+    }
+    let (x, y) = points.into_iter().next().unwrap();
     device.click(x, y)?;
     device.settle();
+    Ok(())
+}
+
+pub fn open_named(device: &impl Automation, folder: &Path, target: &str) -> Result<Chat, String> {
+    let xml = home(device, folder)?;
+    tap_label(device, &xml, &["搜索", "搜索按钮"], true)?;
+    let xml = snapshot(device, folder, "search.xml")?;
+    let doc = document(&xml)?;
+    let edits: Vec<_> = doc
+        .descendants()
+        .filter(|n| {
+            n.attribute("class") == Some("android.widget.EditText")
+                && enabled(*n)
+                && n.attribute("package") == Some(PACKAGE)
+        })
+        .collect();
+    if edits.len() != 1 {
+        return Err("搜索页没有唯一输入框，已停止".into());
+    }
+    let bounds = node_bounds(edits[0]).ok_or("搜索框不可见")?;
+    let mut selector =
+        json!({"mask":0x80010,"className":"android.widget.EditText","packageName":PACKAGE});
+    if let Some(id) = edits[0].attribute("resource-id").filter(|v| !v.is_empty()) {
+        selector["resourceId"] = json!(id);
+        selector["mask"] = json!(0x280010);
+    }
+    device.expect_true("setText", json!([selector, target]))?;
+    device.settle();
+    let xml = snapshot(device, folder, "search.xml")?;
+    let doc = document(&xml)?;
+    let points: BTreeSet<_> = doc
+        .descendants()
+        .filter(|n| {
+            label(*n) == target
+                && enabled(*n)
+                && n.attribute("class") != Some("android.widget.EditText")
+                && node_bounds(*n).is_some_and(|b| b[1] >= bounds[3])
+        })
+        .filter_map(center)
+        .collect();
+    if points.len() != 1 {
+        return Err(format!(
+            "搜索「{target}」得到 {} 个同名结果，未选择；请核对接收会话",
+            points.len()
+        ));
+    }
+    let (x, y) = points.into_iter().next().unwrap();
+    device.click(x, y)?;
+    device.settle();
+    let chat = Chat {
+        title: target.into(),
+    };
     let xml = snapshot(device, folder, "chat-open.xml")?;
-    check_title(&document(&xml)?, &chat)?;
+    let doc = document(&xml)?;
+    check_title(&doc, &chat)?;
+    if target == "文件传输助手"
+        && !doc
+            .descendants()
+            .any(|n| label(n) == target && node_bounds(n).is_some_and(|b| b[1] < height(&doc) / 5))
+    {
+        return Err("目标并非文件传输助手，已停止".into());
+    }
     Ok(chat)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetList {
+    pub items: Vec<Chat>,
+    pub source: String,
+    pub scanned_at: u64,
+    pub complete: bool,
+}
+
+fn row_names(xml: &str) -> Result<Vec<String>, String> {
+    let doc = document(xml)?;
+    let list = list_node(&doc)?;
+    let viewport = node_bounds(list).ok_or("列表不可见")?;
+    let mut names = Vec::new();
+    for row in list.children().filter(|n| n.is_element()) {
+        let Some(b) = node_bounds(row).filter(|b| b[1] >= viewport[1] && b[3] <= viewport[3])
+        else {
+            continue;
+        };
+        let avatar = row
+            .descendants()
+            .filter(|n| n.attribute("class") == Some("android.widget.ImageView"))
+            .filter_map(node_bounds)
+            .filter(|a| a[0] < (b[0] + b[2]) / 2)
+            .min_by_key(|a| a[0]);
+        let Some(avatar) = avatar else {
+            if row.attribute("clickable") == Some("true") {
+                return Err("列表中存在无法识别的可点击项目，未开始发送".into());
+            }
+            continue;
+        };
+        let candidates: Vec<_> = row
+            .descendants()
+            .filter(|n| {
+                n.attribute("class") == Some("android.widget.TextView")
+                    && !label(*n).trim().is_empty()
+                    && node_bounds(*n).is_some_and(|a| {
+                        a[0] >= avatar[2] && a[0] < (b[0] + b[2]) / 2 && a[1] < (b[1] + b[3]) / 2
+                    })
+            })
+            .map(label)
+            .collect();
+        if candidates.len() != 1 {
+            return Err("列表存在无法唯一识别的会话名称，未开始发送".into());
+        }
+        let name = candidates[0];
+        if ![
+            "公众号",
+            "订阅号消息",
+            "服务通知",
+            "折叠置顶聊天",
+            "微信团队",
+            "微信运动",
+            "支付服务",
+            "微信支付",
+        ]
+        .contains(&name)
+        {
+            names.push(name.into());
+        }
+    }
+    Ok(names)
+}
+
+fn merge_page(names: &mut Vec<String>, page: &[String]) -> Result<(), String> {
+    if page.iter().collect::<BTreeSet<_>>().len() != page.len() {
+        return Err("列表包含同名会话，无法安全区分，未开始发送".into());
+    }
+    let overlap = (0..=names.len().min(page.len()))
+        .rev()
+        .find(|n| names[names.len() - n..] == page[..*n])
+        .unwrap_or(0);
+    for name in &page[overlap..] {
+        if names.contains(name) {
+            return Err(format!(
+                "会话「{name}」出现重复或列表在读取中发生变化，请重新读取"
+            ));
+        }
+        names.push(name.clone());
+    }
+    Ok(())
+}
+
+pub fn discover_progress(
+    device: &impl Automation,
+    folder: &Path,
+    scope: Scope,
+    mut report: impl FnMut(&str) -> Result<(), String>,
+) -> Result<TargetList, String> {
+    let mut xml = home(device, folder)?;
+    let source = if scope == Scope::Groups {
+        tap_label(device, &xml, &["更多功能按钮", "添加", "更多功能"], true)?;
+        xml = snapshot(device, folder, "group-picker.xml")?;
+        tap_label(device, &xml, &["发起群聊"], false)?;
+        xml = snapshot(device, folder, "group-picker.xml")?;
+        tap_label(device, &xml, &["选择一个群", "选择群聊"], false)?;
+        xml = snapshot(device, folder, "group-picker.xml")?;
+        "微信「选择一个群」列表（本次可枚举的群聊）"
+    } else {
+        "微信首页会话列表（普通会话与群聊，不含公众号等系统入口）"
+    };
+    let selector = list_selector(&xml)?;
+    device.expect_true("scrollToBeginning", json!([selector, true, 300, 20]))?;
+    device.settle();
+    let mut names = Vec::new();
+    let mut last = Vec::new();
+    for page_number in 0..300 {
+        report(&format!(
+            "正在读取会话列表第 {} 屏，已发现 {} 个",
+            page_number + 1,
+            names.len()
+        ))?;
+        xml = snapshot(device, folder, "recipient-list.xml")?;
+        let page = row_names(&xml)?;
+        if page == last && !names.is_empty() {
+            return Err("列表无法继续滚动，也未确认到达末尾，未开始发送".into());
+        }
+        merge_page(&mut names, &page)?;
+        last = page;
+        if names.len() > 2000 {
+            return Err("本轮超过 2000 个会话，请分批选择".into());
+        }
+        let moved = device
+            .rpc("scrollForward", json!([selector, true, 20]))?
+            .as_bool()
+            .ok_or("滚动响应无效")?;
+        if !moved {
+            return Ok(TargetList {
+                items: names.into_iter().map(|title| Chat { title }).collect(),
+                source: source.into(),
+                scanned_at: history::now(),
+                complete: true,
+            });
+        }
+        device.settle();
+    }
+    Err("未能确认列表末尾，未开始发送；请分批勾选会话".into())
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delivery {
+    pub title: String,
+    pub status: String,
+    pub message: Option<String>,
+    pub error: Option<String>,
+    pub updated_at: u64,
+}
+fn save_deliveries(folder: &Path, records: &[Delivery]) -> Result<(), String> {
+    let next = folder.join("targets.next.json");
+    let mut file = fs::File::create(&next).map_err(|e| e.to_string())?;
+    file.write_all(&serde_json::to_vec_pretty(records).map_err(|e| e.to_string())?)
+        .and_then(|_| file.sync_all())
+        .map_err(|e| e.to_string())?;
+    fs::rename(next, folder.join("targets.json")).map_err(|e| format!("保存逐会话记录失败：{e}"))
+}
+pub fn broadcast(
+    device: &impl Automation,
+    folder: &Path,
+    input: &SendInput,
+    context: &Value,
+    mut report: impl FnMut(&str) -> Result<(), String>,
+) -> Result<BTreeMap<String, String>, String> {
+    input.validate()?;
+    let frozen_message = if input.refresh_each() {
+        None
+    } else {
+        Some(input.message_for(context)?)
+    };
+    report("正在读取接收会话列表")?;
+    let list = discover_progress(device, folder, input.recipients.scope, &mut report)?;
+    if !list.complete {
+        return Err("接收会话列表未读取完整，未开始发送".into());
+    }
+    let targets = if input.recipients.mode == Selection::All {
+        list.items
+    } else {
+        let mut selected = Vec::new();
+        for name in &input.recipients.names {
+            let matches: Vec<_> = list.items.iter().filter(|c| c.title == *name).collect();
+            if matches.len() != 1 {
+                return Err(format!(
+                    "勾选的会话「{name}」不在当前列表或重名，未开始发送"
+                ));
+            }
+            selected.push(matches[0].clone());
+        }
+        selected
+    };
+    if targets.is_empty() {
+        return Err("没有找到可发送的会话，未发送消息".into());
+    }
+    let mut deliveries: Vec<_> = targets
+        .iter()
+        .map(|c| Delivery {
+            title: c.title.clone(),
+            status: "pending".into(),
+            message: None,
+            error: None,
+            updated_at: history::now(),
+        })
+        .collect();
+    save_deliveries(folder, &deliveries)?;
+    let mut completed = 0;
+    for (i, target) in targets.iter().enumerate() {
+        if let Err(error) = report(&format!(
+            "正在处理 {}/{}：{}",
+            i + 1,
+            targets.len(),
+            target.title
+        )) {
+            for remaining in &mut deliveries[i..] {
+                remaining.status = "skipped".into();
+                remaining.error = Some(error.clone());
+            }
+            save_deliveries(folder, &deliveries)?;
+            return Err(error);
+        }
+        let child = folder.join(format!("target-{:04}", i + 1));
+        fs::create_dir_all(&child).map_err(|e| e.to_string())?;
+        let result = (|| {
+            let text = if let Some(message) = &frozen_message {
+                message.clone()
+            } else {
+                let mut context = context.clone();
+                context["recipient"] =
+                    json!({"title":target.title,"index":i+1,"total":targets.len()});
+                input.message_for(&context)?
+            };
+            let chat = open_named(device, &child, &target.title)?;
+            deliveries[i].status = "sending".into();
+            deliveries[i].message = Some(text.clone());
+            deliveries[i].updated_at = history::now();
+            save_deliveries(folder, &deliveries)?;
+            send_text(device, &chat, &text, &child)
+        })();
+        deliveries[i].updated_at = history::now();
+        match result {
+            Ok(_) => {
+                deliveries[i].status = "sent".into();
+                completed += 1;
+            }
+            Err(error) => {
+                let intent = fs::read_to_string(child.join("events.jsonl"))
+                    .unwrap_or_default()
+                    .contains("send_requested");
+                deliveries[i].status = if intent { "uncertain" } else { "failed" }.into();
+                deliveries[i].error = Some(error.clone());
+                for remaining in &mut deliveries[i + 1..] {
+                    remaining.status = "skipped".into();
+                    remaining.error = Some("本轮已停止，未发送".into());
+                }
+                save_deliveries(folder, &deliveries)?;
+                history::log(
+                    folder,
+                    0,
+                    "failed",
+                    &format!(
+                        "已发送 {completed}/{}；「{}」：{error}",
+                        targets.len(),
+                        target.title
+                    ),
+                )?;
+                return Err(format!(
+                    "已发送 {completed}/{}，本轮已停止：「{}」{error}；逐会话记录已保存",
+                    targets.len(),
+                    target.title
+                ));
+            }
+        }
+        save_deliveries(folder, &deliveries)?;
+        history::log(
+            folder,
+            i + 1,
+            "sent",
+            &format!("已发送 {completed}/{}：{}", targets.len(), target.title),
+        )?;
+        if i + 1 < targets.len() {
+            thread::sleep(Duration::from_millis(input.interval_ms));
+        }
+    }
+    home(device, folder)?;
+    Ok(BTreeMap::from([
+        (
+            "send_status".into(),
+            format!("已发送 {completed}/{} 个会话", targets.len()),
+        ),
+        ("recipient_source".into(), list.source),
+    ]))
 }
 
 fn outgoing_count(doc: &Document<'_>, text: &str) -> usize {
@@ -366,6 +766,16 @@ mod tests {
 
     const HOME: &str = include_str!("../tests/fixtures/wechat-home.xml");
     const CHAT: &str = include_str!("../tests/fixtures/wechat-chat.xml");
+
+    #[test]
+    fn recipient_pages_merge_overlap_but_reject_ambiguous_names() {
+        let mut names = vec!["A".into(), "B".into(), "C".into()];
+        merge_page(&mut names, &["C".into(), "D".into()]).unwrap();
+        assert_eq!(names, vec!["A", "B", "C", "D"]);
+        assert!(merge_page(&mut names, &["X".into(), "X".into()]).is_err());
+        assert!(merge_page(&mut names, &["A".into(), "E".into()]).is_err());
+        assert_eq!(row_names(HOME).unwrap(), vec!["测试联系人", "第二个联系人"]);
+    }
     struct Fake {
         screens: RefCell<VecDeque<String>>,
         calls: RefCell<Vec<(String, Value)>>,
@@ -488,6 +898,24 @@ mod tests {
             .unwrap()
             .contains("send_observed"));
         fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn never_clicks_send_when_the_intent_cannot_be_saved() {
+        let root = folder();
+        fs::create_dir(root.join("events.jsonl")).unwrap();
+        let device = fake(vec![CHAT.into(), typed()], false);
+        assert!(send_text(
+            &device,
+            &Chat {
+                title: "测试联系人".into()
+            },
+            "你好",
+            &root
+        )
+        .is_err());
+        assert!(!device.calls.borrow().iter().any(|c| c.0 == "click"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

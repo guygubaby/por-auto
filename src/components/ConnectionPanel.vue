@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ArrowRight, Cable, Check, Download, Play, RefreshCw, ShieldCheck, Smartphone, Usb } from '@lucide/vue';
+import { ref } from 'vue';
+import { ArrowRight, Cable, Check, Download, Play, RefreshCw, ShieldCheck, Smartphone, Settings2, Usb } from '@lucide/vue';
 import { storeToRefs } from 'pinia';
 import { RouterLink } from 'vue-router';
 import { useConnectionStore } from '../useConnection';
@@ -7,9 +8,11 @@ import AppButton from './AppButton.vue';
 import DeviceRunProgress from './DeviceRunProgress.vue';
 import DevicePicker from './DevicePicker.vue';
 import StatusPill from './StatusPill.vue';
+import WorkflowConfigDialog from './WorkflowConfigDialog.vue';
+const configuringRef = ref(false);
 
 const connection = useConnectionStore();
-const { environmentRef, selectedSerialsRef, busyRef, runningRef, progressRef, deviceRunsRef, batchSummaryRef, readyDevicesRef, selectedDevicesRef, storeRef, workflowKeyRef, selectedWorkflowRef } = storeToRefs(connection);
+const { environmentRef, selectedSerialsRef, busyRef, runningRef, stoppingRef, progressRef, deviceRunsRef, batchSummaryRef, readyDevicesRef, selectedDevicesRef, storeRef, workflowKeyRef, selectedWorkflowRef } = storeToRefs(connection);
 const { refresh, initialize, runWorkflow } = connection;
 const stateLabels: Record<string, string> = { device: '可以使用', unauthorized: '等待手机授权', offline: '设备离线', recovery: '恢复模式', sideload: '刷机模式', no: '连接权限不足' };
 </script>
@@ -47,9 +50,10 @@ const stateLabels: Record<string, string> = { device: '可以使用', unauthoriz
       </ul>
       <p v-if="environmentRef?.devices.some(d => d.state === 'unauthorized')" class="mt-3 rounded-control bg-warning-soft p-3 text-xs leading-5 text-warning">请查看手机上的「允许 USB 调试」弹窗，勾选「始终允许」并确认，再刷新设备。</p>
       <div class="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-line pt-4">
-        <div class="w-full"><label for="workflow" class="mb-2 block text-xs text-ink-muted">已安装的工作流</label><select id="workflow" v-model="workflowKeyRef" class="min-h-8 w-full rounded-control border border-line bg-surface-soft px-3 py-2 text-sm pointer-coarse:min-h-11" :disabled="busyRef"><option v-for="item in storeRef.installed" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }} · {{ item.registryUrl.replace('https://github.com/', '') }} / {{ item.reference }}</option></select><p class="mt-2 text-xs leading-5 text-ink-muted">{{ selectedWorkflowRef?.workflow.description }}</p></div>
+        <div class="w-full"><label for="workflow" class="mb-2 block text-xs text-ink-muted">已安装的工作流</label><select id="workflow" v-model="workflowKeyRef" class="min-h-8 w-full rounded-control border border-line bg-surface-soft px-3 py-2 text-sm pointer-coarse:min-h-11" :disabled="busyRef"><option v-for="item in storeRef.installed" :key="item.key" :value="item.key">{{ item.workflow.name }} · {{ item.workflow.version }} · {{ item.registryUrl.replace('https://github.com/', '') }} / {{ item.reference }}</option></select><p class="mt-2 text-xs leading-5 text-ink-muted">{{ selectedWorkflowRef?.workflow.description }}</p><p v-if="selectedWorkflowRef?.workflow.inputSchema && !selectedWorkflowRef.input" class="mt-2 text-xs text-warning">先点击「配置输入与运行前后操作」，设置消息与接收会话后即可运行。</p></div>
+        <AppButton v-if="selectedWorkflowRef" variant="secondary" :disabled="busyRef" @click="configuringRef = true"><Settings2 :size="14" />配置输入与运行前后操作</AppButton>
         <DevicePicker v-model="selectedSerialsRef" :devices="readyDevicesRef" :disabled="busyRef" />
-        <div class="flex w-full flex-wrap items-center justify-between gap-3"><p class="text-xs text-ink-secondary" aria-live="polite">{{ runningRef ? `运行中 ${batchSummaryRef.running} 台 · 排队 ${batchSummaryRef.queued} 台 · 已处理 ${batchSummaryRef.done} / ${batchSummaryRef.total} 台` : `已选择 ${selectedDevicesRef.length} 台手机` }}</p><AppButton :loading="runningRef" :disabled="busyRef || !selectedDevicesRef.length || !selectedWorkflowRef" @click="runWorkflow"><Play v-if="!runningRef" :size="15" aria-hidden="true" />{{ runningRef ? '正在执行…' : `${selectedWorkflowRef?.workflow.steps.some(step => step.action?.type === 'wechat_send_text') ? '运行并发送' : '运行工作流'}${selectedDevicesRef.length ? `（${selectedDevicesRef.length} 台）` : ''}` }}</AppButton></div>
+        <div class="flex w-full flex-wrap items-center justify-between gap-3"><p class="text-xs text-ink-secondary" aria-live="polite">{{ runningRef ? `运行中 ${batchSummaryRef.running} 台 · 排队 ${batchSummaryRef.queued} 台 · 已处理 ${batchSummaryRef.done} / ${batchSummaryRef.total} 台` : `已选择 ${selectedDevicesRef.length} 台手机` }}</p><AppButton v-if="runningRef" variant="secondary" :disabled="stoppingRef" @click="connection.stopWorkflows">{{ stoppingRef ? '正在停止…' : '停止后续操作' }}</AppButton><AppButton :loading="runningRef" :disabled="busyRef || !selectedDevicesRef.length || !selectedWorkflowRef || (!!selectedWorkflowRef.workflow.inputSchema && !selectedWorkflowRef.input)" @click="runWorkflow"><Play v-if="!runningRef" :size="15" aria-hidden="true" />{{ runningRef ? '正在执行…' : `${selectedWorkflowRef?.workflow.steps.some(step => ['wechat_send_text', 'wechat_broadcast'].includes(step.action?.type ?? '')) ? '运行并发送' : '运行工作流'}${selectedDevicesRef.length ? `（${selectedDevicesRef.length} 台）` : ''}` }}</AppButton></div>
       </div>
       <div v-if="!runningRef || deviceRunsRef.length === 1" class="mt-4 rounded-control bg-canvas/60 px-4 py-3">
         <ol class="flex flex-wrap items-center gap-2 text-xs text-ink-muted" role="list">
@@ -60,6 +64,7 @@ const stateLabels: Record<string, string> = { device: '可以使用', unauthoriz
       <DeviceRunProgress v-if="runningRef" :runs="deviceRunsRef" />
     </section>
 
+    <WorkflowConfigDialog :item="configuringRef ? selectedWorkflowRef ?? null : null" @close="configuringRef = false" />
     <RouterLink v-if="deviceRunsRef.length" to="/results" class="block rounded-control border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand-strong">{{ runningRef ? `已处理 ${batchSummaryRef.done} / ${batchSummaryRef.total} 台手机` : `本次执行 ${batchSummaryRef.total} 台手机，成功 ${batchSummaryRef.succeeded} 台，失败 ${batchSummaryRef.failed} 台` }} · 查看每台手机的运行结果</RouterLink>
   </div>
 </template>

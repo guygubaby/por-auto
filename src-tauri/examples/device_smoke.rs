@@ -6,8 +6,8 @@ mod android;
 #[path = "../src/history.rs"]
 mod history;
 #[allow(dead_code)]
-#[path = "../src/ocr.rs"]
-mod ocr;
+#[path = "../src/send_input.rs"]
+mod send_input;
 #[allow(dead_code)]
 #[path = "../src/u2.rs"]
 mod u2;
@@ -39,8 +39,9 @@ fn main() {
         .join("../work/real-device-debug-cache")
         .join(format!("{}-{}", flow.id, history::now()));
     fs::create_dir_all(&folder).unwrap();
-    let result = workflow::execute(
+    let result = workflow::execute_with_input(
         &flow,
+        None,
         &PathBuf::from(&args[1]),
         &args[0],
         &PathBuf::from(&args[2]),

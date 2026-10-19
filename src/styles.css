@@ -36,12 +36,12 @@
   --radius-control: 0.5rem;
 }
 
-:root { color-scheme: dark; font-family: var(--font-sans); color: var(--color-ink); background: var(--color-canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+:root { forced-color-adjust: none; color-scheme: dark; font-family: var(--font-sans); color: var(--color-ink); background: var(--color-canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; min-width: 360px; height: 100%; }
 body { font-size: var(--text-sm); line-height: 1.5; background: radial-gradient(ellipse at 70% 0%, #6d7cff09, transparent 60%), var(--color-canvas); }
 button:not(:disabled), select:not(:disabled) { cursor: pointer; }
-:where(button, a, input, select, summary):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 2px; }
+:where(button, a, input, textarea, select, summary):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 2px; }
 ::selection { background: #6d7cff60; color: white; }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-thumb { background: #a8b0c038; border-radius: 8px; }

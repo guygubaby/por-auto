@@ -3,9 +3,9 @@
 mod android;
 mod history;
 mod jobs;
-mod ocr;
 mod registry;
 mod schedule;
+mod send_input;
 mod u2;
 mod updater;
 mod wechat;
@@ -297,6 +297,112 @@ async fn install_workflow(
 }
 
 #[tauri::command]
+async fn uninstall_workflow(app: AppHandle, key: String) -> Reply<registry::Store> {
+    blocking(move || {
+        let jobs = app.state::<Jobs>();
+        let _guard = jobs
+            .maintenance
+            .try_write()
+            .map_err(|_| "请等待工作流运行结束后卸载")?;
+        app.state::<schedule::Scheduler>().pause_workflow(&key)?;
+        let store = registry::uninstall(&data_dir(&app)?, &key)?;
+        let _ = app.emit("schedules-changed", ());
+        Ok(store)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn configure_workflow(
+    app: AppHandle,
+    key: String,
+    input: Option<send_input::SendInput>,
+    hooks: send_input::Hooks,
+    secrets: BTreeMap<String, String>,
+) -> Reply<registry::Store> {
+    blocking(move || {
+        let jobs = app.state::<Jobs>();
+        let _guard = jobs
+            .maintenance
+            .try_write()
+            .map_err(|_| "请等待当前任务结束再保存配置")?;
+        registry::configure(&data_dir(&app)?, &key, input, hooks, &secrets)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn test_http_request(
+    request: send_input::Request,
+    secret: Option<String>,
+) -> Reply<send_input::Preview> {
+    blocking(move || {
+        let context=serde_json::json!({"run":{"id":"test-preview","status":"completed","error":null},"workflow":{"id":"test-workflow","name":"测试工作流","version":"1.0.0"},"device":{"serial":"test-device"},"recipient":{"title":"测试会话","index":1,"total":1},"outputs":{"nickname":"测试昵称","send_status":"测试结果","before_hook":"测试数据"}});
+        request.with_context(&context)?.preview(secret.as_deref().filter(|s| !s.is_empty()))
+    }).await
+}
+
+#[tauri::command]
+async fn parse_http_response(raw: String, response: send_input::Response) -> Reply<String> {
+    if raw.len() > 1_048_576 {
+        return Err("解析样本不能超过 1 MiB".into());
+    }
+    send_input::parse(&raw, &response)
+}
+
+#[tauri::command]
+async fn list_wechat_targets(
+    app: AppHandle,
+    serial: String,
+    scope: send_input::Scope,
+) -> Reply<wechat::TargetList> {
+    blocking(move || {
+        if !schedule::valid_serial(&serial) {
+            return Err("请选择有效手机".into());
+        }
+        let jobs = app.state::<Jobs>();
+        let _permit = jobs.acquire(&serial)?;
+        _permit.check()?;
+        let adb = adb_path(&app)?;
+        let folder = data_dir(&app)?
+            .join("recipient-scan")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let result = (|| {
+            android::text(
+                &adb,
+                &[
+                    "-s",
+                    &serial,
+                    "shell",
+                    "input",
+                    "keyevent",
+                    "KEYCODE_WAKEUP",
+                ],
+            )?;
+            android::text(
+                &adb,
+                &[
+                    "-s",
+                    &serial,
+                    "shell",
+                    "am",
+                    "start",
+                    "-n",
+                    "com.tencent.mm/com.tencent.mm.ui.LauncherUI",
+                ],
+            )?;
+            thread::sleep(Duration::from_millis(1600));
+            let device = u2::Session::start(&adb, &serial, &resource(&app, "u2.jar")?, &folder)?;
+            wechat::discover_progress(&device, &folder, scope, |_| _permit.check())
+        })();
+        let _ = fs::remove_dir_all(folder);
+        result
+    })
+    .await
+}
+
+#[tauri::command]
 async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> Reply<RunResult> {
     blocking(move || {
         if !schedule::valid_serial(&serial) {
@@ -310,6 +416,17 @@ async fn run_workflow(app: AppHandle, serial: String, workflow_key: String) -> R
         run_installed(&app, serial, installed, None)
     })
     .await
+}
+
+#[tauri::command]
+fn cancel_device_tasks(app: AppHandle, serials: Vec<String>) -> Reply<()> {
+    if serials.len() > 100 || serials.iter().any(|s| !schedule::valid_serial(s)) {
+        return Err("设备列表无效".into());
+    }
+    for serial in serials {
+        app.state::<Jobs>().cancel(&serial)?;
+    }
+    Ok(())
 }
 
 fn run_installed(
@@ -329,6 +446,14 @@ fn run_installed(
     );
     let jobs = app.state::<Jobs>();
     let _permit = jobs.acquire(&serial)?;
+    _permit.check()?;
+    if !registry::load(&data_dir(app)?)?
+        .installed
+        .iter()
+        .any(|w| w.key == installed.key)
+    {
+        return Err("此工作流已卸载，请重新安装后运行".into());
+    }
     let adb = adb_path(app)?;
     let (id, folder) = history::create_folder(&data_dir(app)?.join("runs"))?;
     let timestamp = history::now();
@@ -352,28 +477,101 @@ fn run_installed(
     .map_err(|e| e.to_string())?;
     history::log(&folder, 0, "started", "工作流开始，检查设备与目标应用")?;
     let total = installed.workflow.steps.len();
-    let read = workflow::execute(
-        &installed.workflow,
-        &adb,
-        &serial,
-        &resource(app, "u2.jar")?,
-        &folder,
-        |step, count, message, status| {
-            history::log(&folder, step, status, message)?;
-            if status == "started" {
-                progress(
-                    app,
-                    dispatch.is_some(),
-                    &serial,
-                    &installed.key,
-                    step.max(1),
-                    count,
-                    message,
-                );
+    let context = serde_json::json!({"run":{"id":summary.id,"status":"running"},"workflow":{"id":installed.workflow.id,"name":installed.workflow.name,"version":installed.workflow.version},"device":{"serial":serial},"outputs":{}});
+    let mut read = (|| {
+        let before = if let Some(request) = &installed.hooks.before_run {
+            history::log(&folder, 0, "started", "前置 Hook：请求并解析数据")?;
+            let preview = request.with_context(&context)?.fetch(None)?;
+            history::log(
+                &folder,
+                0,
+                "completed",
+                &format!(
+                    "前置 Hook 完成，HTTP {}，{} ms",
+                    preview.status, preview.elapsed_ms
+                ),
+            )?;
+            Some(preview.message)
+        } else {
+            None
+        };
+        let mut input = installed.input.clone();
+        if let Some(input) = &mut input {
+            if matches!(input.message, send_input::Message::BeforeRun) {
+                let text = before
+                    .clone()
+                    .ok_or("消息来源为前置 Hook，但未配置前置请求")?;
+                send_input::validate_message(&text)?;
+                input.message = send_input::Message::Manual { text };
             }
-            Ok(())
-        },
-    );
+        }
+        let mut outputs = workflow::execute_with_input(
+            &installed.workflow,
+            input.as_ref(),
+            &adb,
+            &serial,
+            &resource(app, "u2.jar")?,
+            &folder,
+            |step, count, message, status| {
+                _permit.check()?;
+                history::log_step(
+                    &folder,
+                    step,
+                    step.checked_sub(1)
+                        .and_then(|i| installed.workflow.steps.get(i))
+                        .and_then(|s| s.id.as_deref()),
+                    status,
+                    message,
+                )?;
+                if status == "started" {
+                    progress(
+                        app,
+                        dispatch.is_some(),
+                        &serial,
+                        &installed.key,
+                        step.max(1),
+                        count,
+                        message,
+                    );
+                }
+                Ok(())
+            },
+        )?;
+        if let Some(value) = before {
+            outputs.insert("before_hook".into(), value);
+        }
+        Ok::<_, String>(outputs)
+    })();
+    let mut hook_warning = None;
+    if let Some(request) = &installed.hooks.after_run {
+        let mut context = context.clone();
+        context["run"]["status"] =
+            serde_json::json!(if read.is_ok() { "completed" } else { "failed" });
+        context["run"]["error"] = serde_json::json!(read.as_ref().err());
+        context["outputs"] = serde_json::json!(read.as_ref().ok().cloned().unwrap_or_default());
+        let result = (|| {
+            history::log(&folder, 0, "started", "后置 Hook：回传本轮结果")?;
+            let preview = request.with_context(&context)?.fetch(None)?;
+            history::log(
+                &folder,
+                0,
+                "completed",
+                &format!("后置 Hook 完成，HTTP {}", preview.status),
+            )?;
+            Ok::<_, String>(())
+        })();
+        if let Err(error) = result {
+            history::log(
+                &folder,
+                0,
+                "warning",
+                &format!("后置 Hook 失败：{error}；不会重新发送消息"),
+            )?;
+            hook_warning = Some(format!("后置 Hook 失败：{error}；手机动作不会重跑"));
+        } else if let Ok(outputs) = &mut read {
+            outputs.insert("after_hook".into(), "已完成结果回调".into());
+        }
+    }
     if let Err(error) = &read {
         history::log(&folder, 0, "failed", error)?;
     }
@@ -385,7 +583,11 @@ fn run_installed(
             fs::write(folder.join("screen.png"), &bytes).map_err(|e| e.to_string())?;
             Ok(STANDARD.encode(bytes))
         });
-    let warning = screenshot.as_ref().err().cloned();
+    let warning = match (hook_warning, screenshot.as_ref().err()) {
+        (Some(a), Some(b)) => Some(format!("{a}；截图：{b}")),
+        (Some(a), None) => Some(a),
+        (None, b) => b.cloned(),
+    };
     if let Some(message) = &warning {
         history::log(&folder, 0, "warning", message)?;
     }
@@ -680,7 +882,7 @@ fn run_schedule_logged(app: &AppHandle, dispatch: &schedule::Dispatch) -> Reply<
     fs::write(
         folder.join("result.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
-            "schedule": task, "trigger": dispatch.trigger, "scheduledAt": dispatch.scheduled_at,
+            "schedule": {"id":task.id,"name":task.name,"cron":task.cron,"timezone":task.timezone,"serials":task.serials,"workflowKey":task.snapshot.key,"workflowVersion":task.snapshot.workflow.version}, "trigger": dispatch.trigger, "scheduledAt": dispatch.scheduled_at,
             "status": status, "message": message, "devices": results
         }))
         .map_err(|e| e.to_string())?,
@@ -760,7 +962,13 @@ fn main() {
             sync_registry,
             remove_registry,
             install_workflow,
+            uninstall_workflow,
+            configure_workflow,
+            test_http_request,
+            parse_http_response,
+            list_wechat_targets,
             run_workflow,
+            cancel_device_tasks,
             open_results,
             list_runs,
             run_details,

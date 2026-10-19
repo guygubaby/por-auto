@@ -9,7 +9,7 @@ import StatusPill from './StatusPill.vue';
 
 interface Summary { id: string; workflow_name: string; workflow_version: string; serial: string; timestamp: number; status: string; error: string | null; schedule_id?: string | null; schedule_name?: string | null; trigger?: string | null }
 interface Event { timestamp?: number; step?: number; status: string; message: string }
-interface Details { summary: Summary; logs: Event[] }
+interface Details { summary: Summary; logs: Event[]; targets?: { title: string; status: string; error: string | null; updatedAt: number }[] }
 const props = defineProps<{ busy: boolean; runTimestamp?: number }>();
 const emit = defineEmits<{ busyChange: [value: boolean] }>();
 const route = useRoute();
@@ -23,7 +23,7 @@ const errorRef = ref('');
 const pendingDeleteRef = shallowRef<string[]>([]);
 const confirmRef = useTemplateRef<HTMLDialogElement>('confirm');
 const allSelectedRef = computed(() => recordsRef.value.length > 0 && selectedRef.value.length === recordsRef.value.length);
-const statusNames: Record<string, string> = { completed: '已完成', failed: '失败', running: '执行中 / 中断', partial: '部分失败', skipped: '已跳过', interrupted: '已中断', started: '开始', warning: '提示', incomplete: '日志中断' };
+const statusNames: Record<string, string> = { completed: '已完成', failed: '失败', running: '执行中 / 中断', partial: '部分失败', skipped: '已跳过', interrupted: '已中断', started: '开始', warning: '提示', incomplete: '日志中断', pending: '待发送', sending: '发送中', sent: '已发送', uncertain: '结果待核对' };
 let unlisten: UnlistenFn | undefined;
 let disposed = false;
 
@@ -119,6 +119,7 @@ watch(scheduleIdRef, () => {
     <div v-if="detailRef" class="mt-4 rounded-control border border-line bg-canvas p-3">
       <h3 class="text-sm font-medium">{{ detailRef.summary.workflow_name }} · 运行日志</h3>
       <p v-if="detailRef.summary.error" class="mt-3 break-words text-xs leading-5 text-danger">{{ detailRef.summary.error }}</p>
+      <div v-if="detailRef.targets?.length" class="mt-3 overflow-auto"><h4 class="mb-2 text-xs font-medium">逐会话结果 · {{ detailRef.targets.filter(t => t.status === 'sent').length }} / {{ detailRef.targets.length }} 已发送</h4><table class="w-full text-left text-xs"><caption class="sr-only">每个接收会话的发送结果</caption><thead><tr class="border-b border-line text-ink-muted"><th class="py-2 font-normal">会话</th><th class="py-2 font-normal">状态</th><th class="py-2 font-normal">详情</th></tr></thead><tbody><tr v-for="target in detailRef.targets" :key="target.title" class="border-b border-line/40"><td class="py-2 pr-3 wrap-anywhere">{{ target.title }}</td><td class="whitespace-nowrap py-2 pr-3" :class="target.status === 'sent' ? 'text-success' : 'text-warning'">{{ statusNames[target.status] ?? target.status }}</td><td class="py-2 text-ink-muted wrap-anywhere">{{ target.error ?? '—' }}</td></tr></tbody></table></div>
       <ol class="mt-3 max-h-72 space-y-2 overflow-auto text-xs" role="list"><li v-for="(event, index) in detailRef.logs" :key="index" class="flex flex-wrap gap-x-3 gap-y-1 border-b border-line/40 py-2"><time class="text-ink-muted">{{ event.timestamp ? new Date(event.timestamp).toLocaleTimeString('zh-CN') : '时间未知' }}</time><span :class="event.status === 'failed' ? 'text-danger' : 'text-brand-strong'">{{ statusNames[event.status] ?? event.status }}{{ event.step ? ` · 步骤 ${event.step}` : '' }}</span><span class="break-words text-ink-secondary">{{ event.message }}</span></li></ol>
     </div>
     <p class="mt-3 text-xs leading-5 text-ink-muted">每次最多导出 100 条。JSON 包含步骤日志、错误、工作流版本及已有的截图与页面数据，导出后可发给开发者定位问题。</p>

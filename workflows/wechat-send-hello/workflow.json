@@ -1,16 +1,51 @@
 {
   "schemaVersion": 1,
-  "minEngine": 2,
+  "minEngine": 3,
   "id": "wechat-send-hello",
-  "name": "向首个会话发送你好",
-  "version": "1.0.0",
-  "description": "真实发送：向运行时微信列表顶部的第一个会话（含置顶）发送一次「你好」。已有草稿或页面不匹配时停止；发送结果不明时请人工核对后再决定是否重跑。需简体中文原版微信、已登录且手机已解锁。",
+  "name": "向文件传输助手发送 1",
+  "version": "2.0.0",
+  "description": "打开微信，返回会话列表，精确查找文件传输助手并发送一次「1」。保留已有草稿；发送结果不明时停止，不自动重发。",
   "package": "com.tencent.mm",
   "steps": [
-    { "name": "唤醒手机", "action": { "type": "wake" } },
-    { "name": "打开微信", "action": { "type": "launch", "activity": "com.tencent.mm.ui.LauncherUI" } },
-    { "name": "等待页面显示", "action": { "type": "wait", "ms": 1600 } },
-    { "name": "进入并核对首个会话", "action": { "type": "wechat_first_chat", "output": "chat_title" } },
-    { "name": "输入你好并发送一次", "action": { "type": "wechat_send_text", "text": "你好" } }
+    {
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      },
+      "id": "step-1"
+    },
+    {
+      "name": "打开微信",
+      "action": {
+        "type": "launch",
+        "activity": "com.tencent.mm.ui.LauncherUI"
+      },
+      "id": "step-2"
+    },
+    {
+      "name": "等待页面显示",
+      "action": {
+        "type": "wait",
+        "ms": 1600
+      },
+      "id": "step-3"
+    },
+    {
+      "name": "进入文件传输助手",
+      "action": {
+        "type": "wechat_open_chat",
+        "target": "文件传输助手",
+        "output": "chat_title"
+      },
+      "id": "step-4"
+    },
+    {
+      "name": "输入1并发送一次",
+      "action": {
+        "type": "wechat_send_text",
+        "text": "1"
+      },
+      "id": "step-5"
+    }
   ]
 }
