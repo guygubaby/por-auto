@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import test from 'node:test';
-import { mobileWechatDefinitions } from './mobile-scripts.mjs';
+import { mobileWechatDefinitions, buildMobileCatalog } from './mobile-scripts.mjs';
 
 const require = createRequire(import.meta.url);
 const modules = new Map();
@@ -23,10 +23,38 @@ const definitions = loadMobile(mobilePath + 'definitions.js');
 const markers = loadMobile(mobilePath + 'markers.js');
 const provider = loadMobile(mobilePath + 'provider.js');
 const capture = loadMobile(mobilePath + 'capture.js');
+const wecomNative = loadMobile(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)));
 const workflow = id => definitions.workflows.find(w => w.id === id);
 const pair = (role, text, point, value = null) => ({ role, text, point, value, complete: true });
 const request = (response = { type: 'text' }) => ({ url: 'https://example.invalid/message', method: 'GET', query: [], headers: [], auth: { type: 'none' }, body: null, response, timeoutSeconds: 20 });
 const input = (message = { type: 'manual', text: 'Ok' }, names = ['群甲', '群乙']) => ({ message, recipients: { scope: 'groups', mode: 'selected', names }, intervalMs: 1000 });
+
+test('a sliding WeCom sidebar cannot be mistaken for the normal messages page', () => {
+  const nodes = [
+    { id: 'ncq', text: '消息', bounds: [489,121,591,190], visible: true, enabled: true },
+    { id: 'czp', text: '', bounds: [0,228,1080,2111], visible: true, enabled: true },
+    { id: 'fg8', text: '全部', bounds: [109,281,168,331], visible: true, enabled: true },
+  ];
+  assert.equal(wecomNative.homeReady(nodes,1080),true);
+  const drawer = structuredClone(nodes); drawer[1].bounds[0]=994;
+  assert.equal(wecomNative.homeReady(drawer,1080),false);
+  drawer[0].bounds=[1483,121,1080,190]; drawer[0].visible=false;
+  assert.equal(wecomNative.homeReady(drawer,1080),false);
+});
+
+test('native workflow cleanup leaves the timer wake session owned by the launcher', () => {
+  for (const shared of [false, true]) {
+    const calls = { awake: 0, release: 0, check: 0 };
+    const module = { exports: {} };
+    const sandbox = { module, require: () => ({ create: () => ({}) }), auto: { service: {} },
+      device: { keepScreenDim: () => calls.awake++, cancelKeepingAwake: () => calls.release++ },
+      android: { view: { accessibility: { AccessibilityNodeInfo: {} } } } };
+    vm.runInNewContext(readFileSync(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)), 'utf8'), sandbox);
+    const io = module.exports.create({ screenSession: shared ? { check: () => calls.check++ } : null }, {});
+    io.prepare(); io.finish();
+    assert.deepEqual(calls, shared ? { awake: 0, release: 0, check: 1 } : { awake: 1, release: 1, check: 0 });
+  }
+});
 
 function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '群乙'], groupTitles = false, profileTitle = '个人信息', nicknameLabel = '昵称' } = {}) {
   const state = { page: 'me', pageIndex: 0, query: '', title: '', draft: existingDraft, outgoing: [], sendClicks: 0, requests: [], records: [], typed: [], clears: 0, logs: [] };
@@ -93,6 +121,37 @@ test('mobile bundle contains the five exact desktop workflow definitions and obs
   assert.equal(await readFile(new URL('../mobile-workflows/wechat-suite/src/definitions.js', import.meta.url), 'utf8'), await mobileWechatDefinitions());
   assert.equal(definitions.workflows.length, 5);
   for (const mobile of definitions.workflows) assert.deepEqual(mobile, JSON.parse(await readFile(new URL('../workflows/' + mobile.id + '/workflow.json', import.meta.url), 'utf8')));
+});
+
+test('every published native package file exists at the exact path used by GitHub online installs', async () => {
+  const { catalog } = await buildMobileCatalog();
+  const native = catalog.workflows.find(item => item.id === 'wecom-suite');
+  assert.ok(native);
+  const names = [];
+  for (const file of native.files) {
+    const bytes = await readFile(new URL('../mobile-workflows/wecom-suite/src/' + file.path, import.meta.url));
+    assert.equal(bytes.length, file.size); names.push(file.path);
+  }
+  assert.ok(names.includes('core.js') && names.includes('request.js') && names.includes('wecom.js'));
+});
+
+test('native WeCom definitions reuse the message lifecycle, freshness and rehearsal checks without a model', async () => {
+  for (const id of ['wecom-open', 'wecom-nickname', 'wecom-first-chat', 'wecom-broadcast']) {
+    const workflow = JSON.parse(await readFile(new URL('../workflows/' + id + '/workflow.json', import.meta.url), 'utf8'));
+    const { io, state } = fixture();
+    io.package = 'com.tencent.wework';
+    io.home = () => { state.page = 'home'; state.pageIndex = 0; return io.observe(); };
+    io.recipientPage = scope => { state.page = scope === 'groups' ? 'groups' : 'home'; state.pageIndex = 0; return io.observe(); };
+    io.openNamed = title => { assert.ok(['群甲', '群乙'].includes(title)); state.title = title; state.page = 'chat'; };
+    io.nickname = () => '测试姓名';
+    const result = core.create(io).run(workflow, { dryRun: true, hooks: { beforeRun: request(), afterRun: request({ type: 'ignore' }) }, input: input({ type: 'http', request: request(), refresh: 'recipient' }) });
+    assert.equal(state.sendClicks, 0); assert.equal(state.records.at(-1).status, 'completed');
+    if (id === 'wecom-nickname') assert.equal(result.nickname, '测试姓名');
+    if (id === 'wecom-broadcast') {
+      assert.deepEqual(state.typed, ['fresh-2', 'fresh-3']); assert.equal(state.clears, 2);
+      assert.equal(state.requests.length, 4); assert.ok(state.records.at(-1).targets.every(t => t.status === 'rehearsed'));
+    }
+  }
 });
 
 test('all five workflows run through the mobile controller; rehearsal clears its draft and never sends', () => {

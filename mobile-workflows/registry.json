@@ -29,15 +29,15 @@
       "name": "微信手机工作流（预览）",
       "description": "预览版，微信页面兼容性正在验收。在手机独立执行打开微信、读取昵称、首个会话、文件传输助手和批量消息工作流。支持消息配置、HTTP 获取和生命周期请求；默认预演，不点击发送。需要无障碍服务、截图授权和可访问的图像模型接口。",
       "version": "1.0.0",
-      "versionCode": 22,
+      "versionCode": 25,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
           "path": "android.js",
-          "size": 33982,
-          "sha256": "2bf0c1360d706ff51b304c27d07b85cf5339d61a2aec52bb94758faba290e677"
+          "size": 34171,
+          "sha256": "393820afd830d2479a9f104b81a879e069840b2b0fe21cf6436c6ec6d76bd665"
         },
         {
           "path": "capture.js",
@@ -46,8 +46,8 @@
         },
         {
           "path": "core.js",
-          "size": 21333,
-          "sha256": "6bf979464d08b2778ef137f7104c3b5cefac276eeb9601b64cf8a440f1289565"
+          "size": 22112,
+          "sha256": "5ef1df4709940b3f157ff7fa6038b9290b13e3e56ad5e30783c49d9da395be01"
         },
         {
           "path": "definitions.js",
@@ -56,8 +56,8 @@
         },
         {
           "path": "main.js",
-          "size": 15799,
-          "sha256": "9ea34f0b1b3a2a459816d5b3c95be23a7f7ef4c59970bdfaac4f4b9e633f8ccf"
+          "size": 16316,
+          "sha256": "e3796caac52d0e1674e184284d7a8c21c1174723b491e126d6f9794fa9461aae"
         },
         {
           "path": "markers.js",
@@ -73,6 +73,63 @@
           "path": "request.js",
           "size": 6855,
           "sha256": "e5fcde727c1314d0808ea7c52dbe2a6b089831e31318294a43f328db86149c5f"
+        }
+      ]
+    },
+    {
+      "id": "wecom-suite",
+      "name": "企业微信手机工作流",
+      "description": "在手机独立运行打开企业微信、读取姓名、首个会话和批量消息。消息支持手动或 HTTP，群聊和首页会话支持勾选或全部，包含前后置请求和定时任务。通过原生控件执行，无需图像模型；默认预演，不点击发送。",
+      "version": "1.0.0",
+      "versionCode": 8,
+      "minLauncher": 1,
+      "minAutoJs6": "6.7.0",
+      "entry": "main.js",
+      "files": [
+        {
+          "path": "android.js",
+          "size": 34234,
+          "sha256": "5ba834dc29016632ec5fba25038bb0bd85950b3f0cd33715c76a9d7d214b5343"
+        },
+        {
+          "path": "capture.js",
+          "size": 547,
+          "sha256": "33feb3cc98f033e46df95e7a63579e9a32b9455eb78158b3c290a5d1616ed22b"
+        },
+        {
+          "path": "core.js",
+          "size": 22172,
+          "sha256": "2ef89d8709c2614ac41d5f62b845ffa7eceadfaa452cfcb00d37bf47820e8070"
+        },
+        {
+          "path": "definitions.js",
+          "size": 4337,
+          "sha256": "202ec0ecccf646844dbe392998208ba383726c3c4089a31de583443127d8fdf1"
+        },
+        {
+          "path": "main.js",
+          "size": 16376,
+          "sha256": "19c2e3bc65a569002a05b5243f5dc8a25797a5a493cc795586def73dd63f6bbf"
+        },
+        {
+          "path": "markers.js",
+          "size": 8712,
+          "sha256": "1030eb513af7eb84875d62ef1054c06c5a6bbcff0f8cdc57515dc59bbea802e9"
+        },
+        {
+          "path": "provider.js",
+          "size": 538,
+          "sha256": "124282edf3b9b9d2b8c2df702b1af309370cb3f11034dcb08cb7879702189883"
+        },
+        {
+          "path": "request.js",
+          "size": 6918,
+          "sha256": "150d4c3d35b0e96ec7f9e7194ad6315a596140a00ddf562ddf45f764ec7c5eac"
+        },
+        {
+          "path": "wecom.js",
+          "size": 14203,
+          "sha256": "f19b84cfaa34534997a8827a5b3734c1e34522a35ab8878bf9e4266bcca6d005"
         }
       ]
     }

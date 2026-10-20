@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "por-auto://schemas/chat-send-input/v1",
+  "title": "Por Auto 聊天消息输入 v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "message",
+    "recipients"
+  ],
+  "properties": {
+    "message": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text"
+          ],
+          "properties": {
+            "type": {
+              "const": "manual"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "description": "运行器额外限制为最多 4000 UTF-8 字节，不接受空白内容或控制字符（换行、制表除外）。"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "before_run"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "request",
+            "refresh"
+          ],
+          "properties": {
+            "type": {
+              "const": "http"
+            },
+            "request": {
+              "$ref": "#/$defs/request"
+            },
+            "refresh": {
+              "enum": [
+                "run",
+                "recipient"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "recipients": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "mode"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "groups",
+            "conversations"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "all",
+            "selected"
+          ]
+        },
+        "names": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "selected"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "names": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "names"
+            ]
+          }
+        }
+      ]
+    },
+    "intervalMs": {
+      "type": "integer",
+      "minimum": 500,
+      "maximum": 60000,
+      "default": 1000
+    }
+  },
+  "$defs": {
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "text"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "ignore"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "json"
+            },
+            "pointer": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "type",
+            "pointer"
+          ]
+        }
+      ]
+    },
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "none"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "bearer"
+            },
+            "credential": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "credential"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "basic"
+            },
+            "username": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "credential": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "username",
+            "credential"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "api_key"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "location": {
+              "enum": [
+                "header",
+                "query"
+              ]
+            },
+            "credential": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "location",
+            "credential"
+          ]
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 4000
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "query": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/pair"
+          }
+        },
+        "headers": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/pair"
+          }
+        },
+        "auth": {
+          "$ref": "#/$defs/auth"
+        },
+        "body": {},
+        "response": {
+          "$ref": "#/$defs/response"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 20
+        }
+      },
+      "required": [
+        "url",
+        "method",
+        "auth",
+        "response"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "GET"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "body": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

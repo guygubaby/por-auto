@@ -14,12 +14,20 @@ use std::{
 pub const VERSION: &str = "0.4.0";
 const SHA256: &str = "0b74e83c55f443539a9f76f5ce023a51466b764b1100e4097a897053fdfc0eb6";
 const REMOTE: &str = "/data/local/tmp/por-u2-0.4.0.jar";
+const REMOTE_HINT: &str = "/data/local/tmp/por-u2-hint.dex";
 const DEVICE_PORT: &str = "tcp:9010";
 
 pub fn verify(jar: &Path) -> Result<(), String> {
     let bytes = fs::read(jar).map_err(|e| format!("无法读取自动化组件：{e}"))?;
     if format!("{:x}", Sha256::digest(&bytes)) != SHA256 {
         return Err("自动化组件校验失败，请重新安装软件".into());
+    }
+    let manifest: Value = serde_json::from_str(include_str!("../../native/u2-hint/manifest.json"))
+        .map_err(|_| "原生编辑组件清单无效")?;
+    let hint = fs::read(jar.with_file_name("u2-hint.dex"))
+        .map_err(|_| "缺少原生编辑组件，请重新安装软件")?;
+    if Some(format!("{:x}", Sha256::digest(&hint)).as_str()) != manifest["dexSha256"].as_str() {
+        return Err("原生编辑组件校验失败，请重新安装软件".into());
     }
     Ok(())
 }
@@ -65,6 +73,7 @@ impl Session {
     pub fn start(adb: &Path, serial: &str, jar: &Path, folder: &Path) -> Result<Self, String> {
         verify(jar)?;
         android::push(adb, serial, jar, REMOTE)?;
+        android::push(adb, serial, &jar.with_file_name("u2-hint.dex"), REMOTE_HINT)?;
         let port = android::text(adb, &["-s", serial, "forward", "tcp:0", DEVICE_PORT])?;
         let port = port.trim().to_owned();
         if port.parse::<u16>().ok().filter(|p| *p > 0).is_none() {
@@ -97,7 +106,9 @@ impl Session {
                 "-s",
                 serial,
                 "shell",
-                &format!("CLASSPATH={REMOTE} app_process / com.wetest.uia2.Main -p 9010"),
+                &format!(
+                    "CLASSPATH={REMOTE_HINT}:{REMOTE} app_process / com.wetest.uia2.Main -p 9010"
+                ),
             ])
             .stdin(Stdio::null())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)

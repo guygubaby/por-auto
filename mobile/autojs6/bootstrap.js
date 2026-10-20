@@ -618,22 +618,23 @@ function createAutoJs6Runtime() {
     if (typeof name !== 'string' || name.length > 100 || !java.time.ZoneId.getAvailableZoneIds().contains(name)) throw new Error('请填写 Asia/Shanghai 等 IANA 时区');
     zones[name] = java.time.ZoneId.of(name); return zones[name];
   }
-  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false;
+  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false, sessionCapture = false;
   var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
   function releaseScreenSession() {
     if (!screenActive.get()) return;
     screenActive.set(false);
-    try { images.stopScreenCapture(); }
+    try { if (sessionCapture) { sessionCapture = false; images.stopScreenCapture(); } }
     finally { try { device.cancelKeepingAwake(); } finally { if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } } }
   }
   var screenSession = {
     isActive: function () { return !!screenActive.get(); },
+    hasCapture: function () { return !!sessionCapture; },
     check: function () {
       if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
       if (!auto.service) throw new Error('无障碍服务已停止，请恢复后重新开启手机定时执行');
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
     },
-    acquire: function () {
+    acquire: function (capture) {
       if (screenActive.get()) return;
       if (!auto.service) throw new Error('请先开启 AutoJs6 无障碍服务');
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
@@ -646,7 +647,10 @@ function createAutoJs6Runtime() {
         sessionForeground = true;
       }
       try {
-        if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+        if (capture !== false) {
+          if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+          sessionCapture = true;
+        }
         screenActive.set(true); device.keepScreenDim();
       } catch (e) { if (screenActive.get()) releaseScreenSession(); else if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } throw e; }
     },
@@ -790,13 +794,14 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   function version(p) { return 'v' + p.version + ' · ' + p.versionCode; }
   function startTimer() {
     if (timerRunning()) return '手机定时执行已开启';
-    if (!dialogs.confirm('开启手机定时执行', '会申请本次截图授权，并保持手机唤醒。请保持手机解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
+    var capture = scheduler.list().some(function (task) { return task.enabled && task.scriptId !== 'wecom-suite'; });
+    if (!dialogs.confirm('开启手机定时执行', (capture ? '视觉工作流会申请本次截图授权。' : '当前任务使用原生控件，无需截图授权。') + '保持手机唤醒，请保持解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
     var ready = threads.disposable(); timerStop = new java.util.concurrent.atomic.AtomicBoolean(false);
     timerThread = threads.start(function () {
       var notified = false, failure = null;
       try {
         io.withLock(io.root + '/scheduler-session.lock', function () {
-          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(); scheduler.recover(); });
+          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(capture); scheduler.recover(); });
           ready.setAndNotify(null); notified = true;
           ui.run(function () { if (!closed) { ui.timerStatus.setText('手机定时：执行会话已开启'); ui.timerStatus.attr('textColor', green); } });
           while (!timerStop.get()) {

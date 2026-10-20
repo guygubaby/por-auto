@@ -26,6 +26,26 @@
       "id": "wechat-send-hello",
       "path": "workflows/wechat-send-hello/workflow.json",
       "sha256": "2e2b1a558273b9b67eea0e99336d354731b7ac58e222e395de3b7ced21fb402b"
+    },
+    {
+      "id": "wecom-broadcast",
+      "path": "workflows/wecom-broadcast/workflow.json",
+      "sha256": "bde3045eedd6446e7382fafc5d5062340bd00bea25e8eac240529d83aba5a1c1"
+    },
+    {
+      "id": "wecom-first-chat",
+      "path": "workflows/wecom-first-chat/workflow.json",
+      "sha256": "bf183e07e9d60741606436e3d272da61e4a26e85cdec7ab1be4e60649d06e861"
+    },
+    {
+      "id": "wecom-nickname",
+      "path": "workflows/wecom-nickname/workflow.json",
+      "sha256": "36e0a5e352f4a18f7b4e08fbd9d29b5e76e81e45cae34d8c5f657955d713ede7"
+    },
+    {
+      "id": "wecom-open",
+      "path": "workflows/wecom-open/workflow.json",
+      "sha256": "7e1d8752494a9c55647e649c78de063ef9542baf415171e2c448843fe320888c"
     }
   ]
 }

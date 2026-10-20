@@ -92,6 +92,7 @@ function create(io) {
   }
   function click(p) { if (!point(p)) fail('点击坐标无效'); io.click(p); io.sleep(800); }
   function home() {
+    if (io.home) return screen(io.home());
     for (var n = 0; n < 8; n++) {
       var s = observe('定位底部四个导航项，识别当前页面。');
       if (['微信', '通讯录', '发现', '我'].every(function (label) { return s.items.some(function (i) { return i.role === 'tab' && i.text === label; }); })) {
@@ -113,6 +114,7 @@ function create(io) {
     fail('未能确认列表开头');
   }
   function recipientPage(scope) {
+    if (io.recipientPage) return screen(io.recipientPage(scope));
     var s = home();
     if (scope === 'groups') {
       click(unique(s, 'more').point); s = observe();
@@ -146,7 +148,7 @@ function create(io) {
     fail('目标会话未完成页面切换，未继续输入或发送');
   }
   function openFirst() {
-    var s = beginning(home()), list = names(s, 'home');
+    var s = beginning(io.recipientPage ? recipientPage('conversations') : home()), list = names(s, 'home');
     if (!list.length) fail('会话列表为空');
     var row = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.text === list[0]; })[0];
     io.openRow(row.text, 'home', row.point); confirm(row.text); return row.text;
@@ -156,6 +158,7 @@ function create(io) {
     return title;
   }
   function namedPage(title) {
+    if (io.openNamed) { io.openNamed(title, 'conversations'); return confirm(title); }
     var s = home(), found = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.complete && key(i.text) === key(title); });
     if (found.length > 1) return null;
     if (!found.length) {
@@ -172,6 +175,7 @@ function create(io) {
     io.openRow(title, s.page, found[0].point); return confirm(title);
   }
   function openGroup(title) {
+    if (io.openNamed) { io.openNamed(title, 'groups'); confirm(title); return title; }
     var searched = namedPage(title);
     if (searched && groupTitle(searched.title, title)) return title;
     var s = recipientPage('groups');
@@ -231,8 +235,8 @@ function create(io) {
     fail('未找到唯一匹配的工作流控件');
   }
   function run(workflow, config) {
-    if (!object(workflow) || workflow.package !== 'com.tencent.mm' || !Array.isArray(workflow.steps)) fail('不支持的手机工作流');
-    var allowed = ['wake', 'launch', 'wait', 'back', 'tap', 'read_row', 'wechat_home', 'wechat_first_chat', 'wechat_open_chat', 'wechat_send_text', 'wechat_broadcast'];
+    if (!object(workflow) || workflow.package !== (io.package || 'com.tencent.mm') || !Array.isArray(workflow.steps)) fail('不支持的手机工作流');
+    var allowed = ['wake', 'launch', 'wait', 'back', 'tap', 'read_row', 'wechat_home', 'wechat_first_chat', 'wechat_open_chat', 'wechat_send_text', 'wechat_broadcast', 'chat_home', 'chat_profile', 'chat_first_chat', 'chat_open_chat', 'chat_send_text', 'chat_broadcast'];
     workflow.steps.forEach(function (s) { if (!s.action || allowed.indexOf(s.action.type) < 0) fail('手机运行器不支持这个动作'); });
     var request = require('./request.js'), outputs = {}, deliveries = [], status = 'running', error = null;
     var dryRun = config.dryRun !== false, hooks = config.hooks || {};
@@ -282,18 +286,19 @@ function create(io) {
         else if (a.type === 'launch') io.launch();
         else if (a.type === 'wait') io.sleep(a.ms);
         else if (a.type === 'back') io.back();
-        else if (a.type === 'wechat_home') home();
-        else if (a.type === 'wechat_first_chat') { chat = openFirst(); outputs[a.output] = chat; }
-        else if (a.type === 'wechat_open_chat') { chat = openNamed(a.target); outputs[a.output] = chat; }
-        else if (a.type === 'wechat_send_text') {
+        else if (a.type === 'chat_profile') { if (!io.nickname) fail('当前适配器不能读取姓名'); outputs[a.output] = io.nickname(); }
+        else if (['wechat_home', 'chat_home'].indexOf(a.type) >= 0) home();
+        else if (['wechat_first_chat', 'chat_first_chat'].indexOf(a.type) >= 0) { chat = openFirst(); outputs[a.output] = chat; }
+        else if (['wechat_open_chat', 'chat_open_chat'].indexOf(a.type) >= 0) { chat = openNamed(a.target); outputs[a.output] = chat; }
+        else if (['wechat_send_text', 'chat_send_text'].indexOf(a.type) >= 0) {
           if (!chat) fail('没有已核对的接收会话');
           var attempted = false;
           try { send(chat, a.text, dryRun, function () { attempted = true; }); }
           catch (e) { if (attempted) outputs.message_status = 'uncertain'; throw e; }
           outputs.message_status = dryRun ? 'rehearsed' : 'observed';
-        } else if (a.type === 'wechat_broadcast') batch(config.input);
+        } else if (['wechat_broadcast', 'chat_broadcast'].indexOf(a.type) >= 0) batch(config.input);
         else if (a.type === 'tap') {
-          if (dryRun && workflow.steps.some(function (s) { return ['wechat_send_text', 'wechat_broadcast'].indexOf(s.action.type) >= 0; })) fail('发送预演不允许额外自定义点击');
+          if (dryRun && workflow.steps.some(function (s) { return ['wechat_send_text', 'wechat_broadcast', 'chat_send_text', 'chat_broadcast'].indexOf(s.action.type) >= 0; })) fail('发送预演不允许额外自定义点击');
           tap(a.selector, a.skip_if, a.recover_back);
         } else if (a.type === 'read_row') {
           var s = observe('完整读取个人信息页面的昵称。');

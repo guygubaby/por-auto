@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "minEngine": 4,
+  "id": "wecom-open",
+  "name": "打开企业微信",
+  "version": "1.0.0",
+  "description": "切回企业微信的消息首页，恢复到第一个导航项。",
+  "package": "com.tencent.wework",
+  "steps": [
+    {
+      "id": "wake",
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      }
+    },
+    {
+      "id": "launch",
+      "name": "打开企业微信",
+      "action": {
+        "type": "launch",
+        "activity": ".launch.LaunchSplashActivity"
+      }
+    },
+    {
+      "id": "wait",
+      "name": "等待页面就绪",
+      "action": {
+        "type": "wait",
+        "ms": 1200
+      }
+    },
+    {
+      "id": "home",
+      "name": "返回消息首页",
+      "action": {
+        "type": "chat_home"
+      }
+    }
+  ]
+}

@@ -1244,6 +1244,14 @@ pub fn execute(
             step.name
         ))?;
         match &step.action {
+            Action::ChatHome
+            | Action::ChatProfile { .. }
+            | Action::ChatFirstChat { .. }
+            | Action::ChatOpenChat { .. }
+            | Action::ChatSendText { .. }
+            | Action::ChatBroadcast => {
+                return Err("此工作流使用原生控件，不支持截图执行模式".into())
+            }
             Action::Wake => {
                 device.shell(&["input", "keyevent", "KEYCODE_WAKEUP"])?;
             }

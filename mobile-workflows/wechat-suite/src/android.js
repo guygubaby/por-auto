@@ -151,6 +151,7 @@ function create(por, config) {
       }
     } catch (_) { throw new Error('不能启用 AutoJs6 前台服务，请检查当前版本兼容性与手机运行限制'); }
     if (por.screenSession) {
+      if (por.screenSession.hasCapture && !por.screenSession.hasCapture()) throw new Error('当前定时会话未授权截图；请返回商店，停止后重新开启手机定时执行');
       if (!por.screenSession.isActive()) throw new Error('截图会话已停止，请重新开启手机定时执行');
     } else {
       if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');

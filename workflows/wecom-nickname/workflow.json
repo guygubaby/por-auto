@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "minEngine": 4,
+  "id": "wecom-nickname",
+  "name": "读取企业微信姓名",
+  "version": "1.0.0",
+  "description": "打开侧边栏个人信息，通过原生控件读取当前登录姓名。",
+  "package": "com.tencent.wework",
+  "steps": [
+    {
+      "id": "wake",
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      }
+    },
+    {
+      "id": "launch",
+      "name": "打开企业微信",
+      "action": {
+        "type": "launch",
+        "activity": ".launch.LaunchSplashActivity"
+      }
+    },
+    {
+      "id": "wait",
+      "name": "等待页面就绪",
+      "action": {
+        "type": "wait",
+        "ms": 1200
+      }
+    },
+    {
+      "id": "profile",
+      "name": "读取个人信息",
+      "action": {
+        "type": "chat_profile",
+        "output": "nickname"
+      }
+    }
+  ]
+}

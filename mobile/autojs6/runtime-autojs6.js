@@ -82,22 +82,23 @@ function createAutoJs6Runtime() {
     if (typeof name !== 'string' || name.length > 100 || !java.time.ZoneId.getAvailableZoneIds().contains(name)) throw new Error('请填写 Asia/Shanghai 等 IANA 时区');
     zones[name] = java.time.ZoneId.of(name); return zones[name];
   }
-  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false;
+  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false, sessionCapture = false;
   var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
   function releaseScreenSession() {
     if (!screenActive.get()) return;
     screenActive.set(false);
-    try { images.stopScreenCapture(); }
+    try { if (sessionCapture) { sessionCapture = false; images.stopScreenCapture(); } }
     finally { try { device.cancelKeepingAwake(); } finally { if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } } }
   }
   var screenSession = {
     isActive: function () { return !!screenActive.get(); },
+    hasCapture: function () { return !!sessionCapture; },
     check: function () {
       if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
       if (!auto.service) throw new Error('无障碍服务已停止，请恢复后重新开启手机定时执行');
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
     },
-    acquire: function () {
+    acquire: function (capture) {
       if (screenActive.get()) return;
       if (!auto.service) throw new Error('请先开启 AutoJs6 无障碍服务');
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
@@ -110,7 +111,10 @@ function createAutoJs6Runtime() {
         sessionForeground = true;
       }
       try {
-        if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+        if (capture !== false) {
+          if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+          sessionCapture = true;
+        }
         screenActive.set(true); device.keepScreenDim();
       } catch (e) { if (screenActive.get()) releaseScreenSession(); else if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } throw e; }
     },

@@ -27,7 +27,7 @@ workflows/
 
 ## 工作流格式
 
-顶层字段必须包含：`schemaVersion: 1`、`minEngine: 1`（旧动作）、`minEngine: 2`（首会话/固定文字）或 `minEngine: 3`（首页恢复/指定会话/可配置发送）、`id`、`name`、`version`、`description`、`package`、`steps`。未知字段会被拒绝。
+顶层字段必须包含：`schemaVersion: 1`、`minEngine: 1`（旧动作）、`minEngine: 2`（首会话/固定文字）或 `minEngine: 3`（首页恢复/指定会话/可配置发送）或 `minEngine: 4`（企业微信原生动作）、`id`、`name`、`version`、`description`、`package`、`steps`。未知字段会被拒绝。
 
 每个步骤包含 `name` 和 `action`，推荐提供唯一且稳定的 `id`。工作流 `version` 使用 SemVer（例如 `2.0.0`），与 JSON 结构版本和 `minEngine` 分开演进。现有动作：
 
@@ -43,6 +43,12 @@ workflows/
 | `wechat_home` | 无 | 引擎 3；从当前微信页面返回并确认首页第一个 Tab |
 | `wechat_open_chat` | `target`、`output` | 引擎 3；搜索完整名称，唯一匹配才打开并核对标题 |
 | `wechat_broadcast` | 无 | 引擎 3；读取本地输入配置、冻结完整名单、逐会话发送并记录；需要 `inputSchema` |
+| `chat_home` | 无 | 引擎 4；企业微信消息首页，确认侧栏已收起 |
+| `chat_profile` | `output` | 引擎 4；原生读取企业微信个人信息中的姓名 |
+| `chat_first_chat` | `output` | 引擎 4；打开企业微信首个普通会话 |
+| `chat_open_chat` | `target`、`output` | 引擎 4；唯一完整名称，打开后再核对标题 |
+| `chat_send_text` | `text` | 引擎 4；已确认会话后提交一次文字；预演只核对和清理自有草稿 |
+| `chat_broadcast` | 无 | 引擎 4；企业微信批量消息，使用 `por-auto://schemas/chat-send-input/v1` 输入 |
 | `read_row` | `page`、`labels`、`output` | 确认页面标题，从标签同行容器读取唯一文本，写入结果字段 |
 
 `selector` 可包含 `text`（精确文字候选列表）、`prefix`（文字前缀候选列表）、`bottom`（只查找屏幕底部）、`peers`（要求指定文字在同一行）。`text` 和 `prefix` 至少存在一项。`skip_if` 是选择器列表，只检查文字存在性，不使用位置约束。匹配歧义会停止，不凭猜测点击。
@@ -107,3 +113,5 @@ HTTP 支持 GET/POST、查询参数、普通请求头、JSON 请求体、Bearer/
 ## 设备兼容性
 
 默认运行器使用原生 UI 控件，不使用 OCR。当前 vivo X21 / Android 9 / 微信 8.0.79 在 uiautomator2 与 AutoJs6 下返回空节点，此状态会停止操作。用户可主动配置 Provider 并选择视觉执行，读取截图后由控制器校验目标；结构或坐标不合规则重新观察最多两次，期间不执行动作，仍不可靠则停止。模型不接管任意工具或生成待发文字。单元测试与演练均不代表消息已实际送达。
+
+企业微信当前支持 `com.tencent.wework` 的简体中文原生页面，已在 vivo X21 / Android 9 / 企业微信 5.0.8 验证电脑端四个工作流。接收范围以消息首页「全部 / 群聊」分类可枚举的列表为准，功能入口不作为接收对象。空控件、重名、未确认末尾、旧草稿或提示状态缺失时停止。发送界面观察不代表网络送达。

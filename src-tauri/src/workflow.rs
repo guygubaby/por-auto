@@ -2,7 +2,7 @@ use crate::{
     android,
     send_input::SendInput,
     u2::{Automation, Session},
-    wechat,
+    wechat, wecom,
 };
 use roxmltree::Document;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-pub const ENGINE_VERSION: u32 = 3;
+pub const ENGINE_VERSION: u32 = 4;
 pub const BUNDLED: &str = include_str!("../../workflows/wechat-nickname/workflow.json");
 pub const BUNDLED_WORKFLOWS: &[&str] = &[
     BUNDLED,
@@ -22,6 +22,10 @@ pub const BUNDLED_WORKFLOWS: &[&str] = &[
     include_str!("../../workflows/wechat-first-chat/workflow.json"),
     include_str!("../../workflows/wechat-send-hello/workflow.json"),
     include_str!("../../workflows/wechat-broadcast/workflow.json"),
+    include_str!("../../workflows/wecom-open/workflow.json"),
+    include_str!("../../workflows/wecom-nickname/workflow.json"),
+    include_str!("../../workflows/wecom-first-chat/workflow.json"),
+    include_str!("../../workflows/wecom-broadcast/workflow.json"),
 ];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -51,6 +55,21 @@ pub struct Step {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    ChatHome,
+    ChatProfile {
+        output: String,
+    },
+    ChatFirstChat {
+        output: String,
+    },
+    ChatOpenChat {
+        target: String,
+        output: String,
+    },
+    ChatSendText {
+        text: String,
+    },
+    ChatBroadcast,
     Wake,
     Launch {
         activity: String,
@@ -150,7 +169,10 @@ impl Workflow {
         self.steps.iter().any(|s| {
             matches!(
                 s.action,
-                Action::WechatSendText { .. } | Action::WechatBroadcast
+                Action::WechatSendText { .. }
+                    | Action::WechatBroadcast
+                    | Action::ChatSendText { .. }
+                    | Action::ChatBroadcast
             )
         })
     }
@@ -169,7 +191,7 @@ impl Workflow {
     pub fn configurable(&self) -> bool {
         self.steps
             .iter()
-            .any(|s| matches!(s.action, Action::WechatBroadcast))
+            .any(|s| matches!(s.action, Action::WechatBroadcast | Action::ChatBroadcast))
     }
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         let value: Self =
@@ -200,7 +222,9 @@ impl Workflow {
         if self.input_schema.is_some()
             && (!self.configurable()
                 || self.input_schema
-                    != Some(serde_json::json!({"$ref":"por-auto://schemas/wechat-send-input/v1"})))
+                    != Some(
+                        serde_json::json!({"$ref":if self.package == wecom::PACKAGE {"por-auto://schemas/chat-send-input/v1"}else{"por-auto://schemas/wechat-send-input/v1"}}),
+                    ))
         {
             return Err("工作流输入 Schema 不受此引擎支持".into());
         }
@@ -213,14 +237,40 @@ impl Workflow {
                     return Err("步骤 ID 无效或重复".into());
                 }
             }
+            let generic = matches!(
+                step.action,
+                Action::ChatHome
+                    | Action::ChatProfile { .. }
+                    | Action::ChatFirstChat { .. }
+                    | Action::ChatOpenChat { .. }
+                    | Action::ChatSendText { .. }
+                    | Action::ChatBroadcast
+            );
+            if generic && (self.min_engine < 4 || self.package != wecom::PACKAGE) {
+                return Err("通用原生聊天动作需要引擎 4 和受支持的企业微信应用".into());
+            }
+            if matches!(
+                step.action,
+                Action::WechatHome
+                    | Action::WechatOpenChat { .. }
+                    | Action::WechatFirstChat { .. }
+                    | Action::WechatSendText { .. }
+                    | Action::WechatBroadcast
+            ) && self.package != "com.tencent.mm"
+            {
+                return Err("微信动作只能用于微信".into());
+            }
             if !short_text(&step.name) {
                 return Err("工作流步骤名称无效".into());
             }
             if !matches!(
                 step.action,
                 Action::WechatFirstChat { .. }
+                    | Action::ChatFirstChat { .. }
                     | Action::WechatOpenChat { .. }
+                    | Action::ChatOpenChat { .. }
                     | Action::WechatSendText { .. }
+                    | Action::ChatSendText { .. }
                     | Action::Wait { .. }
             ) {
                 first_chat = false;
@@ -231,13 +281,14 @@ impl Workflow {
                 {
                     return Err("此微信动作需要引擎 3".into())
                 }
-                Action::WechatOpenChat { target, output } => {
+                Action::WechatOpenChat { target, output }
+                | Action::ChatOpenChat { target, output } => {
                     if !short_text(target) || !valid_id(output) || !outputs.insert(output) {
                         return Err("指定会话与输出字段无效".into());
                     }
                     first_chat = true;
                 }
-                Action::WechatBroadcast => {
+                Action::WechatBroadcast | Action::ChatBroadcast => {
                     sends += 1;
                     if sends > 1
                         || !outputs.insert("send_status")
@@ -246,20 +297,15 @@ impl Workflow {
                         return Err("每个工作流只能有一个发送动作".into());
                     }
                 }
-                Action::WechatFirstChat { output } => {
-                    if self.min_engine < 2
-                        || self.package != "com.tencent.mm"
-                        || !valid_id(output)
-                        || !outputs.insert(output)
-                    {
+                Action::WechatFirstChat { output } | Action::ChatFirstChat { output } => {
+                    if self.min_engine < 2 || !valid_id(output) || !outputs.insert(output) {
                         return Err("微信首个会话动作需要引擎 2 和唯一输出字段".into());
                     }
                     first_chat = true;
                 }
-                Action::WechatSendText { text } => {
+                Action::WechatSendText { text } | Action::ChatSendText { text } => {
                     sends += 1;
                     if self.min_engine < 2
-                        || self.package != "com.tencent.mm"
                         || !first_chat
                         || !short_text(text)
                         || sends > 1
@@ -292,6 +338,11 @@ impl Workflow {
                     }
                     for selector in skip_if {
                         selector.validate()?;
+                    }
+                }
+                Action::ChatProfile { output } => {
+                    if !valid_id(output) || !outputs.insert(output) {
+                        return Err("姓名输出字段无效或重复".into());
                     }
                 }
                 Action::ReadRow {
@@ -550,21 +601,38 @@ pub fn execute_with_input(
                 )?;
                 thread::sleep(Duration::from_millis(700));
             }
-            Action::WechatFirstChat { output } => {
-                let target = wechat::open_first(&device, folder)?;
+            Action::WechatFirstChat { output } | Action::ChatFirstChat { output } => {
+                let target = if workflow.package == wecom::PACKAGE {
+                    wecom::open_first(&device, folder)?
+                } else {
+                    wechat::open_first(&device, folder)?
+                };
                 outputs.insert(output.clone(), target.title.clone());
                 chat = Some(target);
             }
-            Action::WechatHome => {
-                wechat::home(&device, folder)?;
+            Action::WechatHome | Action::ChatHome => {
+                if workflow.package == wecom::PACKAGE {
+                    wecom::home(&device, folder)?;
+                } else {
+                    wechat::home(&device, folder)?;
+                }
                 chat = None;
             }
-            Action::WechatOpenChat { target, output } => {
-                let target = wechat::open_named(&device, folder, target)?;
+            Action::WechatOpenChat { target, output } | Action::ChatOpenChat { target, output } => {
+                let target = if workflow.package == wecom::PACKAGE {
+                    wecom::open_named(
+                        &device,
+                        folder,
+                        target,
+                        crate::send_input::Scope::Conversations,
+                    )?
+                } else {
+                    wechat::open_named(&device, folder, target)?
+                };
                 outputs.insert(output.clone(), target.title.clone());
                 chat = Some(target);
             }
-            Action::WechatBroadcast => {
+            Action::WechatBroadcast | Action::ChatBroadcast => {
                 let config = input.ok_or("缺少发送配置")?;
                 fs::write(
                     folder.join("input.json"),
@@ -572,20 +640,27 @@ pub fn execute_with_input(
                 )
                 .map_err(|e| e.to_string())?;
                 let context = serde_json::json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running","mode":if dry_run {"rehearsal"} else {"send"}}});
-                outputs.extend(wechat::broadcast(
-                    &device,
-                    folder,
-                    config,
-                    &context,
-                    dry_run,
-                    |message| report(index + 1, workflow.steps.len(), message, "started"),
-                )?);
+                let mut report_step =
+                    |message: &str| report(index + 1, workflow.steps.len(), message, "started");
+                outputs.extend(if workflow.package == wecom::PACKAGE {
+                    wecom::broadcast(&device, folder, config, &context, dry_run, &mut report_step)?
+                } else {
+                    wechat::broadcast(&device, folder, config, &context, dry_run, &mut report_step)?
+                });
             }
-            Action::WechatSendText { text } => {
+            Action::WechatSendText { text } | Action::ChatSendText { text } => {
                 let target = chat.as_ref().ok_or("尚未确认首个会话，禁止发送")?;
-                let status = wechat::send_text(&device, target, text, folder, dry_run)?;
+                let status = if workflow.package == wecom::PACKAGE {
+                    wecom::send_text(&device, target, text, folder, dry_run)?
+                } else {
+                    wechat::send_text(&device, target, text, folder, dry_run)?
+                };
                 outputs.insert("message".into(), text.clone());
                 outputs.insert("send_status".into(), status);
+            }
+            Action::ChatProfile { output } => {
+                outputs.insert(output.clone(), wecom::nickname(&device, folder)?);
+                chat = None;
             }
             Action::Tap {
                 selector,

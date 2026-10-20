@@ -13,4 +13,10 @@ if (!bytes) {
 if (createHash('sha256').update(bytes).digest('hex') !== sha256) throw new Error('uiautomator2 0.4.0 checksum mismatch');
 await mkdir(new URL('../src-tauri/resources/', import.meta.url), { recursive: true });
 await writeFile(target, bytes);
+const native = new URL('../native/u2-hint/', import.meta.url);
+const manifest = JSON.parse(await readFile(new URL('manifest.json', native), 'utf8'));
+for (const [name, expected] of [['AccessibilityNodeInfoDumper.java', manifest.sourceSha256], ['classes.dex', manifest.dexSha256]]) {
+  if (createHash('sha256').update(await readFile(new URL(name, native))).digest('hex') !== expected) throw Error(`Native editor hint overlay checksum mismatch: ${name}`);
+}
+await writeFile(new URL('../src-tauri/resources/u2-hint.dex', import.meta.url), await readFile(new URL('classes.dex', native)));
 console.log(`Prepared uiautomator2 server 0.4.0 (${(bytes.length / 1048576).toFixed(2)} MiB)`);

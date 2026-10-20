@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "minEngine": 4,
+  "id": "wecom-first-chat",
+  "name": "打开企业微信首个会话",
+  "version": "1.0.0",
+  "description": "返回消息首页，跳过功能入口，打开首个普通聊天会话。",
+  "package": "com.tencent.wework",
+  "steps": [
+    {
+      "id": "wake",
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      }
+    },
+    {
+      "id": "launch",
+      "name": "打开企业微信",
+      "action": {
+        "type": "launch",
+        "activity": ".launch.LaunchSplashActivity"
+      }
+    },
+    {
+      "id": "wait",
+      "name": "等待页面就绪",
+      "action": {
+        "type": "wait",
+        "ms": 1200
+      }
+    },
+    {
+      "id": "first",
+      "name": "打开首个普通会话",
+      "action": {
+        "type": "chat_first_chat",
+        "output": "chat_title"
+      }
+    }
+  ]
+}

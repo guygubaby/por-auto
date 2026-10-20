@@ -18,6 +18,9 @@ mod u2;
 #[path = "../src/wechat.rs"]
 mod wechat;
 #[allow(dead_code)]
+#[path = "../src/wecom.rs"]
+mod wecom;
+#[allow(dead_code)]
 #[path = "../src/workflow.rs"]
 mod workflow;
 use std::{env, fs, path::PathBuf};

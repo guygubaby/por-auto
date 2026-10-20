@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Por Auto",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "identifier": "com.por.wechatreader",
   "build": {
     "beforeDevCommand": "pnpm prepare:u2 && pnpm dev",
@@ -42,6 +42,7 @@
       "resources/platform-tools.zip",
       "resources/adb-manifest.json",
       "resources/u2.jar",
+      "resources/u2-hint.dex",
       "resources/u2-NOTICE.txt"
     ],
     "icon": [

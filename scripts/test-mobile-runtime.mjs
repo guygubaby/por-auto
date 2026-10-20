@@ -3,6 +3,17 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 
+test('native task session keeps the phone active without requesting or releasing screen capture', () => {
+  const value = runtimeFixture();
+  value.io.screenSession.acquire(false);
+  assert.equal(value.io.screenSession.isActive(), true);
+  assert.equal(value.io.screenSession.hasCapture(), false);
+  value.io.screenSession.check(); value.io.screenSession.release();
+  assert.equal(value.calls.capture, 0); assert.equal(value.calls.stopCapture, 0);
+  assert.equal(value.calls.keepAwake, 1); assert.equal(value.calls.releaseAwake, 1);
+  assert.equal(value.calls.startForeground, 1); assert.equal(value.calls.stopForeground, 1);
+});
+
 function runtimeFixture({ foregroundActive = false, captureAllowed = true, locked = false, failWake = false } = {}) {
   const events = [], calls = { capture: 0, stopCapture: 0, startForeground: 0, stopForeground: 0, keepAwake: 0, releaseAwake: 0 };
   class File {

@@ -7,9 +7,13 @@ import openWorkflow from '../workflows/wechat-open/workflow.json';
 import firstChatWorkflow from '../workflows/wechat-first-chat/workflow.json';
 import sendHelloWorkflow from '../workflows/wechat-send-hello/workflow.json';
 import broadcastWorkflow from '../workflows/wechat-broadcast/workflow.json';
+import wecomOpen from '../workflows/wecom-open/workflow.json';
+import wecomNickname from '../workflows/wecom-nickname/workflow.json';
+import wecomFirst from '../workflows/wecom-first-chat/workflow.json';
+import wecomBroadcast from '../workflows/wecom-broadcast/workflow.json';
 import type { Hooks, SendInput } from './workflowInput';
 
-const bundledWorkflows = [bundled, openWorkflow, firstChatWorkflow, sendHelloWorkflow, broadcastWorkflow];
+const bundledWorkflows = [bundled, openWorkflow, firstChatWorkflow, sendHelloWorkflow, broadcastWorkflow, wecomOpen, wecomNickname, wecomFirst, wecomBroadcast];
 
 export interface Device { serial: string; state: string; model: string }
 interface Environment { ready: boolean; version: string; platform: string; devices: Device[]; automation_version?: string }
@@ -47,7 +51,7 @@ export const useConnectionStore = defineStore('connection', () => {
     return { total: deviceRunsRef.value.length, succeeded, failed, done: succeeded + failed, running: deviceRunsRef.value.filter(run => run.status === 'running').length, queued: deviceRunsRef.value.filter(run => run.status === 'queued').length, current: deviceRunsRef.value.findIndex(run => run.status === 'running') + 1 };
   });
   const defaultUrl = DEFAULT_REGISTRY_URL;
-  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: bundledWorkflows }], installed: bundledWorkflows.map(workflow => ({ key: `preview-${workflow.id}`, registryUrl: defaultUrl, reference: 'main', commit: 'bundled', dryRun: workflow.steps.some(step => ['wechat_send_text', 'wechat_broadcast'].includes(step.action.type)), workflow })) });
+  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: bundledWorkflows }], installed: bundledWorkflows.map(workflow => ({ key: `preview-${workflow.id}`, registryUrl: defaultUrl, reference: 'main', commit: 'bundled', dryRun: workflow.steps.some(step => ['wechat_send_text', 'wechat_broadcast', 'chat_send_text', 'chat_broadcast'].includes(step.action.type)), workflow })) });
   const workflowKeyRef = ref('preview-wechat-nickname');
   const selectedWorkflowRef = computed(() => storeRef.value.installed.find(item => item.key === workflowKeyRef.value));
   const readyDevicesRef = computed(() => environmentRef.value?.devices.filter(device => device.state === 'device') ?? []);

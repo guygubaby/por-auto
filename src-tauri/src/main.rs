@@ -15,6 +15,7 @@ mod u2;
 mod updater;
 mod visual;
 mod wechat;
+mod wecom;
 mod workflow;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -405,11 +406,19 @@ async fn list_wechat_targets(
     app: AppHandle,
     serial: String,
     scope: send_input::Scope,
+    package: Option<String>,
     execution_mode: Option<provider::ExecutionMode>,
 ) -> Reply<wechat::TargetList> {
     blocking(move || {
         if !schedule::valid_serial(&serial) {
             return Err("请选择有效手机".into());
+        }
+        let package = package.as_deref().unwrap_or("com.tencent.mm");
+        if !["com.tencent.mm", wecom::PACKAGE].contains(&package) {
+            return Err("不支持的目标应用".into());
+        }
+        if package == wecom::PACKAGE && execution_mode == Some(provider::ExecutionMode::Visual) {
+            return Err("企业微信使用原生控件执行".into());
         }
         let jobs = app.state::<Jobs>();
         let _permit = jobs.acquire(&serial)?;
@@ -442,7 +451,11 @@ async fn list_wechat_targets(
                     "am",
                     "start",
                     "-n",
-                    "com.tencent.mm/com.tencent.mm.ui.LauncherUI",
+                    &if package == wecom::PACKAGE {
+                        format!("{}/{}", wecom::PACKAGE, wecom::ACTIVITY)
+                    } else {
+                        "com.tencent.mm/com.tencent.mm.ui.LauncherUI".into()
+                    },
                 ],
             )?;
             thread::sleep(Duration::from_millis(1600));
@@ -459,7 +472,11 @@ async fn list_wechat_targets(
                 .discover(scope);
             }
             let device = u2::Session::start(&adb, &serial, &resource(&app, "u2.jar")?, &folder)?;
-            wechat::discover_progress(&device, &folder, scope, |_| _permit.check())
+            if package == wecom::PACKAGE {
+                wecom::discover_progress(&device, &folder, scope, |_| _permit.check())
+            } else {
+                wechat::discover_progress(&device, &folder, scope, |_| _permit.check())
+            }
         })();
         let restore = wake.as_mut().map_or(Ok(()), awake::ScreenAwake::restore);
         let _ = fs::remove_dir_all(folder);

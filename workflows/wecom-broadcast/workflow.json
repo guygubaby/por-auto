@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "minEngine": 4,
+  "id": "wecom-broadcast",
+  "name": "企业微信批量发送消息",
+  "version": "1.0.0",
+  "description": "配置手动或接口消息，选择群聊或首页会话，支持全部或勾选、逐会话获取、预演和定时执行。",
+  "package": "com.tencent.wework",
+  "steps": [
+    {
+      "id": "wake",
+      "name": "唤醒手机",
+      "action": {
+        "type": "wake"
+      }
+    },
+    {
+      "id": "launch",
+      "name": "打开企业微信",
+      "action": {
+        "type": "launch",
+        "activity": ".launch.LaunchSplashActivity"
+      }
+    },
+    {
+      "id": "wait",
+      "name": "等待页面就绪",
+      "action": {
+        "type": "wait",
+        "ms": 1200
+      }
+    },
+    {
+      "id": "broadcast",
+      "name": "处理配置的接收对象",
+      "action": {
+        "type": "chat_broadcast"
+      }
+    }
+  ],
+  "inputSchema": {
+    "$ref": "por-auto://schemas/chat-send-input/v1"
+  }
+}

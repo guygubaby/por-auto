@@ -96,6 +96,15 @@ async function main() {
   const definitionsPath = resolve(root, 'mobile-workflows/wechat-suite/src/definitions.js');
   if (command === 'bundle') await writeFile(definitionsPath, definitions);
   else assert.equal(await readFile(definitionsPath, 'utf8'), definitions, 'Phone workflow definitions are stale; run pnpm mobile:bundle');
+  const shared = await sourceFiles(resolve(root, 'mobile-workflows/wechat-suite/src'));
+  const wecom = await Promise.all(['wecom-open', 'wecom-nickname', 'wecom-first-chat', 'wecom-broadcast'].map(async id => JSON.parse(await readFile(resolve(root, 'workflows', id, 'workflow.json'), 'utf8'))));
+  const generated = shared.filter(file => file.path !== 'definitions.js').map(file => [file.path, '// GENERATED from mobile-workflows/wechat-suite/src/' + file.path + '\n' + file.bytes.toString('utf8')]);
+  generated.push(['definitions.js', '// GENERATED from desktop definitions.\nmodule.exports = ' + JSON.stringify({ schemaVersion: 1, package: 'com.tencent.wework', workflows: wecom }, null, 2) + ';\n']);
+  for (const [name, code] of generated) {
+    const path = resolve(root, 'mobile-workflows/wecom-suite/src', name);
+    if (command === 'bundle') await writeFile(path, code);
+    else assert.equal(await readFile(path, 'utf8'), code, `Shared WeCom source ${name} is stale; run pnpm mobile:bundle`);
+  }
   const { catalog, bundle } = await buildMobileCatalog();
   try {
     const previous = core.catalog(JSON.parse(await readFile(resolve(root, 'mobile-workflows/registry.json'), 'utf8')));
