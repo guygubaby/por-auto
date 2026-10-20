@@ -60,6 +60,14 @@ function merge(a, b) {
   return a;
 }
 function checkChat(s, title) { if (s.page !== 'chat' || !same(s.title, title)) fail('当前页面不能确认为目标会话「' + title + '」'); }
+function confirmStableDraft(title, text, observe) {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    var current = observe(), value = screen(current.screen); checkChat(value,title);
+    if (!value.editor || value.editor.text !== text) fail('草稿内容已变化，未发送或清理');
+    if (current.unchanged === true) return value;
+  }
+  fail('页面持续变化，未发送或清理草稿');
+}
 function input(value) {
   if (!object(value) || !object(value.recipients) || ['groups', 'conversations'].indexOf(value.recipients.scope) < 0
       || ['all', 'selected'].indexOf(value.recipients.mode) < 0 || !Array.isArray(value.recipients.names) || value.recipients.names.length > 2000
@@ -200,7 +208,7 @@ function create(io) {
     if (!s.editor || s.editor.text !== text) fail('输入内容未能精确核对，未发送，请检查手机草稿');
     io.log('draft_verified', { title: title });
     if (dryRun) {
-      io.beforeCommit(s.editor.point);
+      io.beforeCommit(s.editor.point, title, text);
       io.clear(text, s.editor.point); s = observe(); checkChat(s, title);
       if (!s.editor || s.editor.text !== '') fail('预演草稿清理未能确认，未发送');
       return;
@@ -208,7 +216,7 @@ function create(io) {
     var button = unique(s, 'send');
     if (button.text !== '发送' || button.point[0] <= s.editor.point[0] || Math.abs(button.point[1] - s.editor.point[1]) > 120) fail('不能确认发送按钮');
     var count = s.outgoing.filter(function (b) { return b.text === text && !b.pending && !b.failed; }).length;
-    io.beforeCommit(s.editor.point);
+    io.beforeCommit(s.editor.point, title, text);
     intent(); io.log('send_requested', { title: title }); click(button.point);
     var after = observe(); checkChat(after, title);
     if (!after.editor || after.editor.text !== '' || after.outgoing.some(function (b) { return b.failed || b.pending; })
@@ -320,4 +328,4 @@ function create(io) {
   }
   return { run: run, discover: discover, observe: observe };
 }
-module.exports = { create: create, validateScreen: screen, validateInput: input, validateMessage: message, sameTitle: same, mergeNames: merge };
+module.exports = { create: create, confirmStableDraft: confirmStableDraft, validateScreen: screen, validateInput: input, validateMessage: message, sameTitle: same, mergeNames: merge };

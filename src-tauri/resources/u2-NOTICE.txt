@@ -3,6 +3,11 @@ https://github.com/openatx/android-uiautomator-server-jar/tree/0.4.0
 Unmodified official release artifact u2.jar
 SHA-256: 0b74e83c55f443539a9f76f5ce023a51466b764b1100e4097a897053fdfc0eb6
 
+Por Auto also loads u2-hint.dex before this JAR. It contains the MIT-licensed
+AccessibilityNodeInfoDumper class from the same upstream 0.4.0 source, with
+one added native showing-hint-text attribute. Source, bytecode checksums and
+rebuild instructions are in native/u2-hint/. The official JAR stays unmodified.
+
 The MIT License (MIT)
 Copyright (c) 2015 xiaocong@gmail.com
 

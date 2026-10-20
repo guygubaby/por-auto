@@ -2,6 +2,10 @@
 
 var PACKAGE = 'com.tencent.wework';
 function fail(message) { throw new Error(message); }
+function exactDraft(screen, title, text) {
+  return screen.page === 'chat' && require('./core.js').sameTitle(screen.title, title)
+    && !!screen.editor && screen.editor.text === text;
+}
 function homeReady(nodes, width) {
   function matches(id) { return nodes.filter(function (n) { return n.id === id && n.visible && n.enabled && n.bounds[2] > n.bounds[0] && n.bounds[3] > n.bounds[1]; }); }
   var titles = matches('ncq'), lists = matches('czp'), filters = matches('fg8');
@@ -10,9 +14,9 @@ function homeReady(nodes, width) {
 }
 function create(por, config) {
   var io = require('./android.js').create(por, config), ownedAwake = false;
-  var scope = 'conversations', last = null, lastTitle = null;
+  var scope = 'conversations', last = null, lastTitle = null, commit = null;
   function foreground() {
-    if (!auto.service) fail('请先开启 AutoJs6 无障碍服务');
+    io.requireAccessibility();
     if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
     if (String(currentPackage()) !== PACKAGE) fail('企业微信不在前台，已停止');
   }
@@ -167,7 +171,7 @@ function create(por, config) {
   }
   io.package = PACKAGE;
   io.prepare = function () {
-    if (!auto.service) fail('请先开启 AutoJs6 无障碍服务');
+    io.requireAccessibility();
     if (por.screenSession) por.screenSession.check();
     else if (!ownedAwake) { device.keepScreenDim(); ownedAwake = true; }
   };
@@ -176,16 +180,20 @@ function create(por, config) {
   io.observe = observe; io.home = home; io.recipientPage = recipientPage; io.openNamed = openNamed; io.openRow = openRow; io.scroll = scroll;
   io.back = function () { foreground(); if (!back()) fail('返回操作未完成'); };
   io.type = function (text, p, title) { lastTitle = title; edit('',text); };
-  io.clear = function (text) { edit(text,''); };
-  io.beforeCommit = function () { var s=observe(); if (s.page!=='chat'||!lastTitle||!sameChat(lastTitle,s.title)) fail('提交前会话核对失败'); };
+  io.clear = function (text) { commit=null;edit(text,''); };
+  io.beforeCommit = function (p,title,text) {
+    if (!lastTitle || !sameChat(lastTitle,title) || !exactDraft(observe(),title,text)) fail('提交前会话或完整草稿核对失败');
+    commit={title:title,text:text};
+  };
   io.click = function (p) {
     var before = observe(), buttons = before.items.filter(function (i) { return i.role==='send' && String(i.point)===String(p); });
-    if (buttons.length!==1 || !lastTitle || !sameChat(lastTitle,before.title) || !before.editor || !before.editor.text) fail('发送控件或接收对象已变化');
+    if (buttons.length!==1 || !commit || !exactDraft(before,commit.title,commit.text)) fail('发送控件、接收对象或草稿已变化');
     var candidates=last.nodes.filter(function(n){return valid(n)&&n.text==='发送'&&String(point(n))===String(p);});
     if(candidates.length!==1)fail('发送控件不唯一'); var b=candidates[0].bounds;
+    commit=null;
     if(!click(Math.floor((b[0]+b[2])/2),Math.floor((b[1]+b[3])/2)))fail('发送结果不明，未重试');
   };
   io.nickname = function () { home(); clickId('ndw'); var nodes=tree(), header=one(nodes,'og3'), name=one(nodes,'mi0'); if(!under(nodes,name,header)||!name.text.trim())fail('未确认个人信息中的姓名');return name.text; };
   return io;
 }
-module.exports = { create: create, homeReady: homeReady };
+module.exports = { create: create, homeReady: homeReady, exactDraft: exactDraft };

@@ -619,6 +619,11 @@ function createAutoJs6Runtime() {
     zones[name] = java.time.ZoneId.of(name); return zones[name];
   }
   var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false, sessionCapture = false;
+  function requireAccessibility() {
+    var value = String(android.provider.Settings.Secure.getString(context.getContentResolver(), 'enabled_accessibility_services') || '');
+    var prefix = String(context.getPackageName()) + '/';
+    if (!auto.service || !value.split(':').some(function (item) { return item.indexOf(prefix) === 0; })) throw new Error('AutoJs6 无障碍服务已关闭或断开，请在手机恢复后重新运行');
+  }
   var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
   function releaseScreenSession() {
     if (!screenActive.get()) return;
@@ -631,12 +636,12 @@ function createAutoJs6Runtime() {
     hasCapture: function () { return !!sessionCapture; },
     check: function () {
       if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
-      if (!auto.service) throw new Error('无障碍服务已停止，请恢复后重新开启手机定时执行');
+      requireAccessibility();
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
     },
     acquire: function (capture) {
       if (screenActive.get()) return;
-      if (!auto.service) throw new Error('请先开启 AutoJs6 无障碍服务');
+      requireAccessibility();
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
       if (String(currentPackage()) !== String(context.getPackageName())) throw new Error('请在 AutoJs6 前台开启手机定时执行');
       var services = context.getSystemService(android.content.Context.ACTIVITY_SERVICE).getRunningServices(1000), active = false;

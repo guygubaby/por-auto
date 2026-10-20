@@ -42,11 +42,19 @@ test('a sliding WeCom sidebar cannot be mistaken for the normal messages page', 
   assert.equal(wecomNative.homeReady(drawer,1080),false);
 });
 
+test('native send commit rechecks the exact message instead of accepting any nonempty draft', () => {
+  const value={page:'chat',title:'测试群(2)',editor:{text:'Ok'}};
+  assert.equal(wecomNative.exactDraft(value,'测试群','Ok'),true);
+  assert.equal(wecomNative.exactDraft({...value,editor:{text:'用户修改后的草稿'}},'测试群','Ok'),false);
+  assert.equal(wecomNative.exactDraft({...value,title:'其他群(2)'},'测试群','Ok'),false);
+  assert.equal(wecomNative.exactDraft({...value,editor:null},'测试群','Ok'),false);
+});
+
 test('native workflow cleanup leaves the timer wake session owned by the launcher', () => {
   for (const shared of [false, true]) {
     const calls = { awake: 0, release: 0, check: 0 };
     const module = { exports: {} };
-    const sandbox = { module, require: () => ({ create: () => ({}) }), auto: { service: {} },
+    const sandbox = { module, require: () => ({ create: () => ({ requireAccessibility() {} }) }), auto: { service: {} },
       device: { keepScreenDim: () => calls.awake++, cancelKeepingAwake: () => calls.release++ },
       android: { view: { accessibility: { AccessibilityNodeInfo: {} } } } };
     vm.runInNewContext(readFileSync(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)), 'utf8'), sandbox);
@@ -54,6 +62,20 @@ test('native workflow cleanup leaves the timer wake session owned by the launche
     io.prepare(); io.finish();
     assert.deepEqual(calls, shared ? { awake: 0, release: 0, check: 1 } : { awake: 1, release: 1, check: 0 });
   }
+});
+
+test('commit waits out a disappearing keyboard suggestion but rejects changed draft, target and persistent changes', () => {
+  const screen = { page: 'chat', title: '测试群(2)', certain: true, items: [], editor: { point: [420,578], text: 'Ok' }, outgoing: [], listEmpty: false };
+  let reads=0;
+  assert.equal(core.confirmStableDraft('测试群','Ok',()=>({screen:structuredClone(screen),unchanged:++reads>1})).editor.text,'Ok');
+  assert.equal(reads,2);
+  for (const changed of [{title:'其他群'}, {editor:{point:[420,578],text:'用户的草稿'}}]) {
+    reads=0;
+    assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>({screen:{...structuredClone(screen),...changed},unchanged:++reads>1})),/会话|草稿/);
+    assert.equal(reads,1);
+  }
+  reads=0;assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>({screen:structuredClone(screen),unchanged:!!(reads++<0)})),/持续变化/);assert.equal(reads,3);
+  reads=0;assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>{reads++;throw Error('transport failure');}),/transport failure/);assert.equal(reads,1);
 });
 
 function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '群乙'], groupTitles = false, profileTitle = '个人信息', nicknameLabel = '昵称' } = {}) {

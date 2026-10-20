@@ -14,7 +14,7 @@ test('native task session keeps the phone active without requesting or releasing
   assert.equal(value.calls.startForeground, 1); assert.equal(value.calls.stopForeground, 1);
 });
 
-function runtimeFixture({ foregroundActive = false, captureAllowed = true, locked = false, failWake = false } = {}) {
+function runtimeFixture({ foregroundActive = false, captureAllowed = true, locked = false, failWake = false, accessibilityEnabled = true } = {}) {
   const events = [], calls = { capture: 0, stopCapture: 0, startForeground: 0, stopForeground: 0, keepAwake: 0, releaseAwake: 0 };
   class File {
     constructor(parent, child) { this.path = child ? String(parent) + '/' + child : String(parent); }
@@ -27,9 +27,9 @@ function runtimeFixture({ foregroundActive = false, captureAllowed = true, locke
   const sandbox = {
     java: { io: { File }, util: { concurrent: { TimeUnit: { SECONDS: 'seconds' }, atomic: { AtomicBoolean } } } },
     Packages: { okhttp3: { OkHttpClient: { Builder } } },
-    android: { content: { Context: { KEYGUARD_SERVICE: 'keyguard', ACTIVITY_SERVICE: 'activity' }, Intent: class { setClassName() { return this; } } }, os: { Build: { VERSION: { SDK_INT: 28 } } } },
+    android: { provider: { Settings: { Secure: { getString: () => accessibilityEnabled ? 'org.autojs.autojs6/.AccessibilityService' : '' } } }, content: { Context: { KEYGUARD_SERVICE: 'keyguard', ACTIVITY_SERVICE: 'activity' }, Intent: class { setClassName() { return this; } } }, os: { Build: { VERSION: { SDK_INT: 28 } } } },
     context: {
-      getFilesDir: () => '/private', getPackageName: () => 'org.autojs.autojs6',
+      getFilesDir: () => '/private', getPackageName: () => 'org.autojs.autojs6', getContentResolver: () => ({}),
       getPackageManager: () => ({ getPackageInfo: () => ({ versionName: '6.7.0' }) }),
       getSystemService: name => name === 'keyguard' ? { isKeyguardLocked: () => locked } : { getRunningServices: () => ({ size: () => foregroundActive ? 1 : 0, get: () => ({ service: { getClassName: () => 'org.autojs.autojs.external.foreground.AppForegroundService' } }) }) },
       startForegroundService() { calls.startForeground++; return {}; }, stopService() { calls.stopForeground++; }
@@ -43,6 +43,12 @@ function runtimeFixture({ foregroundActive = false, captureAllowed = true, locke
   const io = vm.runInContext(readFileSync(new URL('../mobile/autojs6/runtime-autojs6.js', import.meta.url), 'utf8') + '\ncreateAutoJs6Runtime();', sandbox);
   return { io, calls, setLocked(value) { locked = value; }, exit() { events.forEach(callback => callback()); } };
 }
+
+test('a stale service object does not bypass a disabled accessibility service', () => {
+  const value=runtimeFixture({accessibilityEnabled:false});
+  assert.throws(()=>value.io.screenSession.acquire(false),/无障碍服务已关闭/);
+  assert.equal(value.calls.capture,0);assert.equal(value.calls.startForeground,0);assert.equal(value.calls.keepAwake,0);
+});
 
 test('mobile timer projection is granted once per engine session and cleanup respects service ownership', () => {
   for (const foregroundActive of [false, true]) {

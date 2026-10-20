@@ -87,10 +87,14 @@ function create(por, config) {
   var foregroundIntent = new android.content.Intent().setClassName(AUTOJS, foregroundClass);
   var lock = context.getSystemService(android.content.Context.KEYGUARD_SERVICE);
   var lastOwnClipAt = 0;
-  var lastPixels = null, lastWidth = 0, lastHeight = 0, modelCalls = 0;
+  var lastPixels = null, lastWidth = 0, lastHeight = 0, modelCalls = 0, lastObservation = null;
   var clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+  function requireAccessibility() {
+    var value = String(android.provider.Settings.Secure.getString(context.getContentResolver(), 'enabled_accessibility_services') || '');
+    if (!auto.service || !value.split(':').some(function (item) { return item.indexOf(AUTOJS + '/') === 0; })) throw new Error('AutoJs6 无障碍服务已关闭或断开，请在手机恢复后重新运行');
+  }
   function foreground() {
-    if (!auto.service) throw new Error('无障碍服务连接已中断，请在手机恢复服务后重新运行');
+    requireAccessibility();
     if (lock.isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新运行；未操作或上传锁屏画面');
     if (String(currentPackage()) !== PACKAGE) throw new Error('微信没有处于前台，未操作或上传其他应用的画面');
   }
@@ -131,7 +135,7 @@ function create(por, config) {
     } finally { focused.recycle(); }
   }
   function prepare() {
-    if (!auto.service) throw new Error('请先在手机设置中开启 AutoJs6 无障碍服务，再运行工作流');
+    requireAccessibility();
     if (lock.isKeyguardLocked()) throw new Error('请先手动解锁手机');
     if (por.execution && String(currentPackage()) !== AUTOJS && !returnHost()) throw new Error('定时任务未能返回 AutoJs6，未操作微信');
     if (String(currentPackage()) !== AUTOJS) throw new Error('请在 AutoJs6 前台启动工作流，以便保存并恢复剪贴板');
@@ -223,13 +227,20 @@ function create(por, config) {
     } finally { photo.image.recycle(); }
     var value = model(image, require('./definitions.js').protocol + '\nSource image dimensions: ' + width + ' x ' + height + ' pixels. Output coordinates are NOT image pixels: x = pixel_x / ' + width + ' * 1000, y = pixel_y / ' + height + ' * 1000. Every coordinate must be an integer from 1 to 999. Bottom of image is y=999, never 1280 or the image height. Check every point before returning JSON. Inspection goal: ' + hint
       + '\nIf an Android text-selection toolbar is visible, include 粘贴/全选/剪切 entries as role row with their exact labels and centers. This toolbar does not make the underlying readable page uncertain.');
-    write(directory + '/latest-observation.json', value); return value;
+    write(directory + '/latest-observation.json', value); lastObservation = value; return value;
   }
-  function beforeCommit(p) {
-    var fresh = photograph();
-    try {
-      if (fresh.width !== lastWidth || fresh.height !== lastHeight || !markers.unchanged(lastPixels, fresh.pixels, fresh.width, fresh.height, p, true)) throw new Error('标题或输入区域在识别后发生变化，未发送或清理草稿');
-    } finally { fresh.image.recycle(); }
+  function beforeCommit(p, title, text) {
+    var attempt = 0;
+    return require('./core.js').confirmStableDraft(title,text,function () {
+      if (attempt++) readScreen('重新核对当前聊天标题和输入框中的完整文字。画面变化后只重新读取，未重复输入或点击。');
+      var current = lastObservation, fresh = photograph();
+      try {
+        var same = !!current && !!current.editor && fresh.width === lastWidth && fresh.height === lastHeight
+          && markers.unchanged(lastPixels, fresh.pixels, fresh.width, fresh.height, current.editor.point, true);
+        if (!same) por.log('draft_observation_wait','画面发生变化，重新核对会话和草稿，未执行操作');
+        return { screen: current, unchanged: same };
+      } finally { fresh.image.recycle(); }
+    });
   }
   function windowMetrics(photo) {
     var windows = auto.service.getWindows(), bounds = null, keyboardTop = null, navigationTop = null;
@@ -442,7 +453,7 @@ function create(por, config) {
     }
   }
   return {
-    prepare: prepare, finish: finish, checkModel: checkImageSupport, saveSecret: saveSecret, secret: secret, parseUrl: parsed, request: request,
+    requireAccessibility: requireAccessibility, prepare: prepare, finish: finish, checkModel: checkImageSupport, saveSecret: saveSecret, secret: secret, parseUrl: parsed, request: request,
     base64: function (text) { return base64(bytes(text)); }, now: Date.now, runId: por.runId, observe: observe,
     click: clickPoint, clickTab: clickTab, openRow: openRow, beforeCommit: beforeCommit, type: typeValue, clear: clear, sleep: sleep,
     wake: function () { device.wakeUpIfNeeded(); },

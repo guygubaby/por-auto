@@ -98,6 +98,23 @@ struct Screen {
     outgoing: Vec<Bubble>,
     list_empty: bool,
 }
+fn confirm_stable_draft(
+    title: &str,
+    text: &str,
+    mut observe: impl FnMut() -> Result<(Screen, bool), String>,
+) -> Result<Screen, String> {
+    for _ in 0..3 {
+        let (screen, stable) = observe()?;
+        screen.check_chat(title)?;
+        if screen.editor.as_ref().and_then(|e| e.text.as_deref()) != Some(text) {
+            return Err("输入内容已变化，未点击发送或清理；请检查手机草稿".into());
+        }
+        if stable {
+            return Ok(screen);
+        }
+    }
+    Err("页面持续变化，未点击发送或清理草稿；请核对手机后重新运行".into())
+}
 fn parse_screen(mut value: serde_json::Value) -> Result<Screen, String> {
     if let Some(items) = value
         .get_mut("items")
@@ -489,12 +506,12 @@ impl<'a> Session<'a> {
         .map_err(|e| e.to_string())?;
         self.click(&Point(point))
     }
-    fn ensure_unchanged(
+    fn screen_unchanged(
         &mut self,
         before: &[u8],
         point: &Point,
         editor: bool,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         self.foreground()?;
         let fresh = android::run(
             self.adb,
@@ -509,9 +526,21 @@ impl<'a> Session<'a> {
                 "screen_changed",
                 "目标区域在识别后发生变化，未点击或清理草稿",
             )?;
-            return Err("页面在识别后发生变化，未点击或清理草稿；请核对手机后重新运行".into());
+            return Ok(false);
         }
-        Ok(())
+        Ok(true)
+    }
+    fn ensure_unchanged(
+        &mut self,
+        before: &[u8],
+        point: &Point,
+        editor: bool,
+    ) -> Result<(), String> {
+        if self.screen_unchanged(before, point, editor)? {
+            Ok(())
+        } else {
+            Err("页面在识别后发生变化，未点击或清理草稿；请核对手机后重新运行".into())
+        }
     }
     fn back(&mut self) -> Result<(), String> {
         self.shell(&["input", "keyevent", "KEYCODE_BACK"])?;
@@ -842,11 +871,18 @@ impl<'a> Session<'a> {
         self.focus_input(Some(chat), screen)?;
         self.type_text(text, Some(chat))?;
         thread::sleep(Duration::from_millis(500));
-        let before = self.observe()?;
-        before.check_chat(&chat.title)?;
-        if before.editor.as_ref().and_then(|e| e.text.as_deref()) != Some(text) {
-            return Err("输入内容未能精确核对，未点击发送；请检查手机草稿".into());
-        }
+        let before = confirm_stable_draft(&chat.title, text, || {
+            let screen = self.observe()?;
+            let stable = match &screen.editor {
+                Some(editor) => self.screen_unchanged(
+                    &fs::read(self.folder.join("visual-last.png")).map_err(|e| e.to_string())?,
+                    &editor.point,
+                    true,
+                )?,
+                None => false,
+            };
+            Ok((screen, stable))
+        })?;
         fs::write(
             folder.join("visual-before-send.json"),
             serde_json::to_vec_pretty(&before).map_err(|e| e.to_string())?,
@@ -863,11 +899,6 @@ impl<'a> Session<'a> {
                 0,
                 "draft_verified",
                 "演练通过：输入内容已核对，未点击发送",
-            )?;
-            self.ensure_unchanged(
-                &fs::read(self.folder.join("visual-last.png")).map_err(|e| e.to_string())?,
-                &before.editor.as_ref().unwrap().point,
-                true,
             )?;
             let mut keys = vec!["input", "keyevent", "KEYCODE_MOVE_END"];
             keys.extend(std::iter::repeat_n(
@@ -897,11 +928,6 @@ impl<'a> Session<'a> {
             return Err("发送按钮与输入框位置不符，未点击".into());
         }
         (self.check)("核对完成，即将点击一次发送")?;
-        self.ensure_unchanged(
-            &fs::read(self.folder.join("visual-last.png")).map_err(|e| e.to_string())?,
-            &editor.point,
-            true,
-        )?;
         history::log(
             folder,
             0,
@@ -1403,6 +1429,46 @@ mod tests {
             outgoing: vec![],
             list_empty: false,
         }
+    }
+    #[test]
+    fn draft_commit_reobserves_transient_changes_without_replaying_input_or_transport_errors() {
+        let mut reads = 0;
+        let value = confirm_stable_draft("文件传输助手", "1", || {
+            reads += 1;
+            Ok((screen(), reads > 1))
+        })
+        .unwrap();
+        assert_eq!(value.editor.unwrap().text.as_deref(), Some("1"));
+        assert_eq!(reads, 2);
+        for change_title in [true, false] {
+            let mut reads = 0;
+            let result = confirm_stable_draft("文件传输助手", "1", || {
+                reads += 1;
+                let mut value = screen();
+                if change_title {
+                    value.title = "其他会话".into();
+                } else {
+                    value.editor.as_mut().unwrap().text = Some("用户的草稿".into());
+                }
+                Ok((value, false))
+            });
+            assert!(result.is_err());
+            assert_eq!(reads, 1);
+        }
+        let mut reads = 0;
+        assert!(confirm_stable_draft("文件传输助手", "1", || {
+            reads += 1;
+            Ok((screen(), false))
+        })
+        .is_err());
+        assert_eq!(reads, 3);
+        let mut reads = 0;
+        assert!(confirm_stable_draft("文件传输助手", "1", || {
+            reads += 1;
+            Err("transport failure".into())
+        })
+        .is_err());
+        assert_eq!(reads, 1);
     }
     #[test]
     fn send_requires_exact_draft_target_new_outgoing_bubble_and_no_error() {
