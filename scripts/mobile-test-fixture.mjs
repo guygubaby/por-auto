@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
@@ -29,8 +29,9 @@ export function adapter(root) {
     rename: fs.renameSync, removeTree: p => fs.rmSync(p, { recursive: true, force: true }), list: fs.readdirSync,
     append: fs.appendFileSync,
     withLock(p, fn) {
-      if (locks.has(p)) { const error = Error('BUSY'); error.code = 'BUSY'; throw error; }
-      locks.add(p); try { return fn(); } finally { locks.delete(p); }
+      const key = resolve(p);
+      if (locks.has(key)) { const error = Error('BUSY'); error.code = 'BUSY'; throw error; }
+      locks.add(key); try { return fn(); } finally { locks.delete(key); }
     },
     request(url, token, limit) {
       requests.push({ url, token });
