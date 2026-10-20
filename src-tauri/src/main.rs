@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod android;
+mod awake;
 mod credentials;
 mod history;
 mod jobs;
@@ -418,7 +419,9 @@ async fn list_wechat_targets(
             .join("recipient-scan")
             .join(uuid::Uuid::new_v4().to_string());
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let mut wake = None;
         let result = (|| {
+            wake = Some(awake::ScreenAwake::start(&adb, &serial)?);
             android::text(
                 &adb,
                 &[
@@ -458,7 +461,14 @@ async fn list_wechat_targets(
             let device = u2::Session::start(&adb, &serial, &resource(&app, "u2.jar")?, &folder)?;
             wechat::discover_progress(&device, &folder, scope, |_| _permit.check())
         })();
+        let restore = wake.as_mut().map_or(Ok(()), awake::ScreenAwake::restore);
         let _ = fs::remove_dir_all(folder);
+        if let Err(error) = restore {
+            return Err(match result {
+                Err(original) => format!("{original}；{error}"),
+                Ok(_) => error,
+            });
+        }
         result
     })
     .await
@@ -549,7 +559,9 @@ fn run_installed(
     }
     let total = installed.workflow.steps.len();
     let context = serde_json::json!({"run":{"id":summary.id,"status":"running","mode":if installed.dry_run {"rehearsal"} else {"send"}},"workflow":{"id":installed.workflow.id,"name":installed.workflow.name,"version":installed.workflow.version},"device":{"serial":serial},"outputs":{}});
+    let mut wake = None;
     let mut read = (|| {
+        wake = Some(awake::ScreenAwake::start(&adb, &serial)?);
         let before = if let Some(request) = &installed.hooks.before_run {
             history::log(&folder, 0, "started", "前置 Hook：请求并解析数据")?;
             let preview = request.with_context(&context)?.fetch(None)?;
@@ -677,11 +689,19 @@ fn run_installed(
             fs::write(folder.join("screen.png"), &bytes).map_err(|e| e.to_string())?;
             Ok(STANDARD.encode(bytes))
         });
-    let warning = match (hook_warning, screenshot.as_ref().err()) {
-        (Some(a), Some(b)) => Some(format!("{a}；截图：{b}")),
-        (Some(a), None) => Some(a),
-        (None, b) => b.cloned(),
-    };
+    let wake_warning = wake
+        .as_mut()
+        .and_then(|guard| guard.restore().err())
+        .map(|e| format!("恢复唤醒设置：{e}"));
+    let warnings: Vec<_> = [
+        hook_warning,
+        screenshot.as_ref().err().map(|e| format!("截图：{e}")),
+        wake_warning,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let warning = (!warnings.is_empty()).then(|| warnings.join("；"));
     if let Some(message) = &warning {
         history::log(&folder, 0, "warning", message)?;
     }

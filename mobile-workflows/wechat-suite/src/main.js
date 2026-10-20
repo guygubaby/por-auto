@@ -82,7 +82,7 @@ module.exports = function (por) {
     else if (type === 1) {
       var value = editRequest(config.input.message.request, false);
       if (dialogs.confirm('测试接口', '现在获取并解析一次内容？不会打开微信或发送消息。')) testRequest(value);
-      next = { type: 'http', request: value, refresh: pick('何时获取最新内容', ['每轮开始时获取一次', '处理每个会话前重新获取']) === 0 ? 'run' : 'recipient' };
+      next = { type: 'http', request: value, refresh: pick('何时获取最新内容', ['每轮开始时获取一次', '进入每个会话后获取最新内容']) === 0 ? 'run' : 'recipient' };
     } else {
       if (!config.hooks.beforeRun || config.hooks.beforeRun.response.type === 'ignore') throw new Error('请先配置能返回文字的前置请求');
       next = { type: 'before_run' };

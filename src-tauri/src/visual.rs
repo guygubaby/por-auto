@@ -212,24 +212,14 @@ impl Screen {
     }
 }
 fn same_title(actual: &str, expected: &str) -> bool {
-    let actual = name_key(actual);
-    let expected = name_key(expected);
-    if actual == expected {
-        return true;
-    }
-    // WeChat adds the group member count to the page title.
-    for (left, right) in [('(', ')'), ('（', '）')] {
-        if let Some((prefix, count)) = actual.rsplit_once(left) {
-            if prefix.trim_end() == expected
-                && count
-                    .strip_suffix(right)
-                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            {
-                return true;
-            }
-        }
-    }
-    false
+    name_key(actual) == name_key(expected) || group_title(actual, expected)
+}
+fn group_title(actual: &str, expected: &str) -> bool {
+    // A searched contact with the same name must not stand in for a group.
+    name_key(actual)
+        .strip_prefix(&format!("{}(", name_key(expected)))
+        .and_then(|s| s.strip_suffix(')'))
+        .is_some_and(|count| !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn name_key(name: &str) -> String {
@@ -435,8 +425,8 @@ impl<'a> Session<'a> {
         thread::sleep(Duration::from_millis(1000));
         Ok(())
     }
-    fn click_row(&mut self, title: &str, page: &str) -> Result<(), String> {
-        (self.check)("正在核对会话头像编号")?;
+    fn click_row(&mut self, title: &str, page: &str, approximate: &Point) -> Result<(), String> {
+        (self.check)("正在核对会话所在行")?;
         self.foreground()?;
         let bytes = android::run(
             self.adb,
@@ -444,10 +434,11 @@ impl<'a> Session<'a> {
         )?;
         self.foreground()?;
         let frame = crate::markers::Frame::new(&bytes)?;
+        self.width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        self.height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
         if frame.points.is_empty() {
             return Err("当前会话列表没有可确认的头像位置，未使用估算坐标".into());
         }
-        fs::write(self.folder.join("visual-labeled.png"), &frame.png).map_err(|e| e.to_string())?;
         fs::write(self.folder.join("visual-grounding-source.png"), &bytes)
             .map_err(|e| e.to_string())?;
         fs::write(
@@ -455,29 +446,47 @@ impl<'a> Session<'a> {
             serde_json::to_vec_pretty(&frame.points).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        let selection: crate::markers::Selection = self
-            .client
-            .observe(&frame.png, &crate::markers::instruction(title, page))?;
-        fs::write(
-            self.folder.join("visual-grounding.json"),
-            serde_json::to_vec_pretty(&selection).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        if !selection.found || name_key(&selection.text) != name_key(title) {
-            return Err(format!("未能将「{title}」和头像编号唯一对应，未点击"));
+        let mut attempts = Vec::new();
+        let mut confirmed = None;
+        for candidate in frame.candidates(approximate.0)? {
+            fs::write(
+                self.folder.join("visual-grounding-candidate.png"),
+                &candidate.png,
+            )
+            .map_err(|e| e.to_string())?;
+            let selection: crate::markers::Selection = self.client.observe(
+                &candidate.png,
+                &crate::markers::instruction(title, page, candidate.id),
+            )?;
+            attempts.push(json!({"candidate":candidate.id,"crop":[0,candidate.top,self.width,candidate.bottom],"selection":selection}));
+            fs::write(
+                self.folder.join("visual-grounding.json"),
+                serde_json::to_vec_pretty(&json!({"target":title,"page":page,"attempts":attempts}))
+                    .map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            if !selection.found {
+                continue;
+            }
+            if name_key(&selection.text) != name_key(title)
+                || selection.marker != Some(candidate.id)
+            {
+                return Err("候选行与模型返回内容不一致，未点击".into());
+            }
+            confirmed = Some(frame.selected(&selection)?);
+            break;
         }
-        let point = frame.selected(&selection)?;
+        let point =
+            confirmed.ok_or_else(|| format!("没有确认「{title}」所在的完整会话行，未点击"))?;
         self.ensure_unchanged(&bytes, &Point(point), false)?;
         fs::write(
             self.folder.join("visual-grounding.json"),
             serde_json::to_vec_pretty(
-                &json!({"selection":selection,"point":point,"page":page,"target":title}),
+                &json!({"attempts":attempts,"point":point,"page":page,"target":title}),
             )
             .map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        self.width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        self.height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
         self.click(&Point(point))
     }
     fn ensure_unchanged(
@@ -578,11 +587,19 @@ impl<'a> Session<'a> {
             return Err("第一个会话名称无法完整识别，未点击".into());
         }
         let title = first.text.clone();
-        self.click_row(&title, "home")?;
+        self.click_row(&title, "home", &first.point)?;
         self.confirm_chat(&title)?;
         Ok(Chat { title })
     }
     fn open_named(&mut self, title: &str) -> Result<Chat, String> {
+        if self.named_page(title)?.is_none() {
+            return Err(format!("未能唯一匹配完整会话「{title}」，未打开"));
+        }
+        Ok(Chat {
+            title: title.into(),
+        })
+    }
+    fn named_page(&mut self, title: &str) -> Result<Option<Screen>, String> {
         let mut home = self.home()?;
         let visible: Vec<_> = home
             .items
@@ -593,8 +610,11 @@ impl<'a> Session<'a> {
                     && name_key(&i.text) == name_key(title)
             })
             .collect();
+        if visible.len() > 1 {
+            return Ok(None);
+        }
         if visible.len() == 1 {
-            self.click_row(title, "home")?;
+            self.click_row(title, "home", &visible[0].point)?;
         } else {
             if home.unique("search").is_err() {
                 home = self.observe_for("Locate the top-right magnifying-glass search icon on the home screen. Include it as role search. Do not confuse it with the adjacent plus icon.")?;
@@ -631,16 +651,13 @@ impl<'a> Session<'a> {
                 })
                 .collect();
             if exact.len() != 1 {
-                return Err(format!("搜索「{title}」没有唯一的完整匹配，已停止"));
+                return Ok(None);
             }
-            self.click_row(title, "search")?;
+            self.click_row(title, "search", &exact[0].point)?;
         }
-        self.confirm_chat(title)?;
-        Ok(Chat {
-            title: title.into(),
-        })
+        Ok(Some(self.confirm_chat(title)?))
     }
-    fn confirm_chat(&mut self, title: &str) -> Result<(), String> {
+    fn confirm_chat(&mut self, title: &str) -> Result<Screen, String> {
         for attempt in 0..4 {
             if attempt > 0 {
                 thread::sleep(Duration::from_millis(800));
@@ -650,7 +667,8 @@ impl<'a> Session<'a> {
                 quote(title)
             ))?;
             if screen.page == "chat" {
-                return screen.check_chat(title);
+                screen.check_chat(title)?;
+                return Ok(screen);
             }
             if !["home", "search", "groups"].contains(&screen.page.as_str()) {
                 break;
@@ -677,6 +695,14 @@ impl<'a> Session<'a> {
         Ok(screen)
     }
     fn open_group(&mut self, title: &str) -> Result<Chat, String> {
+        if self
+            .named_page(title)?
+            .is_some_and(|screen| group_title(&screen.title, title))
+        {
+            return Ok(Chat {
+                title: title.into(),
+            });
+        }
         let mut screen = self.recipient_page(Scope::Groups)?;
         for page in 0..300 {
             let matches: Vec<_> = screen
@@ -688,7 +714,7 @@ impl<'a> Session<'a> {
                 return Err("群列表存在重名，已停止".into());
             }
             if !matches.is_empty() {
-                self.click_row(title, "groups")?;
+                self.click_row(title, "groups", &matches[0].point)?;
                 self.confirm_chat(title)?;
                 return Ok(Chat {
                     title: title.into(),
@@ -1323,13 +1349,18 @@ pub fn execute(
                     frozen,
                     dry_run,
                     |message| report(current_step.get(), workflow.steps.len(), message, "started"),
-                    |target, text, child| {
-                        if input.recipients.scope == Scope::Groups {
-                            device.open_group(&target.title)?;
-                        } else {
-                            device.open_named(&target.title)?;
+                    |action| match action {
+                        wechat::TargetAction::Open(target, _) => {
+                            if input.recipients.scope == Scope::Groups {
+                                device.open_group(&target.title)?;
+                            } else {
+                                device.open_named(&target.title)?;
+                            }
+                            Ok(())
                         }
-                        device.send(target, text, child)
+                        wechat::TargetAction::Send(target, text, child) => {
+                            device.send(target, text, child).map(|_| ())
+                        }
                     },
                 )?;
                 outputs.extend(result);
@@ -1382,6 +1413,10 @@ mod tests {
         assert!(before.check_chat("另一个人").is_err());
         assert!(same_title("测试群（123）", "测试群"));
         assert!(!same_title("测试群聊（123）", "测试群"));
+        assert!(group_title("测试群（123）", "测试群"));
+        assert!(group_title("测试群(2)(123)", "测试群(2)"));
+        assert!(!group_title("测试群", "测试群"));
+        assert!(!group_title("测试群(abc)", "测试群"));
         assert!(Point([1001, 1]).pixels(1080, 2280).is_err());
         let mut unreadable = before;
         unreadable.certain = false;
@@ -1520,13 +1555,30 @@ mod tests {
             let image = std::path::PathBuf::from(image);
             if let Ok(target) = std::env::var("POR_VISUAL_GROUND_TARGET") {
                 let frame = crate::markers::Frame::new(&fs::read(&image).unwrap()).unwrap();
-                fs::write(image.with_extension("marked.png"), &frame.png).unwrap();
                 let page =
                     std::env::var("POR_VISUAL_GROUND_PAGE").unwrap_or_else(|_| "search".into());
-                let selection: crate::markers::Selection = VisionClient::for_phone(&root)
-                    .unwrap()
-                    .observe(&frame.png, &crate::markers::instruction(&target, &page))
-                    .unwrap();
+                let approximate: Point = serde_json::from_str(
+                    &std::env::var("POR_VISUAL_GROUND_POINT")
+                        .unwrap_or_else(|_| "[500,500]".into()),
+                )
+                .unwrap();
+                let client = VisionClient::for_phone(&root).unwrap();
+                let mut matched = None;
+                for candidate in frame.candidates(approximate.0).unwrap() {
+                    fs::write(image.with_extension("candidate.png"), &candidate.png).unwrap();
+                    let selection: crate::markers::Selection = client
+                        .observe(
+                            &candidate.png,
+                            &crate::markers::instruction(&target, &page, candidate.id),
+                        )
+                        .unwrap();
+                    if selection.found {
+                        assert_eq!(selection.marker, Some(candidate.id));
+                        matched = Some(selection);
+                        break;
+                    }
+                }
+                let selection = matched.expect("no candidate row matched the requested full name");
                 fs::write(
                     image.with_extension("grounding.json"),
                     serde_json::to_vec_pretty(&selection).unwrap(),
@@ -1589,6 +1641,7 @@ mod tests {
             );
         }
         let (_, folder) = history::create_folder(&root.join("runs")).unwrap();
+        let mut awake = crate::awake::ScreenAwake::start(&adb, &serial).unwrap();
         let result = execute(
             &root,
             &workflow,
@@ -1602,12 +1655,18 @@ mod tests {
                 Ok(())
             },
         );
+        let wake_cleanup = awake.restore();
         fs::write(
             folder.join("test-outcome.json"),
-            serde_json::to_vec_pretty(&json!({"workflow":workflow.id,"dryRun":dry_run,"ok":result.is_ok(),"error":result.as_ref().err(),"outputs":result.as_ref().ok()}))
+            serde_json::to_vec_pretty(&json!({"workflow":workflow.id,"dryRun":dry_run,"ok":result.is_ok(),"error":result.as_ref().err(),"outputs":result.as_ref().ok(),"wakeCleanupError":wake_cleanup.as_ref().err()}))
                 .unwrap(),
         )
         .unwrap();
+        assert!(
+            wake_cleanup.is_ok(),
+            "{}",
+            wake_cleanup.err().unwrap_or_default()
+        );
         assert!(result.is_ok(), "{}", result.err().unwrap_or_default());
         if dry_run && workflow.sends_messages() {
             let mut evidence = fs::read_to_string(folder.join("events.jsonl")).unwrap();

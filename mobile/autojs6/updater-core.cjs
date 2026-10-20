@@ -61,6 +61,19 @@ function catalog(value) {
   return { schemaVersion: 1, name: String(value.name || '手机脚本'), workflows: workflows };
 }
 
+function storeItems(value) {
+  var ids = [];
+  return value.available.concat(value.installed).filter(function (p) {
+    if (ids.indexOf(p.id) >= 0) return false;
+    ids.push(p.id); return true;
+  }).map(function (p) {
+    var installed = value.installed.filter(function (item) { return item.id === p.id; })[0] || null;
+    var available = value.available.filter(function (item) { return item.id === p.id; })[0] || null;
+    return { id: p.id, name: p.name, description: p.description, installed: installed, available: available,
+      update: !!(installed && available && available.versionCode > installed.versionCode) };
+  });
+}
+
 function create(io, root, inputSource) {
   var origin = source(inputSource);
   var key = io.sha256(io.encode(origin.url + '\n' + origin.reference));
@@ -168,6 +181,20 @@ function create(io, root, inputSource) {
       return install(p, onlineReader(snapshot.commit, token));
     });
   }
+  function uninstall(packageId) {
+    if (!id(packageId)) fail('脚本标识无效');
+    return locked(function () {
+      var current = state();
+      if (!current.installed.some(function (p) { return p.id === packageId; })) return { removed: false, warning: null };
+      current.installed = current.installed.filter(function (p) { return p.id !== packageId; });
+      writeJson(stateFile, current);
+      try {
+        var pattern = new RegExp('^' + packageId + '-[0-9]+-[a-f0-9]{64}$');
+        io.list(store + '/versions').filter(function (name) { return pattern.test(name); }).forEach(function (name) { io.removeTree(store + '/versions/' + name); });
+        return { removed: true, warning: null };
+      } catch (_) { return { removed: true, warning: '工作流已移除，部分缓存未能清理；配置与日志仍保留。' }; }
+    });
+  }
   function importBundle(bundle) {
     return locked(function () {
       if (!object(bundle) || bundle.schemaVersion !== 1 || !Array.isArray(bundle.files) || bundle.files.length > 4096) fail('离线脚本包格式无效');
@@ -255,7 +282,7 @@ function create(io, root, inputSource) {
       }) };
     });
   }
-  return { check: check, install: installOnline, importBundle: importBundle, run: run, list: list, exportLogs: exportLogs, source: origin };
+  return { refresh: function (token) { return locked(function () { return refresh(token); }); }, check: check, install: installOnline, uninstall: uninstall, importBundle: importBundle, run: run, list: list, exportLogs: exportLogs, source: origin };
 }
 
-module.exports = { create: create, catalog: catalog, source: source, relative: relative, versionAtLeast: versionAtLeast, launcherVersion: LAUNCHER_VERSION, limits: { file: MAX_FILE, package: MAX_PACKAGE, catalog: MAX_CATALOG } };
+module.exports = { create: create, catalog: catalog, storeItems: storeItems, source: source, relative: relative, versionAtLeast: versionAtLeast, launcherVersion: LAUNCHER_VERSION, limits: { file: MAX_FILE, package: MAX_PACKAGE, catalog: MAX_CATALOG } };

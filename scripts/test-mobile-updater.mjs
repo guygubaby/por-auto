@@ -102,6 +102,43 @@ test('bad hash, partial download, downgrade and changed bytes without version bu
   assert.match(manager.importBundle(script(1).bundle).errors[0].message, /降级/);
 }));
 
+test('store refresh lists new versions without installing and keeps offline-only packages visible', async () => fixture((env, manager) => {
+  manager.importBundle(script().bundle);
+  online(env, script(2));
+  manager.refresh('read-only-test-token');
+  assert.equal(env.requests.length, 2, 'refresh only requests the commit and catalog');
+  assert.equal(manager.list().installed[0].versionCode, 1);
+  const [item] = core.storeItems(manager.list());
+  assert.equal(item.installed.versionCode, 1); assert.equal(item.available.versionCode, 2); assert.equal(item.update, true);
+  const offline = core.storeItems({ installed: [script().p], available: [] });
+  assert.equal(offline[0].installed.id, 'hello'); assert.equal(offline[0].available, null); assert.equal(offline[0].update, false);
+  assert.equal(core.storeItems({ installed: [], available: [script(2).p] })[0].installed, null);
+  manager.install('hello', 'read-only-test-token');
+  assert.equal(core.storeItems(manager.list())[0].update, false);
+  assert.equal(manager.list().installed[0].versionCode, 2);
+}));
+
+test('uninstall is exclusive and atomic, deletes script versions and preserves config and run logs', async () => fixture((env, manager) => {
+  manager.importBundle(script().bundle);
+  const load = env.io.load;
+  env.io.load = p => { assert.throws(() => manager.uninstall('hello'), /BUSY/); return load(p); };
+  assert.equal(manager.run('hello').status, 'completed');
+  env.hooks.beforeWrite = p => { if (p.endsWith('/state.json')) throw Error('disk full'); };
+  assert.throws(() => manager.uninstall('hello'), /disk full/);
+  assert.equal(manager.list().installed.length, 1);
+  delete env.hooks.beforeWrite;
+  assert.deepEqual(manager.uninstall('hello'), { removed: true, warning: null });
+  assert.deepEqual(manager.list().installed, []);
+  assert.throws(() => manager.run('hello'), /先安装/);
+  const store = join(env.root, 'sources', sha(Buffer.from(`${origin.url}\nmain`)));
+  assert.equal(fs.readdirSync(join(store, 'versions')).length, 0);
+  assert.equal(JSON.parse(fs.readFileSync(join(store, 'config/hello.json'))).runs, 1);
+  assert.equal(manager.exportLogs().records.length, 1);
+  manager.importBundle(script(2).bundle);
+  assert.equal(manager.run('hello').status, 'completed');
+  assert.equal(JSON.parse(fs.readFileSync(join(store, 'config/hello.json'))).runs, 2);
+}));
+
 test('pointer write failure preserves previous version and a completed staged copy can be safely retried', async () => fixture((env, manager) => {
   manager.importBundle(script().bundle);
   env.hooks.beforeWrite = p => { if (p.endsWith('/state.json')) throw Error('disk full'); };
@@ -170,6 +207,8 @@ test('actual source package includes verified helper modules and produces a stan
   assert.deepEqual(manager.importBundle(bundle).errors, []);
   const bootstrap = await buildBootstrap(bundle);
   new vm.Script(bootstrap);
+  assert.ok(bootstrap.startsWith('"ui";'), 'the store needs AutoJs6 UI mode');
+  assert.ok(bootstrap.includes('手机工作流商店'));
   assert.ok(bootstrap.includes('createAutoJs6Runtime'));
   assert.ok(!bootstrap.includes('node:fs'));
 }));

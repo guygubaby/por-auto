@@ -29,20 +29,25 @@
       "name": "微信手机工作流（预览）",
       "description": "预览版，微信页面兼容性正在验收。在手机独立执行打开微信、读取昵称、首个会话、文件传输助手和批量消息工作流。支持消息配置、HTTP 获取和生命周期请求；默认预演，不点击发送。需要无障碍服务、截图授权和可访问的图像模型接口。",
       "version": "1.0.0",
-      "versionCode": 8,
+      "versionCode": 16,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
           "path": "android.js",
-          "size": 20176,
-          "sha256": "1d434846fb9c64f3983edd111c032370ffd69e67878cdd3925ef4284912f6ff0"
+          "size": 27570,
+          "sha256": "87561caede6305395242901235c967bae3e0e08a4147e568409b668e5ac6fad1"
+        },
+        {
+          "path": "capture.js",
+          "size": 484,
+          "sha256": "0c5613dfabf19f5cc2d92bddfb729a783e1af3041d36ea54aa6324533237a1a6"
         },
         {
           "path": "core.js",
-          "size": 19713,
-          "sha256": "6d1f2ab7406c00d9bcc1a8e7dad413bf30103cc5fed234c93beb70a0fa67e9ae"
+          "size": 20755,
+          "sha256": "226895608e91e07e275dd62aa0847f1e564112ce7669469527d9953129c1be34"
         },
         {
           "path": "definitions.js",
@@ -51,13 +56,13 @@
         },
         {
           "path": "main.js",
-          "size": 13202,
-          "sha256": "44d4594d0dd0c6a8ca735ee8f2c0805cc505c35912d81b6686fb8e391e5a6986"
+          "size": 13208,
+          "sha256": "bca496744e043f86248324adbc7cc5de7fb679149eb38921ce41af8ecd814f50"
         },
         {
           "path": "markers.js",
-          "size": 4124,
-          "sha256": "04dd69daac80406ab968c7f66d8931925a3724db3cc5aeac29bbb0d53959f161"
+          "size": 4977,
+          "sha256": "c8a9247dbbaf84fe55ebb5929f9466b5410c7f198d0107251271439dc4dc1565"
         },
         {
           "path": "provider.js",

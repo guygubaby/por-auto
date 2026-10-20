@@ -533,13 +533,22 @@ pub fn broadcast(
         frozen_message,
         dry_run,
         &mut report,
-        |target, text, child| {
-            let chat = open_named(device, child, &target.title)?;
-            send_text(device, &chat, text, child, dry_run)
+        |action| match action {
+            TargetAction::Open(target, child) => {
+                open_named(device, child, &target.title).map(|_| ())
+            }
+            TargetAction::Send(target, text, child) => {
+                send_text(device, target, text, child, dry_run).map(|_| ())
+            }
         },
     )?;
     home(device, folder)?;
     Ok(outputs)
+}
+
+pub enum TargetAction<'a> {
+    Open(&'a Chat, &'a Path),
+    Send(&'a Chat, &'a str, &'a Path),
 }
 
 pub fn broadcast_to(
@@ -550,7 +559,7 @@ pub fn broadcast_to(
     frozen_message: Option<String>,
     dry_run: bool,
     mut report: impl FnMut(&str) -> Result<(), String>,
-    mut send: impl FnMut(&Chat, &str, &Path) -> Result<String, String>,
+    mut execute: impl FnMut(TargetAction<'_>) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
     if !list.complete {
         return Err("接收会话列表未读取完整，未开始发送".into());
@@ -602,6 +611,10 @@ pub fn broadcast_to(
         let child = folder.join(format!("target-{:04}", i + 1));
         fs::create_dir_all(&child).map_err(|e| e.to_string())?;
         let result = (|| {
+            deliveries[i].status = "opening".into();
+            deliveries[i].updated_at = history::now();
+            save_deliveries(folder, &deliveries)?;
+            execute(TargetAction::Open(target, &child))?;
             let text = if let Some(message) = &frozen_message {
                 message.clone()
             } else {
@@ -610,11 +623,21 @@ pub fn broadcast_to(
                     json!({"title":target.title,"index":i+1,"total":targets.len()});
                 input.message_for(&context)?
             };
+            history::log(
+                &child,
+                0,
+                "message_prepared",
+                if frozen_message.is_some() {
+                    "使用本轮固定消息"
+                } else {
+                    "已进入目标会话，获取本次最新消息"
+                },
+            )?;
             deliveries[i].status = if dry_run { "rehearsing" } else { "sending" }.into();
             deliveries[i].message = Some(text.clone());
             deliveries[i].updated_at = history::now();
             save_deliveries(folder, &deliveries)?;
-            send(target, &text, &child)
+            execute(TargetAction::Send(target, &text, &child))
         })();
         deliveries[i].updated_at = history::now();
         match result {
@@ -623,9 +646,13 @@ pub fn broadcast_to(
                 completed += 1;
             }
             Err(error) => {
-                let intent = fs::read_to_string(child.join("events.jsonl"))
-                    .unwrap_or_default()
-                    .contains("send_requested");
+                let intent = match fs::read_to_string(child.join("events.jsonl")) {
+                    Ok(events) => events.lines().any(|line| {
+                        serde_json::from_str::<Value>(line)
+                            .map_or(true, |event| event["status"] == "send_requested")
+                    }),
+                    Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+                };
                 deliveries[i].status = if intent { "uncertain" } else { "failed" }.into();
                 deliveries[i].error = Some(error.clone());
                 for remaining in &mut deliveries[i + 1..] {
@@ -851,6 +878,127 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recipient_http_fetch_happens_after_open_and_an_open_failure_never_fetches_or_sends() {
+        use std::{
+            io::{BufRead, BufReader},
+            net::TcpListener,
+            sync::{Arc, Mutex},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let sequence = Arc::new(Mutex::new(Vec::new()));
+        let server_sequence = sequence.clone();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                request.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            assert!(request.starts_with("GET /message?recipient=A "));
+            let mut calls = server_sequence.lock().unwrap();
+            assert_eq!(calls.as_slice(), ["open"]);
+            calls.push("fetch");
+            drop(calls);
+            let body = "fresh-after-open";
+            write!(
+                reader.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let input: SendInput = serde_json::from_value(json!({
+            "message":{"type":"http","refresh":"recipient","request":{"url":format!("http://{address}/message"),"method":"GET","query":[{"name":"recipient","value":"{{recipient.title}}"}],"headers":[],"auth":{"type":"none"},"body":null,"response":{"type":"text"},"timeoutSeconds":5}},
+            "recipients":{"scope":"groups","mode":"all","names":[]},"intervalMs":500
+        })).unwrap();
+        input.validate().unwrap();
+        let list = || TargetList {
+            items: vec![Chat { title: "A".into() }],
+            source: "fixture".into(),
+            scanned_at: history::now(),
+            complete: true,
+        };
+        let success = folder();
+        broadcast_to(
+            &success,
+            &input,
+            &json!({}),
+            list(),
+            None,
+            true,
+            |_| Ok(()),
+            |action| {
+                match action {
+                    TargetAction::Open(_, _) => sequence.lock().unwrap().push("open"),
+                    TargetAction::Send(target, text, _) => {
+                        assert_eq!(target.title, "A");
+                        assert_eq!(text, "fresh-after-open");
+                        sequence.lock().unwrap().push("send");
+                    }
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            sequence.lock().unwrap().as_slice(),
+            ["open", "fetch", "send"]
+        );
+
+        let untouched = TcpListener::bind("127.0.0.1:0").unwrap();
+        untouched.set_nonblocking(true).unwrap();
+        let mut failing_input = input;
+        let crate::send_input::Message::Http { request, .. } = &mut failing_input.message else {
+            unreachable!()
+        };
+        request.url = format!("http://{}/message", untouched.local_addr().unwrap());
+        let failure = folder();
+        let error = broadcast_to(
+            &failure,
+            &failing_input,
+            &json!({}),
+            list(),
+            None,
+            true,
+            |_| Ok(()),
+            |action| {
+                let TargetAction::Open(_, child) = action else {
+                    panic!("must not send after an open failure")
+                };
+                history::log(
+                    child,
+                    0,
+                    "observed",
+                    "conversation name includes send_requested",
+                )?;
+                Err("open failed".into())
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("open failed"));
+        assert_eq!(
+            untouched.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        let records: Vec<Delivery> =
+            serde_json::from_slice(&fs::read(failure.join("targets.json")).unwrap()).unwrap();
+        assert_eq!(records[0].status, "failed");
+        assert!(records[0].message.is_none());
+        fs::remove_dir_all(success).unwrap();
+        fs::remove_dir_all(failure).unwrap();
+    }
+
+    #[test]
     fn shared_batch_stops_on_uncertain_send_and_keeps_every_target_state() {
         use crate::send_input::{Message, Recipients};
         let folder = std::env::temp_dir().join(format!("por-batch-state-{}", uuid::Uuid::new_v4()));
@@ -882,14 +1030,17 @@ mod tests {
             Some("Ok".into()),
             false,
             |_| Ok(()),
-            |target, text, child| {
+            |action| {
+                let TargetAction::Send(target, text, child) = action else {
+                    return Ok(());
+                };
                 assert_eq!(text, "Ok");
                 calls.push(target.title.clone());
                 if target.title == "B" {
                     history::log(child, 0, "send_requested", "test intent")?;
                     Err("outcome unknown".into())
                 } else {
-                    Ok("observed".into())
+                    Ok(())
                 }
             },
         );
@@ -935,10 +1086,13 @@ mod tests {
             Some("Ok".into()),
             true,
             |_| Ok(()),
-            |_, text, child| {
+            |action| {
+                let TargetAction::Send(_, text, child) = action else {
+                    return Ok(());
+                };
                 assert_eq!(text, "Ok");
                 history::log(child, 0, "draft_verified", "verified without send")?;
-                Ok("rehearsed".into())
+                Ok(())
             },
         )
         .unwrap();
@@ -989,10 +1143,13 @@ mod tests {
             Some("Ok".into()),
             true,
             |_| Ok(()),
-            |chat, text, _| {
+            |action| {
+                let TargetAction::Send(chat, text, _) = action else {
+                    return Ok(());
+                };
                 assert_eq!(text, "Ok");
                 visited.push(chat.title.clone());
-                Ok("rehearsed".into())
+                Ok(())
             },
         )
         .unwrap();

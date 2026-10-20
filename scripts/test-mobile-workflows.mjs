@@ -22,12 +22,13 @@ const http = loadMobile(mobilePath + 'request.js');
 const definitions = loadMobile(mobilePath + 'definitions.js');
 const markers = loadMobile(mobilePath + 'markers.js');
 const provider = loadMobile(mobilePath + 'provider.js');
+const capture = loadMobile(mobilePath + 'capture.js');
 const workflow = id => definitions.workflows.find(w => w.id === id);
 const pair = (role, text, point, value = null) => ({ role, text, point, value, complete: true });
 const request = (response = { type: 'text' }) => ({ url: 'https://example.invalid/message', method: 'GET', query: [], headers: [], auth: { type: 'none' }, body: null, response, timeoutSeconds: 20 });
 const input = (message = { type: 'manual', text: 'Ok' }, names = ['群甲', '群乙']) => ({ message, recipients: { scope: 'groups', mode: 'selected', names }, intervalMs: 1000 });
 
-function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '群乙'] } = {}) {
+function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '群乙'], groupTitles = false, profileTitle = '个人信息', nicknameLabel = '昵称' } = {}) {
   const state = { page: 'me', pageIndex: 0, query: '', title: '', draft: existingDraft, outgoing: [], sendClicks: 0, requests: [], records: [], typed: [], clears: 0, logs: [] };
   const tabs = ['微信', '通讯录', '发现', '我'].map((t, i) => pair('tab', t, [125 + i * 250, 950]));
   function observe() {
@@ -35,12 +36,12 @@ function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '
     const s = { page: state.page, title: '', certain: true, items: [], editor: null, outgoing: [], listEmpty: false };
     if (s.page === 'home') s.items = [...tabs, pair('search', '', [850, 50]), pair('more', '', [950, 50]), ...rows('chat')];
     else if (s.page === 'me') s.items = [...tabs, pair('profile', '本地测试 微信号：tester', [500, 150])];
-    else if (s.page === 'profile') { s.title = '个人信息'; s.items = [pair('row', '昵称', [500, 220], '本地测试')]; }
+    else if (s.page === 'profile') { s.title = profileTitle; s.items = [pair('row', nicknameLabel, [500, 220], '本地测试')]; }
     else if (s.page === 'search') { s.items = [pair('search_input', '搜索', [500, 80], state.query)]; if (state.query) s.items.push(pair('chat', state.query, [500, 250])); }
     else if (s.page === 'other') { s.title = '微信菜单'; s.items = [pair('new_chat', '发起群聊', [700, 150])]; }
     else if (s.page === 'new_chat') s.items = [pair('choose_group', '选择一个已有的群', [500, 150])];
     else if (s.page === 'groups') s.items = rows('group');
-    else if (s.page === 'chat') { s.title = state.title; s.editor = { point: [500, 900], text: state.draft }; s.outgoing = state.outgoing; if (state.draft) s.items.push(pair('send', '发送', [900, 900])); }
+    else if (s.page === 'chat') { s.title = state.title + (groupTitles ? '(12)' : ''); s.editor = { point: [500, 900], text: state.draft }; s.outgoing = state.outgoing; if (state.draft) s.items.push(pair('send', '发送', [900, 900])); }
     return structuredClone(s);
   }
   const io = {
@@ -111,6 +112,56 @@ test('all groups and all homepage conversations are enumerated before rehearsal'
   }
 });
 
+test('nickname accepts the profile page and name label used by newer WeChat versions', () => {
+  const { runner, state } = fixture({ profileTitle: '个人资料', nicknameLabel: '名字' });
+  assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
+  assert.equal(state.records.at(-1).status, 'completed');
+  assert.equal(state.sendClicks, 0);
+});
+
+test('screen capture releases the host frame and never copies a missing frame or reuses its cached image', () => {
+  let recycled = false, copies = 0, fallback = false;
+  const source = { recycle() { recycled = true; } }, copy = {};
+  const images = { captureScreen() { return copies ? recycled ? null : (fallback = true, source) : source; }, copy(frame) { assert.equal(frame, source); copies++; return copy; } };
+  assert.equal(capture(images, () => {}), copy);
+  assert.equal(recycled, true);
+  assert.throws(() => capture(images, () => {}), /没有取得新的屏幕画面/);
+  assert.equal(copies, 1); assert.equal(fallback, false);
+  recycled = false;
+  assert.throws(() => capture({ captureScreen: () => source, copy() { throw Error('copy failed'); } }, () => {}), /copy failed/);
+  assert.equal(recycled, true, 'failed copies also release the captured Android image');
+  let attempts = 0;
+  assert.equal(capture({ captureScreen: () => ++attempts === 1 ? null : source, copy: () => copy }, () => {}), copy);
+  assert.equal(attempts, 2);
+});
+
+test('an unconfirmed search page stops before any text input', () => {
+  const { runner, io, state } = fixture();
+  const observe = io.observe;
+  io.observe = hint => { const s = observe(hint); if (s.page === 'search') { s.page = 'home'; s.items = []; } return s; };
+  assert.throws(() => runner.run(workflow('wechat-send-hello'), { dryRun: true }), /没有确认微信全局搜索页/);
+  assert.equal(state.query, ''); assert.deepEqual(state.typed, []); assert.equal(state.sendClicks, 0);
+});
+
+test('invalid image coordinates are reread with no action until valid; transport and verification failures are not retried', () => {
+  const { runner, state, io } = fixture();
+  const observe = io.observe; let reads = 0;
+  io.observe = hint => { const s = observe(hint); if (++reads === 1) s.items[0].point = [148, 2118]; return s; };
+  runner.run(workflow('wechat-open'), { dryRun: true });
+  assert.ok(state.logs.some(e => e.type === 'observation_rejected')); assert.equal(state.sendClicks, 0);
+  const bad = fixture(); let actions = 0, invalidReads = 0;
+  bad.io.click = () => { actions++; };
+  bad.io.observe = () => { invalidReads++; return { certain: true, page: 'other', items: [] }; };
+  assert.throws(() => bad.runner.run(workflow('wechat-open'), { dryRun: true }), /页面识别不完整/);
+  assert.equal(invalidReads, 3); assert.equal(actions, 0);
+  for (const transport of [false, true]) {
+    const stop = fixture(); let calls = 0;
+    stop.io.observe = () => { calls++; if (transport) throw Error('HTTP 429'); return { page: 'other', title: '安全保护中', certain: true, items: [], editor: null, outgoing: [], listEmpty: false }; };
+    assert.throws(() => stop.runner.run(workflow('wechat-open'), { dryRun: true }), transport ? /HTTP 429/ : /账号本人/);
+    assert.equal(calls, 1);
+  }
+});
+
 test('HTTP freshness is once per run or per recipient; lifecycle receives rehearsal and completed context', () => {
   for (const refresh of ['run', 'recipient']) {
     const { runner, state, io } = fixture();
@@ -153,6 +204,45 @@ test('1000 selected conversations preserve durable progress and receive the late
   assert.equal(state.requests.length, 1000); assert.equal(state.typed.length, 1000);
   assert.equal(state.typed[999], 'fresh-1000'); assert.equal(state.clears, 1000); assert.equal(state.sendClicks, 0);
   assert.equal(state.last.targets.length, 1000); assert.ok(state.last.targets.every(t => t.status === 'rehearsed'));
+});
+
+test('1000 groups use one full inventory and exact search instead of rescanning the group picker per recipient', () => {
+  const names = Array.from({ length: 1000 }, (_, i) => '群聊' + (i + 1));
+  const { runner, state, io } = fixture({ targets: names, groupTitles: true });
+  io.record = value => { state.last = structuredClone(value); };
+  const originalClick = io.click, originalScroll = io.scroll, originalRequest = io.request;
+  let pickerEntries = 0, groupScrolls = 0;
+  io.click = point => { if (state.page === 'new_chat') pickerEntries++; return originalClick(point); };
+  io.scroll = up => { if (state.page === 'groups') groupScrolls++; return originalScroll(up); };
+  io.request = value => { assert.equal(state.page, 'chat'); return originalRequest(value); };
+  const value = input({ type: 'http', request: request(), refresh: 'recipient' });
+  value.recipients = { scope: 'groups', mode: 'all', names: [] };
+  runner.run(workflow('wechat-broadcast'), { dryRun: true, input: value });
+  assert.equal(pickerEntries, 1);
+  assert.ok(groupScrolls < 100, 'navigation must not rescan the full picker 1000 times');
+  assert.equal(state.requests.length, 1000);
+  assert.equal(state.clears, 1000); assert.equal(state.sendClicks, 0);
+  assert.equal(state.last.targets.length, 1000);
+  assert.ok(state.last.targets.every(t => t.status === 'rehearsed'));
+});
+
+test('a plain contact title or ambiguous search falls back to the group picker before fetching or typing a message', () => {
+  for (const ambiguous of [false, true]) {
+    const { runner, state, io } = fixture({ targets: ['同名群'] });
+    const originalObserve = io.observe, originalOpen = io.openRow, originalRequest = io.request;
+    const origins = []; let currentOrigin;
+    if (ambiguous) io.observe = hint => {
+      const page = originalObserve(hint);
+      if (page.page === 'home') page.items = page.items.filter(i => !['chat', 'group'].includes(i.role));
+      if (page.page === 'search' && state.query) page.items.push(pair('group', state.query, [500, 350]));
+      return page;
+    };
+    io.openRow = (title, page) => { origins.push(page); currentOrigin = page; return originalOpen(title, page); };
+    io.request = value => { assert.equal(currentOrigin, 'groups'); return originalRequest(value); };
+    runner.run(workflow('wechat-broadcast'), { dryRun: true, input: input({ type: 'http', request: request(), refresh: 'recipient' }, ['同名群']) });
+    assert.deepEqual(origins, ambiguous ? ['groups'] : ['home', 'groups']);
+    assert.deepEqual(state.typed, ['fresh-1']); assert.equal(state.sendClicks, 0);
+  }
 });
 
 test('request parsing, data variables and auth modes enforce boundaries without retries', () => {
@@ -214,11 +304,12 @@ test('phone avatar labels and stale-screen guards match the desktop geometry and
   assert.deepEqual(markers.selected({ found: true, marker: 31, text: '群甲' }, points, '群甲'), [87, 212]);
   for (const marker of [null, '31', 999]) assert.throws(() => markers.selected({ found: true, marker, text: '群甲' }, points, '群甲'), /唯一对应/);
   assert.throws(() => markers.selected({ found: true, marker: 31, text: '群乙' }, points, '群甲'), /唯一对应/);
-  const digitRows = new Set();
-  markers.draw({ 31: points[31] }, width, height, (_x, y, _w, h, color) => {
-    if (color === 0xffffffff) for (let row = y; row < y + h; row++) digitRows.add(row);
-  });
-  assert.ok(digitRows.size >= width * .06, 'avatar label digits must remain legible when the provider scales a tall screenshot');
+  const crops = markers.candidates(points, width, height, [500, 220]);
+  assert.deepEqual(crops.map(c => c.id), [31, 68]);
+  assert.ok(crops[0].bottom <= crops[1].top, 'candidate images must not include the neighboring title');
+  assert.ok(crops[0].bottom - crops[0].top < height / 3);
+  assert.throws(() => markers.candidates(points, width, height, [0, 220]), /位置/);
+  assert.match(markers.instruction('群甲', 'groups', 68), /candidate ID 68/);
   const caret = image.slice();
   for (let y = 710; y < 730; y++) caret[y * width + 100] = 0xffffffff;
   assert.equal(markers.unchanged(image, caret, width, height, [500, 900], true), true);

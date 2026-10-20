@@ -5,9 +5,14 @@ function object(v) { return v && typeof v === 'object' && !Array.isArray(v); }
 function key(name) { return String(name).replace(/\s/g, '').replace(/（/g, '(').replace(/）/g, ')').replace(/[｜丨]/g, '|'); }
 function same(actual, expected) {
   var a = key(actual), b = key(expected);
-  return a === b || a.replace(/\(\d+\)$/, '') === b;
+  return a === b || groupTitle(actual, expected);
+}
+function groupTitle(actual, expected) {
+  var a = key(actual), prefix = key(expected) + '(';
+  return a.indexOf(prefix) === 0 && /^\d+\)$/.test(a.slice(prefix.length));
 }
 function point(p) { return Array.isArray(p) && p.length === 2 && p.every(function (n) { return typeof n === 'number' && n % 1 === 0 && n > 0 && n < 1000; }); }
+function invalidObservation(message) { var error = new Error(message); error.code = 'INVALID_OBSERVATION'; throw error; }
 function message(text) {
   if (typeof text !== 'string' || !text.trim() || unescape(encodeURIComponent(text)).length > 4000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) fail('消息不能为空，最多 4000 字节，不能包含控制字符');
   return text;
@@ -16,14 +21,14 @@ function screen(value) {
   var roles = ['tab', 'search', 'search_input', 'chat', 'group', 'more', 'new_chat', 'choose_group', 'profile', 'row', 'keyboard', 'send', 'back'];
   if (!object(value) || !value.certain || ['home', 'me', 'profile', 'chat', 'search', 'new_chat', 'groups', 'other'].indexOf(value.page) < 0
       || typeof value.title !== 'string' || value.title.length > 500 || value.page === 'chat' && !value.title.trim() || !Array.isArray(value.items) || value.items.length > 100
-      || !Array.isArray(value.outgoing) || value.outgoing.length > 100 || typeof value.listEmpty !== 'boolean') fail('页面识别不完整，未猜测点击位置');
+      || !Array.isArray(value.outgoing) || value.outgoing.length > 100 || typeof value.listEmpty !== 'boolean') invalidObservation('页面识别不完整，未猜测点击位置');
   value.items = value.items.filter(function (i) { return !(object(i) && i.role === 'send' && i.point === null); });
   value.items.forEach(function (i) {
     if (!object(i) || roles.indexOf(i.role) < 0 || typeof i.text !== 'string' || i.text.length > 1000 || !point(i.point) || typeof i.complete !== 'boolean'
-        || !(i.value === null || typeof i.value === 'string' && i.value.length <= 4000)) fail('页面控件格式无效，未点击');
+        || !(i.value === null || typeof i.value === 'string' && i.value.length <= 4000)) invalidObservation('页面控件格式无效，未点击');
   });
-  if (value.editor !== null && (!object(value.editor) || !point(value.editor.point) || !(value.editor.text === null || typeof value.editor.text === 'string' && value.editor.text.length <= 4000))) fail('输入框无法完整读取，未输入');
-  value.outgoing.forEach(function (b) { if (!object(b) || typeof b.text !== 'string' || b.text.length > 4000 || typeof b.pending !== 'boolean' || typeof b.failed !== 'boolean') fail('消息状态格式无效'); });
+  if (value.editor !== null && (!object(value.editor) || !point(value.editor.point) || !(value.editor.text === null || typeof value.editor.text === 'string' && value.editor.text.length <= 4000))) invalidObservation('输入框无法完整读取，未输入');
+  value.outgoing.forEach(function (b) { if (!object(b) || typeof b.text !== 'string' || b.text.length > 4000 || typeof b.pending !== 'boolean' || typeof b.failed !== 'boolean') invalidObservation('消息状态格式无效'); });
   if (value.page === 'other' && value.title === '安全保护中') fail('微信需要账号本人完成验证，当前流程已停止，未重试发送');
   return value;
 }
@@ -73,11 +78,16 @@ function create(io) {
   function observe(hint) {
     for (var attempt = 0; attempt < 3; attempt++) {
       if (++observations > 20000) fail('页面读取次数达到本轮上限');
-      var value = io.observe(hint || '');
-      if (attempt < 2 && object(value) && (value.certain === false || value.page === 'chat' && typeof value.title === 'string' && !value.title.trim())) {
-        io.log('observation_wait', '页面被遮挡或标题不完整，等待后重新读取，未执行操作'); io.sleep(1500); continue;
+      try {
+        var value = io.observe(hint || '');
+        if (attempt < 2 && object(value) && (value.certain === false || value.page === 'chat' && typeof value.title === 'string' && !value.title.trim())) {
+          io.log('observation_wait', '页面被遮挡或标题不完整，等待后重新读取，未执行操作'); io.sleep(1500); continue;
+        }
+        return screen(value);
+      } catch (error) {
+        if (attempt >= 2 || error.code !== 'INVALID_OBSERVATION') throw error;
+        io.log('observation_rejected', '页面格式或坐标无效，重新读取，未执行操作'); io.sleep(800);
       }
-      return screen(value);
     }
   }
   function click(p) { if (!point(p)) fail('点击坐标无效'); io.click(p); io.sleep(800); }
@@ -127,35 +137,42 @@ function create(io) {
   }
   function confirm(title) {
     var s = observe('核对是否已进入目标聊天，标题必须为 ' + JSON.stringify(title) + '；搜索结果不是聊天页面。');
-    checkChat(s, title);
+    checkChat(s, title); return s;
   }
   function openFirst() {
     var s = beginning(home()), list = names(s, 'home');
     if (!list.length) fail('会话列表为空');
     var row = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.text === list[0]; })[0];
-    io.openRow(row.text, 'home'); confirm(row.text); return row.text;
+    io.openRow(row.text, 'home', row.point); confirm(row.text); return row.text;
   }
   function openNamed(title) {
+    if (!namedPage(title)) fail('没有唯一匹配的完整会话名称：' + title);
+    return title;
+  }
+  function namedPage(title) {
     var s = home(), found = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.complete && key(i.text) === key(title); });
-    if (found.length > 1) fail('会话重名，未打开');
+    if (found.length > 1) return null;
     if (!found.length) {
-      click(unique(s, 'search').point); s = observe();
+      click(unique(s, 'search').point); s = observe('核对全局搜索页及搜索框，输入框显示搜索本地或网络结果时 value 为空字符串。');
+      if (s.page !== 'search') fail('没有确认微信全局搜索页，未输入');
       var search = unique(s, 'search_input');
-      if (s.page !== 'search' || search.value !== '') fail('搜索框已有内容或无法读取，未覆盖');
+      if (search.value !== '') fail('搜索框已有内容或无法读取，未覆盖');
       io.type(title, search.point); io.sleep(800);
       s = observe('精确定位本地搜索结果 ' + JSON.stringify(title) + '，不要选择搜索框或网络建议。');
       if (s.page !== 'search' || unique(s, 'search_input').value !== title) fail('搜索内容未能核对');
       found = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.complete && key(i.text) === key(title); });
     }
-    if (found.length !== 1) fail('没有唯一匹配的完整会话名称：' + title);
-    io.openRow(title, s.page); confirm(title); return title;
+    if (found.length !== 1) return null;
+    io.openRow(title, s.page, found[0].point); return confirm(title);
   }
   function openGroup(title) {
+    var searched = namedPage(title);
+    if (searched && groupTitle(searched.title, title)) return title;
     var s = recipientPage('groups');
     for (var n = 0; n < 300; n++) {
       var found = s.items.filter(function (i) { return i.role === 'group' && i.complete && key(i.text) === key(title); });
       if (found.length > 1) fail('群聊名称重复，未打开');
-      if (found.length) { io.openRow(title, 'groups'); confirm(title); return title; }
+      if (found.length) { io.openRow(title, 'groups', found[0].point); confirm(title); return title; }
       if (n === 0) s = beginning(s);
       else { io.scroll(false); s = observe(); }
       names(s, 'groups');
@@ -169,7 +186,7 @@ function create(io) {
     if (!s.editor) fail('无法确认文字输入框');
     if (dryRun && s.editor.text === text) { io.log('draft_verified', { title: title, retained: true }); return; }
     if (s.editor.text !== '') fail('会话有已有草稿或无法完整读取，未覆盖');
-    io.type(text, s.editor.point); s = observe('精确核对聊天标题和输入框的完整文字。'); checkChat(s, title);
+    io.type(text, s.editor.point, title); s = observe('精确核对聊天标题和输入框的完整文字。'); checkChat(s, title);
     if (!s.editor || s.editor.text !== text) fail('输入内容未能精确核对，未发送，请检查手机草稿');
     io.log('draft_verified', { title: title });
     if (dryRun) {
@@ -270,7 +287,7 @@ function create(io) {
           tap(a.selector, a.skip_if, a.recover_back);
         } else if (a.type === 'read_row') {
           var s = observe('完整读取个人信息页面的昵称。');
-          if (s.page !== 'profile' || s.title !== a.page) fail('当前不是个人信息页面');
+          if (s.page !== 'profile' || [a.page, '个人信息', '个人资料'].indexOf(s.title) < 0) fail('当前不是个人信息页面');
           var found = s.items.filter(function (i) { return i.role === 'row' && i.complete && a.labels.indexOf(i.text) >= 0 && typeof i.value === 'string' && i.value.trim(); });
           if (found.length !== 1) fail('不能唯一读取昵称');
           outputs[a.output] = found[0].value;
