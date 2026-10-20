@@ -226,6 +226,8 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
         "launch.txt",
         "execution.json",
         "visual-last.json",
+        "visual-markers.json",
+        "visual-grounding.json",
         "visual-rejected.json",
         "visual-before-action.json",
         "visual-before-send.json",

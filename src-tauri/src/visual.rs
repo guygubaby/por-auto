@@ -33,7 +33,7 @@ When the plus-button popup menu is open, return page other, title 微信菜单, 
 If WeChat shows 安全保护中 with 验证解除, report page other and title 安全保护中. Never treat verification or account recovery as navigation controls.
 For home/search/groups list: include every visible conversation row as chat/group in top-to-bottom order; text is only the full chat name, NOT time, unread count or preview. Do NOT include service/system entries (公众号, 订阅号消息, 服务通知, 微信团队, 微信运动, 支付服务, 微信支付, 折叠置顶聊天). Mark a partially visible or ellipsized name complete:false; do not expand it from memory. For chat titles keep the member count as visible. Never take a message bubble as a title.
 On the groups picker omit the separately styled grey member count (e.g. (497)); it is metadata, not part of the group name. Keep that count in chat-page titles only.
-On profile page include rows with role row, text the field label (昵称/名字 etc.), value the full field value. On me page the profile entry containing 微信号： must be role profile and text include that visible line. Include top-right plus as role more, 发起群聊 menu entry as new_chat, 选择一个群 as choose_group. For tabs strip unread badge counts from tab text. Mark certain:false if blocked by a dialog, blurry, black or uncertain. All points are centers normalized to 0..1000 in the full screenshot. Don't infer hidden controls. No actions, recommendations, Markdown, or additional fields."#;
+On profile page include rows with role row, text the field label (昵称/名字 etc.), value the full field value. On me page the profile entry containing 微信号： must be role profile and text include that visible line. Include top-right plus as role more, 发起群聊 menu entry as new_chat, 选择一个群 as choose_group. For tabs strip unread badge counts from tab text. Mark certain:false if blocked by a dialog, blurry, black or uncertain. A heads-up notification covering the title or navigation makes the page uncertain; never use its sender or group name as the underlying chat title. A chat requires a completely visible, nonempty top-bar title. All points are centers normalized to 0..1000 in the full screenshot. Don't infer hidden controls. No actions, recommendations, Markdown, or additional fields."#;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +121,7 @@ impl Screen {
             || self.items.len() > 100
             || self.outgoing.len() > 100
             || self.title.len() > 500
+            || (self.page == "chat" && self.title.trim().is_empty())
             || self.items.iter().any(|i| {
                 i.text.len() > 1000
                     || i.value.as_ref().is_some_and(|v| v.len() > 4000)
@@ -434,6 +435,75 @@ impl<'a> Session<'a> {
         thread::sleep(Duration::from_millis(1000));
         Ok(())
     }
+    fn click_row(&mut self, title: &str, page: &str) -> Result<(), String> {
+        (self.check)("正在核对会话头像编号")?;
+        self.foreground()?;
+        let bytes = android::run(
+            self.adb,
+            &["-s", self.serial, "exec-out", "screencap", "-p"],
+        )?;
+        self.foreground()?;
+        let frame = crate::markers::Frame::new(&bytes)?;
+        if frame.points.is_empty() {
+            return Err("当前会话列表没有可确认的头像位置，未使用估算坐标".into());
+        }
+        fs::write(self.folder.join("visual-labeled.png"), &frame.png).map_err(|e| e.to_string())?;
+        fs::write(self.folder.join("visual-grounding-source.png"), &bytes)
+            .map_err(|e| e.to_string())?;
+        fs::write(
+            self.folder.join("visual-markers.json"),
+            serde_json::to_vec_pretty(&frame.points).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let selection: crate::markers::Selection = self
+            .client
+            .observe(&frame.png, &crate::markers::instruction(title, page))?;
+        fs::write(
+            self.folder.join("visual-grounding.json"),
+            serde_json::to_vec_pretty(&selection).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if !selection.found || name_key(&selection.text) != name_key(title) {
+            return Err(format!("未能将「{title}」和头像编号唯一对应，未点击"));
+        }
+        let point = frame.selected(&selection)?;
+        self.ensure_unchanged(&bytes, &Point(point), false)?;
+        fs::write(
+            self.folder.join("visual-grounding.json"),
+            serde_json::to_vec_pretty(
+                &json!({"selection":selection,"point":point,"page":page,"target":title}),
+            )
+            .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        self.width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        self.height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        self.click(&Point(point))
+    }
+    fn ensure_unchanged(
+        &mut self,
+        before: &[u8],
+        point: &Point,
+        editor: bool,
+    ) -> Result<(), String> {
+        self.foreground()?;
+        let fresh = android::run(
+            self.adb,
+            &["-s", self.serial, "exec-out", "screencap", "-p"],
+        )?;
+        self.foreground()?;
+        if !crate::markers::unchanged(before, &fresh, point.0, editor)? {
+            fs::write(self.folder.join("visual-changed.png"), fresh).map_err(|e| e.to_string())?;
+            history::log(
+                self.folder,
+                0,
+                "screen_changed",
+                "目标区域在识别后发生变化，未点击或清理草稿",
+            )?;
+            return Err("页面在识别后发生变化，未点击或清理草稿；请核对手机后重新运行".into());
+        }
+        Ok(())
+    }
     fn back(&mut self) -> Result<(), String> {
         self.shell(&["input", "keyevent", "KEYCODE_BACK"])?;
         thread::sleep(Duration::from_millis(650));
@@ -508,7 +578,7 @@ impl<'a> Session<'a> {
             return Err("第一个会话名称无法完整识别，未点击".into());
         }
         let title = first.text.clone();
-        self.click(&first.point)?;
+        self.click_row(&title, "home")?;
         self.confirm_chat(&title)?;
         Ok(Chat { title })
     }
@@ -524,7 +594,7 @@ impl<'a> Session<'a> {
             })
             .collect();
         if visible.len() == 1 {
-            self.click(&visible[0].point)?;
+            self.click_row(title, "home")?;
         } else {
             if home.unique("search").is_err() {
                 home = self.observe_for("Locate the top-right magnifying-glass search icon on the home screen. Include it as role search. Do not confuse it with the adjacent plus icon.")?;
@@ -544,7 +614,10 @@ impl<'a> Session<'a> {
             self.focus_input(None, search)?;
             self.type_text(title, None)?;
             thread::sleep(Duration::from_millis(1000));
-            let results = self.observe()?;
+            let results = self.observe_for(&format!(
+                "Locate the exact local conversation/function result named {} below the search field. Ignore online search suggestions. Report the clickable result row as chat/group and its actual center, not the query field or the area below the row. Coordinates use the entire screenshot.",
+                quote(title)
+            ))?;
             if results.page != "search" {
                 return Err("搜索页面已改变，未进入任何会话".into());
             }
@@ -560,7 +633,7 @@ impl<'a> Session<'a> {
             if exact.len() != 1 {
                 return Err(format!("搜索「{title}」没有唯一的完整匹配，已停止"));
             }
-            self.click(&exact[0].point)?;
+            self.click_row(title, "search")?;
         }
         self.confirm_chat(title)?;
         Ok(Chat {
@@ -572,7 +645,10 @@ impl<'a> Session<'a> {
             if attempt > 0 {
                 thread::sleep(Duration::from_millis(800));
             }
-            let screen = self.observe()?;
+            let screen = self.observe_for(&format!(
+                "Verify whether navigation has reached the chat named {}. Read the exact top-bar title. A search result or a search query with this name is not an open chat.",
+                quote(title)
+            ))?;
             if screen.page == "chat" {
                 return screen.check_chat(title);
             }
@@ -611,8 +687,8 @@ impl<'a> Session<'a> {
             if matches.len() > 1 {
                 return Err("群列表存在重名，已停止".into());
             }
-            if let Some(item) = matches.first() {
-                self.click(&item.point)?;
+            if !matches.is_empty() {
+                self.click_row(title, "groups")?;
                 self.confirm_chat(title)?;
                 return Ok(Chat {
                     title: title.into(),
@@ -762,7 +838,11 @@ impl<'a> Session<'a> {
                 "draft_verified",
                 "演练通过：输入内容已核对，未点击发送",
             )?;
-            self.foreground()?;
+            self.ensure_unchanged(
+                &fs::read(self.folder.join("visual-last.png")).map_err(|e| e.to_string())?,
+                &before.editor.as_ref().unwrap().point,
+                true,
+            )?;
             let mut keys = vec!["input", "keyevent", "KEYCODE_MOVE_END"];
             keys.extend(std::iter::repeat_n(
                 "KEYCODE_DEL",
@@ -791,6 +871,11 @@ impl<'a> Session<'a> {
             return Err("发送按钮与输入框位置不符，未点击".into());
         }
         (self.check)("核对完成，即将点击一次发送")?;
+        self.ensure_unchanged(
+            &fs::read(self.folder.join("visual-last.png")).map_err(|e| e.to_string())?,
+            &editor.point,
+            true,
+        )?;
         history::log(
             folder,
             0,
@@ -1301,6 +1386,9 @@ mod tests {
         let mut unreadable = before;
         unreadable.certain = false;
         assert!(unreadable.validate().is_err());
+        unreadable.certain = true;
+        unreadable.title.clear();
+        assert!(unreadable.validate().is_err());
     }
     #[test]
     fn miniapp_boundary_requires_both_page_title_and_search_label() {
@@ -1430,6 +1518,32 @@ mod tests {
         }
         if let Ok(image) = std::env::var("POR_VISUAL_IMAGE") {
             let image = std::path::PathBuf::from(image);
+            if let Ok(target) = std::env::var("POR_VISUAL_GROUND_TARGET") {
+                let frame = crate::markers::Frame::new(&fs::read(&image).unwrap()).unwrap();
+                fs::write(image.with_extension("marked.png"), &frame.png).unwrap();
+                let page =
+                    std::env::var("POR_VISUAL_GROUND_PAGE").unwrap_or_else(|_| "search".into());
+                let selection: crate::markers::Selection = VisionClient::for_phone(&root)
+                    .unwrap()
+                    .observe(&frame.png, &crate::markers::instruction(&target, &page))
+                    .unwrap();
+                fs::write(
+                    image.with_extension("grounding.json"),
+                    serde_json::to_vec_pretty(&selection).unwrap(),
+                )
+                .unwrap();
+                assert!(selection.found && name_key(&selection.text) == name_key(&target));
+                let point = frame.selected(&selection).unwrap();
+                if let Ok(range) = std::env::var("POR_VISUAL_GROUND_Y_RANGE") {
+                    let (min, max) = range.split_once(':').unwrap();
+                    assert!(
+                        (min.parse::<u16>().unwrap()..=max.parse::<u16>().unwrap())
+                            .contains(&point[1]),
+                        "selected marker is outside the expected target row"
+                    );
+                }
+                return;
+            }
             let value: serde_json::Value = VisionClient::for_phone(&root)
                 .unwrap()
                 .observe(&fs::read(&image).unwrap(), PROTOCOL)
@@ -1439,10 +1553,7 @@ mod tests {
                 serde_json::to_vec_pretty(&value).unwrap(),
             )
             .unwrap();
-            serde_json::from_value::<Screen>(value)
-                .unwrap()
-                .validate()
-                .unwrap();
+            parse_screen(value).unwrap().validate().unwrap();
             return;
         }
         assert!(crate::schedule::valid_serial(&serial));

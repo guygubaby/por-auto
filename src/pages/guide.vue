@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import MobileSetup from '../components/MobileSetup.vue';
 definePage({ meta: { title: '使用指引', description: '完成首次连接，了解工作流安装、运行和问题反馈。' } });
 </script>
 <template>
+  <div class="space-y-4">
+  <MobileSetup />
   <section class="rounded-card border border-line bg-surface p-4">
     <h2 class="text-sm font-semibold">连接前需要做什么</h2>
     <ol class="mt-4 space-y-4 text-sm leading-5 text-ink-secondary" role="list">
@@ -13,4 +16,5 @@ definePage({ meta: { title: '使用指引', description: '完成首次连接，�
     </ol>
     <p class="mt-4 border-t border-line pt-4 text-xs leading-5 text-ink-muted">仍找不到手机？换一根能传输数据的数据线或 USB 接口。Windows 部分手机需要品牌官方 USB 驱动。全部配置和记录保存在本机，无需部署后端服务。</p>
   </section>
+  </div>
 </template>

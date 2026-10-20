@@ -4,6 +4,8 @@ mod android;
 mod credentials;
 mod history;
 mod jobs;
+mod markers;
+mod mobile_assets;
 mod provider;
 mod registry;
 mod schedule;
@@ -760,6 +762,19 @@ async fn list_runs(app: AppHandle) -> Reply<Vec<history::Summary>> {
 }
 
 #[tauri::command]
+async fn export_mobile_scripts(
+    app: AppHandle,
+    kind: mobile_assets::Asset,
+) -> Reply<Option<String>> {
+    blocking(move || mobile_assets::export(&app, kind)).await
+}
+
+#[tauri::command]
+async fn open_mobile_runtime() -> Reply<()> {
+    blocking(mobile_assets::open_runtime).await
+}
+
+#[tauri::command]
 async fn run_details(app: AppHandle, id: String) -> Reply<serde_json::Value> {
     blocking(move || history::details(&data_dir(&app)?.join("runs"), &id)).await
 }
@@ -1070,6 +1085,8 @@ fn main() {
             run_details,
             delete_runs,
             export_runs,
+            export_mobile_scripts,
+            open_mobile_runtime,
             list_schedules,
             preview_cron,
             save_schedule,

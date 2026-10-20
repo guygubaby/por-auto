@@ -1,12 +1,12 @@
 {
   "name": "wechat-connection-demo",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "pnpm mobile:check && vue-tsc --noEmit && vite build",
     "test:devices": "node --test scripts/test-device-batch.mjs",
     "test:schedules": "node --test scripts/test-schedules.mjs",
     "test:updates": "node --test scripts/test-release.mjs scripts/test-app-updater.mjs",
@@ -21,7 +21,7 @@
     "test:adb-paths": "node scripts/test-adb-paths.mjs",
     "mobile:bundle": "node scripts/mobile-scripts.mjs bundle",
     "mobile:check": "node scripts/mobile-scripts.mjs check",
-    "test:mobile": "node --test scripts/test-mobile-updater.mjs"
+    "test:mobile": "node --test scripts/test-mobile-updater.mjs scripts/test-mobile-workflows.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.57.0",

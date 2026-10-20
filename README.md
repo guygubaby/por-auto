@@ -15,7 +15,7 @@ Windows 10/11 x64 安装包生成后位于 `deliverables/`。使用步骤见 [�
 
 部分 Windows 手机需品牌官方 USB 驱动。手机端 USB 调试授权、解锁和微信登录需要用户完成。当前试用包没有商业代码签名证书，Windows 可能提示未知发布者。
 
-### 原生控件兼容（0.3.1 开发版）
+### 原生控件兼容（0.3.2 开发版）
 
 默认运行器使用原生页面控件，已移除独立 OCR。vivo X21 / Android 9 / 微信 8.0.79 在 uiautomator2 与 AutoJs6 下返回空根节点，不能宣称原生路径兼容。空树时原生模式停止；不会静默切换到模型或猜坐标。
 
@@ -45,9 +45,15 @@ Windows 10/11 x64 安装包生成后位于 `deliverables/`。使用步骤见 [�
 
 手机可使用官方 AutoJs6 6.7.0+ 独立运行 JS。导入 [固定启动器](mobile/autojs6/bootstrap.js) 后，启动时检查 GitHub 脚本目录，也可手动更新、安装或导入离线包。启动器内置不操作微信的测试示例；业务脚本更新不需要重新安装 AutoJs6 或 PC 软件。
 
+手机目录现在还包含「微信手机工作流」包：复用桌面的五个工作流定义，提供消息输入、群聊或会话选择、HTTP 测试与字段提取、每轮或每个对象获取最新内容、前后置请求，以及逐个对象的 JSON 结果。默认预演，填入并核对后清理草稿，不点击发送；正式运行需单独选择。该手机运行器使用图像模型观察页面、AutoJs6 无障碍执行操作，未接入独立 OCR；API Key 使用手机 Keystore 加密保存。
+
+手机包不依赖电脑执行，但模型与业务 HTTP 接口必须可从手机访问。开发时使用电脑本机网关需保持 USB 连接和端口映射；这不代表断开电脑后仍能访问该网关。手机工作流的实际页面兼容性仍在验收，手机后台定时执行尚未交付；已有 Cron 继续由桌面端负责。
+
+视觉运行前会检查服务公布的模型输入能力；明确只接受文字的模型会直接提示不支持图片，避免继续操作手机。没有能力元数据的接口仍需要通过图像测试。
+
 脚本位于 `mobile-workflows/<id>/src/`。修改后增加 `workflow.json` 的 `versionCode`，执行 `pnpm mobile:bundle`、`pnpm test:mobile` 和 `pnpm mobile:check`，提交生成文件后发布。下载按单个 Git 提交固定来源，逐文件校验 SHA-256，完整写入新版本目录后原子切换；配置和日志独立保存。运行与更新互斥，失败不自动重试业务任务。
 
-构建同时生成 `deliverables/PorAuto-AutoJs6-bootstrap.js` 与 `deliverables/PorAuto-mobile-scripts.json`，后者可由 PC 传到手机离线导入。私有仓库令牌仅在当前启动器会话使用。完整使用、脚本入口约定及限制见 [手机脚本说明](mobile-workflows/README.md)。本轮未添加 PC 图形化安装/同步按钮或 PC→AutoJs6 任务通信。
+桌面端「使用指引 → 手机独立运行」可打开 AutoJs6 官方下载页、保存启动脚本和离线工作流包，再传到手机导入。构建同时生成 `deliverables/PorAuto-AutoJs6-bootstrap.js` 与 `deliverables/PorAuto-mobile-scripts.json`。私有仓库令牌仅在当前启动器会话使用。完整使用、脚本入口约定及限制见 [手机脚本说明](mobile-workflows/README.md)。目前仍需在手机安装运行环境并导入脚本，未提供 PC 一键安装或 PC→AutoJs6 任务通信。
 
 ## 消息与生命周期配置（引擎 3）
 

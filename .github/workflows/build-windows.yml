@@ -22,6 +22,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.93.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm registry:check
+      - run: pnpm test:mobile
       - run: pnpm prepare:adb windows
       - run: pnpm prepare:u2
       - name: Verify Windows ADB resource paths

@@ -5025,7 +5025,7 @@ dependencies = [
 
 [[package]]
 name = "wechat-connection-demo"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5033,6 +5033,7 @@ dependencies = [
  "croner",
  "keyring",
  "minisign-verify",
+ "png 0.18.1",
  "reqwest",
  "roxmltree",
  "semver",
