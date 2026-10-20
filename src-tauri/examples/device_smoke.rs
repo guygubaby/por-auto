@@ -3,6 +3,9 @@
 #[path = "../src/android.rs"]
 mod android;
 #[allow(dead_code)]
+#[path = "../src/credentials.rs"]
+mod credentials;
+#[allow(dead_code)]
 #[path = "../src/history.rs"]
 mod history;
 #[allow(dead_code)]
@@ -42,6 +45,7 @@ fn main() {
     let result = workflow::execute_with_input(
         &flow,
         None,
+        false,
         &PathBuf::from(&args[1]),
         &args[0],
         &PathBuf::from(&args[2]),

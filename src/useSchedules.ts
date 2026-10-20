@@ -29,7 +29,7 @@ export interface ScheduleInput {
 interface ScheduleView { tasks: Schedule[]; runningIds: string[]; error: string | null }
 
 export function snapshotChanged(current: Installed, saved: Installed): boolean {
-  const state = (item: Installed) => [item.key, item.workflow.version, item.commit, item.input ?? null, item.hooks ?? { beforeRun: null, afterRun: null }];
+  const state = (item: Installed) => [item.key, item.workflow.version, item.commit, item.input ?? null, item.hooks ?? { beforeRun: null, afterRun: null }, item.executionMode ?? 'native', item.dryRun ?? false];
   return JSON.stringify(state(current)) !== JSON.stringify(state(saved));
 }
 

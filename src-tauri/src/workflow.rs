@@ -137,6 +137,35 @@ impl Selector {
 }
 
 impl Workflow {
+    pub fn validate_input(&self, input: Option<&SendInput>) -> Result<(), String> {
+        if self.configurable() != input.is_some() {
+            return Err("此工作流的输入缺失或不适用".into());
+        }
+        if let Some(input) = input {
+            input.validate()?;
+        }
+        Ok(())
+    }
+    pub fn sends_messages(&self) -> bool {
+        self.steps.iter().any(|s| {
+            matches!(
+                s.action,
+                Action::WechatSendText { .. } | Action::WechatBroadcast
+            )
+        })
+    }
+    pub fn validate_run(&self, dry_run: bool) -> Result<(), String> {
+        self.validate()?;
+        if dry_run
+            && self
+                .steps
+                .iter()
+                .any(|s| matches!(s.action, Action::Tap { .. }))
+        {
+            return Err("此工作流含通用点击，无法作为消息演练运行；请使用标准微信发送动作".into());
+        }
+        Ok(())
+    }
     pub fn configurable(&self) -> bool {
         self.steps
             .iter()
@@ -410,6 +439,14 @@ pub fn read_row(xml: &str, page: &str, labels: &[String]) -> Result<String, Stri
 
 pub(crate) fn page_document<'a>(xml: &'a str, package: &str) -> Result<Document<'a>, String> {
     let doc = Document::parse(xml).map_err(|_| "手机页面结构无法解析")?;
+    if package == "com.tencent.mm"
+        && ["安全保护中", "验证解除"].iter().all(|label| {
+            doc.descendants()
+                .any(|n| n.attribute("package") == Some(package) && node_label(n) == *label)
+        })
+    {
+        return Err(wechat::VERIFICATION_REQUIRED.into());
+    }
     let mut nodes = doc
         .descendants()
         .filter(|n| n.attribute("package") == Some(package))
@@ -437,16 +474,15 @@ fn screen(device: &impl Automation, package: &str, folder: &Path) -> Result<Stri
 pub fn execute_with_input(
     workflow: &Workflow,
     input: Option<&SendInput>,
+    dry_run: bool,
     adb: &Path,
     serial: &str,
     jar: &Path,
     folder: &Path,
     mut report: impl FnMut(usize, usize, &str, &str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
-    workflow.validate()?;
-    if workflow.configurable() {
-        input.ok_or("请先配置消息内容与接收会话")?.validate()?;
-    }
+    workflow.validate_run(dry_run)?;
+    workflow.validate_input(input)?;
     let devices = android::parse_devices(&android::text(adb, &["devices", "-l"])?);
     if !devices
         .iter()
@@ -535,18 +571,19 @@ pub fn execute_with_input(
                     serde_json::to_vec_pretty(&config.redacted()).map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;
-                let context = serde_json::json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running"}});
+                let context = serde_json::json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running","mode":if dry_run {"rehearsal"} else {"send"}}});
                 outputs.extend(wechat::broadcast(
                     &device,
                     folder,
                     config,
                     &context,
+                    dry_run,
                     |message| report(index + 1, workflow.steps.len(), message, "started"),
                 )?);
             }
             Action::WechatSendText { text } => {
                 let target = chat.as_ref().ok_or("尚未确认首个会话，禁止发送")?;
-                let status = wechat::send_text(&device, target, text, folder)?;
+                let status = wechat::send_text(&device, target, text, folder, dry_run)?;
                 outputs.insert("message".into(), text.clone());
                 outputs.insert("send_status".into(), status);
             }
@@ -606,6 +643,22 @@ pub fn execute_with_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verification_pages_stop_native_navigation() {
+        let xml = r#"<hierarchy><node package="com.tencent.mm" text="安全保护中"/><node package="com.tencent.mm" text="验证解除"/></hierarchy>"#;
+        assert!(
+            page_document(xml, "com.tencent.mm").is_err_and(|e| e == wechat::VERIFICATION_REQUIRED)
+        );
+    }
+    #[test]
+    fn rehearsal_rejects_generic_taps_but_accepts_the_standard_sender() {
+        let sender = Workflow::parse(BUNDLED_WORKFLOWS[3].as_bytes()).unwrap();
+        assert!(sender.validate_run(true).is_ok());
+        let generic = Workflow::parse(BUNDLED.as_bytes()).unwrap();
+        assert!(generic.validate_run(true).is_err());
+        assert!(generic.validate_run(false).is_ok());
+    }
 
     #[test]
     fn empty_app_nodes_stop_before_navigation_instead_of_returning_to_the_launcher() {

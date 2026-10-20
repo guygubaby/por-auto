@@ -23,6 +23,8 @@ pub struct Summary {
     pub schedule_name: Option<String>,
     #[serde(default)]
     pub trigger: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -161,11 +163,17 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
     let hierarchy = fs::read_to_string(path.join("hierarchy.xml")).ok();
     let mut targets = load_json("targets.json")?;
     if let Some(items) = targets.as_array_mut() {
-        let last_sent = items.iter().rposition(|item| item["status"] == "sent");
+        let last_sent = items
+            .iter()
+            .rposition(|item| item["status"] == "sent" || item["status"] == "rehearsed");
         for (index, item) in items.iter_mut().enumerate() {
             if item["status"] == "sending" {
                 item["status"] = json!("uncertain");
                 item["error"] = json!("运行中断，发送结果待人工核对；未自动重发");
+            }
+            if item["status"] == "rehearsing" {
+                item["status"] = json!("skipped");
+                item["error"] = json!("演练中断，未触发发送；如有演练草稿请在手机核对");
             }
             if index == 0
                 || Some(index) == last_sent
@@ -180,6 +188,10 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
                         "chat-open.xml",
                         "before-send.xml",
                         "after-send.xml",
+                        "after-draft.xml",
+                        "visual-before-send.json",
+                        "visual-after-send.json",
+                        "visual-after-draft.json",
                     ]
                     .into_iter()
                     .filter_map(|name| {
@@ -207,10 +219,18 @@ pub fn details(root: &Path, id: &str) -> Result<Value, String> {
         "chat-open.xml",
         "before-send.xml",
         "after-send.xml",
+        "after-draft.xml",
         "native-hierarchy.xml",
         "ocr-hierarchy.xml",
         "ocr-words.json",
         "launch.txt",
+        "execution.json",
+        "visual-last.json",
+        "visual-rejected.json",
+        "visual-before-action.json",
+        "visual-before-send.json",
+        "visual-after-send.json",
+        "visual-after-draft.json",
     ]
     .into_iter()
     .filter_map(|name| {
@@ -284,6 +304,7 @@ mod tests {
                     schedule_id: None,
                     schedule_name: None,
                     trigger: None,
+                    dry_run: false,
                 },
             )
             .unwrap();

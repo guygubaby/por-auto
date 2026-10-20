@@ -58,6 +58,10 @@ test('schedule controller rejects double submissions and ignores stale refreshes
     assert.equal(snapshotChanged(installed, { ...installed, input: null, hooks: { beforeRun: null, afterRun: null } }), false);
     assert.equal(snapshotChanged({ ...installed, input: { message: { type: 'manual', text: 'Ok' } } }, installed), true);
     assert.equal(snapshotChanged({ ...installed, hooks: { beforeRun: { url: 'https://example.com' }, afterRun: null } }, installed), true);
+    assert.equal(snapshotChanged({ ...installed, executionMode: 'visual' }, installed), true);
+    assert.equal(snapshotChanged({ ...installed, executionMode: 'native' }, installed), false);
+    assert.equal(snapshotChanged({ ...installed, dryRun: true }, installed), true);
+    assert.equal(snapshotChanged({ ...installed, dryRun: false }, installed), false);
     let controller;
     app = renderer.createApp({ setup() { controller = useSchedules(); return () => null; } });
     app.mount({});

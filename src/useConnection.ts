@@ -15,7 +15,8 @@ export interface Device { serial: string; state: string; model: string }
 interface Environment { ready: boolean; version: string; platform: string; devices: Device[]; automation_version?: string }
 export interface Workflow { id: string; name: string; version: string; description: string; package: string; inputSchema?: { $ref: string }; steps: { id?: string; name: string; action?: { type: string; text?: string } }[] }
 export interface Registry { url: string; reference: string; name: string; commit: string; workflows: Workflow[] }
-export interface Installed { key: string; registryUrl: string; reference: string; commit: string; workflow: Workflow; input?: SendInput | null; hooks?: Hooks }
+export type ExecutionMode = 'native' | 'visual';
+export interface Installed { key: string; registryUrl: string; reference: string; commit: string; workflow: Workflow; input?: SendInput | null; hooks?: Hooks; executionMode?: ExecutionMode; dryRun?: boolean }
 export interface Store { schemaVersion: number; registries: Registry[]; installed: Installed[] }
 export interface RunResult { nickname: string | null; outputs: Record<string, string>; workflow_name: string; workflow_version: string; serial: string; timestamp: number; screenshot: string | null; error: string | null; warning: string | null; folder: string }
 export interface DeviceRun { serial: string; model: string; status: 'queued' | 'running' | 'completed' | 'failed'; result: RunResult | null; error: string | null; progress?: Progress }
@@ -46,7 +47,7 @@ export const useConnectionStore = defineStore('connection', () => {
     return { total: deviceRunsRef.value.length, succeeded, failed, done: succeeded + failed, running: deviceRunsRef.value.filter(run => run.status === 'running').length, queued: deviceRunsRef.value.filter(run => run.status === 'queued').length, current: deviceRunsRef.value.findIndex(run => run.status === 'running') + 1 };
   });
   const defaultUrl = DEFAULT_REGISTRY_URL;
-  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: bundledWorkflows }], installed: bundledWorkflows.map(workflow => ({ key: `preview-${workflow.id}`, registryUrl: defaultUrl, reference: 'main', commit: 'bundled', workflow })) });
+  const storeRef = shallowRef<Store>({ schemaVersion: 1, registries: [{ url: defaultUrl, reference: 'main', name: 'Por Auto 官方工作流', commit: 'bundled', workflows: bundledWorkflows }], installed: bundledWorkflows.map(workflow => ({ key: `preview-${workflow.id}`, registryUrl: defaultUrl, reference: 'main', commit: 'bundled', dryRun: workflow.steps.some(step => ['wechat_send_text', 'wechat_broadcast'].includes(step.action.type)), workflow })) });
   const workflowKeyRef = ref('preview-wechat-nickname');
   const selectedWorkflowRef = computed(() => storeRef.value.installed.find(item => item.key === workflowKeyRef.value));
   const readyDevicesRef = computed(() => environmentRef.value?.devices.filter(device => device.state === 'device') ?? []);
@@ -99,9 +100,9 @@ export const useConnectionStore = defineStore('connection', () => {
     });
   }
 
-  async function configureWorkflow(item: Installed, input: SendInput | null, hooks: Hooks, secrets: Record<string, string>): Promise<boolean> {
+  async function configureWorkflow(item: Installed, input: SendInput | null, hooks: Hooks, secrets: Record<string, string>, executionMode: ExecutionMode = item.executionMode ?? 'native', dryRun: boolean = item.dryRun ?? false): Promise<boolean> {
     return operate(async () => {
-      applyStore(await invoke<Store>('configure_workflow', { key: item.key, input, hooks, secrets }));
+      applyStore(await invoke<Store>('configure_workflow', { key: item.key, input, hooks, secrets, executionMode, dryRun }));
       noticeRef.value = '配置已保存在本机。已有定时任务需勾选更新快照后保存，才会使用新配置。';
     });
   }

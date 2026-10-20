@@ -193,11 +193,15 @@ impl Request {
             credential(&id)?
                 .set_password(secret)
                 .map_err(|_| "保存系统凭据失败，配置未更新")?;
+            let _ = crate::credentials::read_once("http", &id, &self.url, || Ok(secret.into()));
             self.auth.set_credential(id);
         } else {
-            credential(self.auth.credential().unwrap_or(""))?
-                .get_password()
-                .map_err(|_| "请填写鉴权值")?;
+            let id = self.auth.credential().unwrap_or("");
+            crate::credentials::read_once("http", id, &self.url, || {
+                credential(id)?
+                    .get_password()
+                    .map_err(|_| "请重新填写鉴权值；本次会话不再重复请求系统凭据".into())
+            })?;
         }
         Ok(())
     }
@@ -368,9 +372,11 @@ impl Request {
             if id.is_empty() {
                 return Err("请先填写并保存鉴权信息".into());
             }
-            stored = credential(id)?
-                .get_password()
-                .map_err(|_| "无法读取系统凭据，请重新保存鉴权信息")?;
+            stored = crate::credentials::read_once("http", id, &self.url, || {
+                credential(id)?.get_password().map_err(|_| {
+                    "无法读取系统凭据，请重新保存鉴权信息；本次会话不再重复请求".into()
+                })
+            })?;
             &stored
         } else {
             ""
@@ -643,7 +649,7 @@ mod tests {
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || {
-            for _ in 0..3 {
+            for index in 0..7 {
                 let (mut stream, _) = server.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
@@ -658,9 +664,20 @@ mod tests {
                     }
                 }
                 assert!(raw.starts_with("POST /message?lang=zh"));
-                assert!(raw
-                    .to_lowercase()
-                    .contains("authorization: bearer test-secret"));
+                let headers = raw.to_lowercase();
+                match index {
+                    0..=2 => assert!(headers.contains("authorization: bearer test-secret")),
+                    3 => assert!(raw.contains(&format!(
+                        "Basic {}",
+                        STANDARD.encode("test-user:test-secret")
+                    ))),
+                    4 => assert!(headers.contains("x-api-key: test-secret")),
+                    5 => assert!(raw.starts_with("POST /message?lang=zh&api_key=test-secret ")),
+                    6 => assert!(
+                        !headers.contains("authorization:") && !headers.contains("x-api-key:")
+                    ),
+                    _ => unreachable!(),
+                }
                 let body = r#"{"data":{"message":"Ok"}}"#;
                 write!(
                     stream,
@@ -700,6 +717,27 @@ mod tests {
         assert!(preview.raw.contains("message"));
         assert!(preview.message.is_empty());
         assert!(bad_path.fetch(Some("test-secret")).is_err());
+        for auth in [
+            Auth::Basic {
+                username: "test-user".into(),
+                credential: "".into(),
+            },
+            Auth::ApiKey {
+                name: "x-api-key".into(),
+                location: "header".into(),
+                credential: "".into(),
+            },
+            Auth::ApiKey {
+                name: "api_key".into(),
+                location: "query".into(),
+                credential: "".into(),
+            },
+            Auth::None,
+        ] {
+            let mut request = r.clone();
+            request.auth = auth;
+            assert_eq!(request.fetch(Some("test-secret")).unwrap().message, "Ok");
+        }
         worker.join().unwrap();
         assert!(parse(
             r#"{"data":12}"#,

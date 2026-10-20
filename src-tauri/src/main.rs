@@ -1,13 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod android;
+mod credentials;
 mod history;
 mod jobs;
+mod provider;
 mod registry;
 mod schedule;
 mod send_input;
 mod u2;
 mod updater;
+mod visual;
 mod wechat;
 mod workflow;
 
@@ -318,6 +321,8 @@ async fn configure_workflow(
     key: String,
     input: Option<send_input::SendInput>,
     hooks: send_input::Hooks,
+    execution_mode: provider::ExecutionMode,
+    dry_run: Option<bool>,
     secrets: BTreeMap<String, String>,
 ) -> Reply<registry::Store> {
     blocking(move || {
@@ -326,9 +331,51 @@ async fn configure_workflow(
             .maintenance
             .try_write()
             .map_err(|_| "请等待当前任务结束再保存配置")?;
-        registry::configure(&data_dir(&app)?, &key, input, hooks, &secrets)
+        if execution_mode == provider::ExecutionMode::Visual {
+            provider::VisionClient::for_phone(&data_dir(&app)?)?;
+        }
+        registry::configure(
+            &data_dir(&app)?,
+            &key,
+            input,
+            hooks,
+            execution_mode,
+            dry_run.unwrap_or(false),
+            &secrets,
+        )
     })
     .await
+}
+
+#[tauri::command]
+async fn vision_provider(app: AppHandle) -> Reply<Option<provider::Config>> {
+    blocking(move || provider::load(&data_dir(&app)?)).await
+}
+
+#[tauri::command]
+async fn save_vision_provider(
+    app: AppHandle,
+    config: provider::Config,
+    secret: Option<String>,
+) -> Reply<provider::Config> {
+    blocking(move || {
+        let jobs = app.state::<Jobs>();
+        let _guard = jobs
+            .maintenance
+            .try_write()
+            .map_err(|_| "请等待当前任务结束后修改模型设置")?;
+        provider::save(&data_dir(&app)?, config, secret.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn test_vision_provider(
+    app: AppHandle,
+    config: provider::Config,
+    secret: Option<String>,
+) -> Reply<provider::TestResult> {
+    blocking(move || provider::test(&data_dir(&app)?, config, secret.as_deref())).await
 }
 
 #[tauri::command]
@@ -337,7 +384,7 @@ async fn test_http_request(
     secret: Option<String>,
 ) -> Reply<send_input::Preview> {
     blocking(move || {
-        let context=serde_json::json!({"run":{"id":"test-preview","status":"completed","error":null},"workflow":{"id":"test-workflow","name":"测试工作流","version":"1.0.0"},"device":{"serial":"test-device"},"recipient":{"title":"测试会话","index":1,"total":1},"outputs":{"nickname":"测试昵称","send_status":"测试结果","before_hook":"测试数据"}});
+        let context=serde_json::json!({"run":{"id":"test-preview","status":"completed","error":null,"mode":"preview"},"workflow":{"id":"test-workflow","name":"测试工作流","version":"1.0.0"},"device":{"serial":"test-device"},"recipient":{"title":"测试会话","index":1,"total":1},"outputs":{"nickname":"测试昵称","send_status":"测试结果","before_hook":"测试数据"}});
         request.with_context(&context)?.preview(secret.as_deref().filter(|s| !s.is_empty()))
     }).await
 }
@@ -355,6 +402,7 @@ async fn list_wechat_targets(
     app: AppHandle,
     serial: String,
     scope: send_input::Scope,
+    execution_mode: Option<provider::ExecutionMode>,
 ) -> Reply<wechat::TargetList> {
     blocking(move || {
         if !schedule::valid_serial(&serial) {
@@ -393,6 +441,18 @@ async fn list_wechat_targets(
                 ],
             )?;
             thread::sleep(Duration::from_millis(1600));
+            if execution_mode == Some(provider::ExecutionMode::Visual) {
+                let mut check = |_: &str| _permit.check();
+                return visual::Session::start(
+                    &data_dir(&app)?,
+                    &adb,
+                    &serial,
+                    &folder,
+                    false,
+                    &mut check,
+                )?
+                .discover(scope);
+            }
             let device = u2::Session::start(&adb, &serial, &resource(&app, "u2.jar")?, &folder)?;
             wechat::discover_progress(&device, &folder, scope, |_| _permit.check())
         })();
@@ -468,6 +528,7 @@ fn run_installed(
         schedule_id: dispatch.map(|d| d.task.id.clone()),
         schedule_name: dispatch.map(|d| d.task.name.clone()),
         trigger: dispatch.map(|d| d.trigger.into()),
+        dry_run: installed.dry_run,
     };
     history::save_summary(&folder, &summary)?;
     fs::write(
@@ -476,8 +537,16 @@ fn run_installed(
     )
     .map_err(|e| e.to_string())?;
     history::log(&folder, 0, "started", "工作流开始，检查设备与目标应用")?;
+    if installed.dry_run {
+        history::log(
+            &folder,
+            0,
+            "started",
+            "演练模式：填写并核对消息，不点击微信发送；新建草稿核对后清理，已有相同草稿保留",
+        )?;
+    }
     let total = installed.workflow.steps.len();
-    let context = serde_json::json!({"run":{"id":summary.id,"status":"running"},"workflow":{"id":installed.workflow.id,"name":installed.workflow.name,"version":installed.workflow.version},"device":{"serial":serial},"outputs":{}});
+    let context = serde_json::json!({"run":{"id":summary.id,"status":"running","mode":if installed.dry_run {"rehearsal"} else {"send"}},"workflow":{"id":installed.workflow.id,"name":installed.workflow.name,"version":installed.workflow.version},"device":{"serial":serial},"outputs":{}});
     let mut read = (|| {
         let before = if let Some(request) = &installed.hooks.before_run {
             history::log(&folder, 0, "started", "前置 Hook：请求并解析数据")?;
@@ -505,38 +574,61 @@ fn run_installed(
                 input.message = send_input::Message::Manual { text };
             }
         }
-        let mut outputs = workflow::execute_with_input(
-            &installed.workflow,
-            input.as_ref(),
-            &adb,
-            &serial,
-            &resource(app, "u2.jar")?,
-            &folder,
-            |step, count, message, status| {
-                _permit.check()?;
-                history::log_step(
-                    &folder,
-                    step,
-                    step.checked_sub(1)
-                        .and_then(|i| installed.workflow.steps.get(i))
-                        .and_then(|s| s.id.as_deref()),
-                    status,
+        let mut report = |step: usize, count: usize, message: &str, status: &str| {
+            _permit.check()?;
+            history::log_step(
+                &folder,
+                step,
+                step.checked_sub(1)
+                    .and_then(|i| installed.workflow.steps.get(i))
+                    .and_then(|s| s.id.as_deref()),
+                status,
+                message,
+            )?;
+            if status == "started" {
+                progress(
+                    app,
+                    dispatch.is_some(),
+                    &serial,
+                    &installed.key,
+                    step.max(1),
+                    count,
                     message,
-                )?;
-                if status == "started" {
-                    progress(
-                        app,
-                        dispatch.is_some(),
-                        &serial,
-                        &installed.key,
-                        step.max(1),
-                        count,
-                        message,
-                    );
-                }
-                Ok(())
-            },
-        )?;
+                );
+            }
+            Ok(())
+        };
+        let mut outputs = match installed.execution_mode {
+            provider::ExecutionMode::Native => workflow::execute_with_input(
+                &installed.workflow,
+                input.as_ref(),
+                installed.dry_run,
+                &adb,
+                &serial,
+                &resource(app, "u2.jar")?,
+                &folder,
+                &mut report,
+            ),
+            provider::ExecutionMode::Visual => visual::execute(
+                &data_dir(app)?,
+                &installed.workflow,
+                input.as_ref(),
+                installed.dry_run,
+                &adb,
+                &serial,
+                &folder,
+                &report,
+            ),
+        }?;
+        outputs.insert(
+            "run_mode".into(),
+            if installed.dry_run {
+                "演练（未点击发送）"
+            } else {
+                "正式运行"
+            }
+            .into(),
+        );
         if let Some(value) = before {
             outputs.insert("before_hook".into(), value);
         }
@@ -788,6 +880,7 @@ fn run_schedule_logged(app: &AppHandle, dispatch: &schedule::Dispatch) -> Reply<
         schedule_id: Some(task.id.clone()),
         schedule_name: Some(task.name.clone()),
         trigger: Some(dispatch.trigger.into()),
+        dry_run: task.snapshot.dry_run,
     };
     history::save_summary(&folder, &summary)?;
     fs::write(
@@ -964,6 +1057,9 @@ fn main() {
             install_workflow,
             uninstall_workflow,
             configure_workflow,
+            vision_provider,
+            save_vision_provider,
+            test_vision_provider,
             test_http_request,
             parse_http_response,
             list_wechat_targets,

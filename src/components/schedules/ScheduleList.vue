@@ -17,7 +17,7 @@ const statuses: Record<string, string> = { running: '执行中', completed: '已
   <ul v-else class="grid gap-3 lg:grid-cols-2" aria-label="定时任务">
     <li v-for="task in tasks" :key="task.id" class="flex min-w-0 flex-col rounded-card border border-line bg-surface p-4">
       <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0"><h2 class="text-base font-semibold wrap-anywhere">{{ task.name }}</h2><p class="mt-2 text-xs leading-5 text-ink-muted">{{ task.snapshot.workflow.name }} · v{{ task.snapshot.workflow.version }}</p></div>
+        <div class="min-w-0"><h2 class="text-base font-semibold wrap-anywhere">{{ task.name }}</h2><p class="mt-2 text-xs leading-5 text-ink-muted">{{ task.snapshot.workflow.name }} · v{{ task.snapshot.workflow.version }}{{ task.snapshot.dryRun ? ' · 演练' : '' }}</p></div>
         <StatusPill :tone="runningIds.includes(task.id) ? 'warning' : task.enabled ? 'success' : 'neutral'">{{ runningIds.includes(task.id) ? '执行中' : task.enabled ? '已启用' : '已暂停' }}</StatusPill>
       </div>
       <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control bg-surface-soft px-3 py-3"><code class="text-sm text-brand-strong">{{ task.cron }}</code><span class="text-xs text-ink-muted">{{ task.timezone }}</span></div>

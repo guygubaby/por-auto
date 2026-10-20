@@ -17,6 +17,8 @@ use std::{
 };
 
 const PACKAGE: &str = "com.tencent.mm";
+pub const VERIFICATION_REQUIRED: &str =
+    "微信显示「安全保护中」，需要账号本人在手机完成验证解除；当前流程已停止";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Chat {
@@ -410,7 +412,7 @@ fn row_names(xml: &str) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-fn merge_page(names: &mut Vec<String>, page: &[String]) -> Result<(), String> {
+pub(crate) fn merge_page(names: &mut Vec<String>, page: &[String]) -> Result<(), String> {
     if page.iter().collect::<BTreeSet<_>>().len() != page.len() {
         return Err("列表包含同名会话，无法安全区分，未开始发送".into());
     }
@@ -441,7 +443,12 @@ pub fn discover_progress(
         xml = snapshot(device, folder, "group-picker.xml")?;
         tap_label(device, &xml, &["发起群聊"], false)?;
         xml = snapshot(device, folder, "group-picker.xml")?;
-        tap_label(device, &xml, &["选择一个群", "选择群聊"], false)?;
+        tap_label(
+            device,
+            &xml,
+            &["选择一个群", "选择群聊", "选择一个已有的群"],
+            false,
+        )?;
         xml = snapshot(device, folder, "group-picker.xml")?;
         "微信「选择一个群」列表（本次可枚举的群聊）"
     } else {
@@ -507,6 +514,7 @@ pub fn broadcast(
     folder: &Path,
     input: &SendInput,
     context: &Value,
+    dry_run: bool,
     mut report: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<BTreeMap<String, String>, String> {
     input.validate()?;
@@ -517,6 +525,33 @@ pub fn broadcast(
     };
     report("正在读取接收会话列表")?;
     let list = discover_progress(device, folder, input.recipients.scope, &mut report)?;
+    let outputs = broadcast_to(
+        folder,
+        input,
+        context,
+        list,
+        frozen_message,
+        dry_run,
+        &mut report,
+        |target, text, child| {
+            let chat = open_named(device, child, &target.title)?;
+            send_text(device, &chat, text, child, dry_run)
+        },
+    )?;
+    home(device, folder)?;
+    Ok(outputs)
+}
+
+pub fn broadcast_to(
+    folder: &Path,
+    input: &SendInput,
+    context: &Value,
+    list: TargetList,
+    frozen_message: Option<String>,
+    dry_run: bool,
+    mut report: impl FnMut(&str) -> Result<(), String>,
+    mut send: impl FnMut(&Chat, &str, &Path) -> Result<String, String>,
+) -> Result<BTreeMap<String, String>, String> {
     if !list.complete {
         return Err("接收会话列表未读取完整，未开始发送".into());
     }
@@ -575,17 +610,16 @@ pub fn broadcast(
                     json!({"title":target.title,"index":i+1,"total":targets.len()});
                 input.message_for(&context)?
             };
-            let chat = open_named(device, &child, &target.title)?;
-            deliveries[i].status = "sending".into();
+            deliveries[i].status = if dry_run { "rehearsing" } else { "sending" }.into();
             deliveries[i].message = Some(text.clone());
             deliveries[i].updated_at = history::now();
             save_deliveries(folder, &deliveries)?;
-            send_text(device, &chat, &text, &child)
+            send(target, &text, &child)
         })();
         deliveries[i].updated_at = history::now();
         match result {
             Ok(_) => {
-                deliveries[i].status = "sent".into();
+                deliveries[i].status = if dry_run { "rehearsed" } else { "sent" }.into();
                 completed += 1;
             }
             Err(error) => {
@@ -604,37 +638,54 @@ pub fn broadcast(
                     0,
                     "failed",
                     &format!(
-                        "已发送 {completed}/{}；「{}」：{error}",
+                        "已{} {completed}/{}；「{}」：{error}",
+                        if dry_run { "演练" } else { "发送" },
                         targets.len(),
                         target.title
                     ),
                 )?;
                 return Err(format!(
-                    "已发送 {completed}/{}，本轮已停止：「{}」{error}；逐会话记录已保存",
+                    "已{} {completed}/{}，本轮已停止：「{}」{error}；逐会话记录已保存",
+                    if dry_run { "演练" } else { "发送" },
                     targets.len(),
                     target.title
                 ));
             }
         }
         save_deliveries(folder, &deliveries)?;
+        // Keep visual images for the first, latest successful and failed target; all target JSON stays.
+        if i > 1 {
+            for name in ["visual-before-send.png", "visual-after-send.png"] {
+                let _ = fs::remove_file(folder.join(format!("target-{i:04}")).join(name));
+            }
+        }
         history::log(
             folder,
             i + 1,
-            "sent",
-            &format!("已发送 {completed}/{}：{}", targets.len(), target.title),
+            if dry_run { "rehearsed" } else { "sent" },
+            &format!(
+                "已{} {completed}/{}：{}",
+                if dry_run { "演练" } else { "发送" },
+                targets.len(),
+                target.title
+            ),
         )?;
         if i + 1 < targets.len() {
             thread::sleep(Duration::from_millis(input.interval_ms));
         }
     }
-    home(device, folder)?;
-    Ok(BTreeMap::from([
+    let outputs = BTreeMap::from([
         (
             "send_status".into(),
-            format!("已发送 {completed}/{} 个会话", targets.len()),
+            if dry_run {
+                format!("演练通过 {completed}/{} 个会话，未点击发送", targets.len())
+            } else {
+                format!("已发送 {completed}/{} 个会话", targets.len())
+            },
         ),
         ("recipient_source".into(), list.source),
-    ]))
+    ]);
+    Ok(outputs)
 }
 
 fn outgoing_count(doc: &Document<'_>, text: &str) -> usize {
@@ -658,6 +709,7 @@ pub fn send_text(
     chat: &Chat,
     text: &str,
     folder: &Path,
+    dry_run: bool,
 ) -> Result<String, String> {
     let mut xml = snapshot(device, folder, "before-send.xml")?;
     {
@@ -684,7 +736,17 @@ pub fn send_text(
     }
     let doc = document(&xml)?;
     check_title(&doc, chat)?;
-    if !label(editor(&doc)?).is_empty() {
+    let draft = label(editor(&doc)?);
+    if dry_run && draft == text {
+        history::log(
+            folder,
+            0,
+            "draft_verified",
+            "演练通过：已有相同草稿，保留原草稿；未点击发送",
+        )?;
+        return Ok("演练通过：已有相同草稿，未改动草稿或点击发送".into());
+    }
+    if !draft.is_empty() {
         return Err("会话中已有未发送草稿，已停止，未覆盖草稿".into());
     }
     let input = editor(&doc)?;
@@ -712,6 +774,23 @@ pub fn send_text(
     let input = editor(&doc)?;
     if label(input) != text {
         return Err("输入内容校验失败，未点击发送；请检查手机草稿".into());
+    }
+    if dry_run {
+        history::log(
+            folder,
+            0,
+            "draft_verified",
+            "演练通过：输入内容已核对，未点击发送",
+        )?;
+        device.expect_true("setText",json!([{"mask":0x280010,"className":"android.widget.EditText","packageName":PACKAGE,"resourceId":resource_id}, ""]))?;
+        device.settle();
+        let cleared = snapshot(device, folder, "after-draft.xml")?;
+        let cleared = document(&cleared)?;
+        check_title(&cleared, chat)?;
+        if !label(editor(&cleared)?).is_empty() {
+            return Err("演练草稿清理未能确认，未点击发送；请检查手机草稿".into());
+        }
+        return Ok("演练通过：草稿已核对并清理，未点击发送".into());
     }
     let input_bounds = node_bounds(input).ok_or("输入框不可见")?;
     let sends: BTreeSet<_> = doc
@@ -754,6 +833,15 @@ pub fn send_text(
             )?;
             return Ok("已点击发送，看到新的右侧消息（未验证网络送达）".into());
         }
+        if check
+            .as_ref()
+            .err()
+            .is_some_and(|e| e == VERIFICATION_REQUIRED)
+        {
+            return Err(format!(
+                "已点击一次发送；{VERIFICATION_REQUIRED}。发送结果待核对，不会自动重发"
+            ));
+        }
     }
     Err("已点击一次发送，但未能确认新消息；请人工核对会话，勿直接重跑以免重复发送".into())
 }
@@ -761,6 +849,164 @@ pub fn send_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_batch_stops_on_uncertain_send_and_keeps_every_target_state() {
+        use crate::send_input::{Message, Recipients};
+        let folder = std::env::temp_dir().join(format!("por-batch-state-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let input = SendInput {
+            message: Message::Manual { text: "Ok".into() },
+            recipients: Recipients {
+                scope: Scope::Groups,
+                mode: Selection::All,
+                names: vec![],
+            },
+            interval_ms: 500,
+        };
+        let list = TargetList {
+            items: ["A", "B", "C"]
+                .into_iter()
+                .map(|s| Chat { title: s.into() })
+                .collect(),
+            source: "test-list".into(),
+            scanned_at: history::now(),
+            complete: true,
+        };
+        let mut calls = Vec::new();
+        let result = broadcast_to(
+            &folder,
+            &input,
+            &json!({}),
+            list,
+            Some("Ok".into()),
+            false,
+            |_| Ok(()),
+            |target, text, child| {
+                assert_eq!(text, "Ok");
+                calls.push(target.title.clone());
+                if target.title == "B" {
+                    history::log(child, 0, "send_requested", "test intent")?;
+                    Err("outcome unknown".into())
+                } else {
+                    Ok("observed".into())
+                }
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, vec!["A", "B"]);
+        let records: Vec<Delivery> =
+            serde_json::from_slice(&fs::read(folder.join("targets.json")).unwrap()).unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .map(|d| d.status.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sent", "uncertain", "skipped"]
+        );
+        fs::remove_dir_all(folder).unwrap();
+    }
+    #[test]
+    fn rehearsal_batch_records_completed_drafts_separately_from_sent_messages() {
+        use crate::send_input::{Message, Recipients};
+        let folder = folder();
+        let input = SendInput {
+            message: Message::Manual { text: "Ok".into() },
+            recipients: Recipients {
+                scope: Scope::Groups,
+                mode: Selection::All,
+                names: vec![],
+            },
+            interval_ms: 500,
+        };
+        let list = TargetList {
+            items: vec![Chat {
+                title: "测试群".into(),
+            }],
+            source: "test-list".into(),
+            scanned_at: history::now(),
+            complete: true,
+        };
+        let outputs = broadcast_to(
+            &folder,
+            &input,
+            &json!({}),
+            list,
+            Some("Ok".into()),
+            true,
+            |_| Ok(()),
+            |_, text, child| {
+                assert_eq!(text, "Ok");
+                history::log(child, 0, "draft_verified", "verified without send")?;
+                Ok("rehearsed".into())
+            },
+        )
+        .unwrap();
+        assert_eq!(outputs["send_status"], "演练通过 1/1 个会话，未点击发送");
+        let records: Vec<Delivery> =
+            serde_json::from_slice(&fs::read(folder.join("targets.json")).unwrap()).unwrap();
+        assert_eq!(records[0].status, "rehearsed");
+        assert!(!fs::read_to_string(folder.join("events.jsonl"))
+            .unwrap()
+            .contains("send_requested"));
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_thousand_selected_targets_are_not_truncated_or_duplicated() {
+        use crate::send_input::{Message, Recipients};
+        let folder = folder();
+        let names: Vec<_> = (0..1000).map(|i| format!("测试群{i:04}")).collect();
+        let mut input = SendInput {
+            message: Message::Manual { text: "Ok".into() },
+            recipients: Recipients {
+                scope: Scope::Groups,
+                mode: Selection::Selected,
+                names: names.clone(),
+            },
+            interval_ms: 500,
+        };
+        input.validate().unwrap();
+        // Only this fixture bypasses pacing; production inputs enforce at least 500 ms.
+        input.interval_ms = 0;
+        let list = TargetList {
+            items: names
+                .iter()
+                .map(|name| Chat {
+                    title: name.clone(),
+                })
+                .collect(),
+            source: "fixture".into(),
+            scanned_at: history::now(),
+            complete: true,
+        };
+        let mut visited = Vec::new();
+        let outputs = broadcast_to(
+            &folder,
+            &input,
+            &json!({}),
+            list,
+            Some("Ok".into()),
+            true,
+            |_| Ok(()),
+            |chat, text, _| {
+                assert_eq!(text, "Ok");
+                visited.push(chat.title.clone());
+                Ok("rehearsed".into())
+            },
+        )
+        .unwrap();
+        assert_eq!(visited, names);
+        assert_eq!(
+            outputs["send_status"],
+            "演练通过 1000/1000 个会话，未点击发送"
+        );
+        let records: Vec<Delivery> =
+            serde_json::from_slice(&fs::read(folder.join("targets.json")).unwrap()).unwrap();
+        assert_eq!(records.len(), 1000);
+        assert!(records.iter().all(|r| r.status == "rehearsed"));
+        fs::remove_dir_all(folder).unwrap();
+    }
     use std::cell::RefCell;
     use std::collections::VecDeque;
 
@@ -885,7 +1131,7 @@ mod tests {
         let chat = Chat {
             title: "测试联系人".into(),
         };
-        assert!(send_text(&device, &chat, "你好", &folder)
+        assert!(send_text(&device, &chat, "你好", &folder, false)
             .unwrap()
             .contains("未验证网络送达"));
         let calls = device.calls.borrow();
@@ -901,6 +1147,42 @@ mod tests {
     }
 
     #[test]
+    fn rehearsal_verifies_and_clears_its_own_draft_without_any_send_click() {
+        let root = folder();
+        let chat = Chat {
+            title: "测试联系人".into(),
+        };
+        let device = fake(vec![CHAT.into(), typed(), CHAT.into()], false);
+        assert!(send_text(&device, &chat, "你好", &root, true)
+            .unwrap()
+            .contains("未点击发送"));
+        let calls = device.calls.borrow();
+        assert!(!calls.iter().any(|c| c.0 == "click"));
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.0 == "setText")
+                .map(|c| c.1[1].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["你好", ""]
+        );
+        assert!(!fs::read_to_string(root.join("events.jsonl"))
+            .unwrap()
+            .contains("send_requested"));
+        drop(calls);
+        let existing = fake(vec![typed()], false);
+        assert!(send_text(&existing, &chat, "你好", &root, true)
+            .unwrap()
+            .contains("已有相同草稿"));
+        assert!(!existing
+            .calls
+            .borrow()
+            .iter()
+            .any(|c| c.0 == "click" || c.0 == "setText"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn never_clicks_send_when_the_intent_cannot_be_saved() {
         let root = folder();
         fs::create_dir(root.join("events.jsonl")).unwrap();
@@ -911,7 +1193,8 @@ mod tests {
                 title: "测试联系人".into()
             },
             "你好",
-            &root
+            &root,
+            false
         )
         .is_err());
         assert!(!device.calls.borrow().iter().any(|c| c.0 == "click"));
@@ -926,7 +1209,7 @@ mod tests {
         };
         for screen in [typed(), CHAT.replace("测试联系人", "其他人")] {
             let device = fake(vec![screen], false);
-            assert!(send_text(&device, &chat, "你好", &folder).is_err());
+            assert!(send_text(&device, &chat, "你好", &folder, false).is_err());
             assert!(!device
                 .calls
                 .borrow()
@@ -934,7 +1217,7 @@ mod tests {
                 .any(|c| c.0 == "setText" || c.0 == "click"));
         }
         let device = fake(vec![CHAT.into(), typed()], true);
-        assert!(send_text(&device, &chat, "你好", &folder)
+        assert!(send_text(&device, &chat, "你好", &folder, false)
             .unwrap_err()
             .contains("勿直接重跑"));
         assert_eq!(

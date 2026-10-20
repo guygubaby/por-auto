@@ -267,13 +267,8 @@ impl Scheduler {
             {
                 return Err("工作流已卸载，请先重新安装再启用此任务".into());
             }
-            if snapshot.workflow.configurable() {
-                snapshot
-                    .input
-                    .as_ref()
-                    .ok_or("请先在工作流商店配置消息和接收会话，再创建定时任务")?
-                    .validate()?;
-            }
+            snapshot.workflow.validate_run(snapshot.dry_run)?;
+            snapshot.workflow.validate_input(snapshot.input.as_ref())?;
             let mut task = Task {
                 id: old
                     .as_ref()

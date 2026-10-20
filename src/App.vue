@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Cable, CalendarClock, CircleHelp, FolderCheck, History, Library, Monitor, Smartphone } from '@lucide/vue';
+import { Cable, CalendarClock, CircleHelp, FolderCheck, History, Library, Monitor, Settings, Smartphone } from '@lucide/vue';
 import { onMounted, onBeforeUnmount } from 'vue';
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
@@ -16,6 +16,7 @@ const navigation = [
   { to: '/schedules', label: '定时任务', icon: CalendarClock },
   { to: '/history', label: '运行记录', icon: History },
   { to: '/store', label: '工作流商店', icon: Library },
+  { to: '/settings', label: '模型设置', icon: Settings },
   { to: '/guide', label: '使用指引', icon: CircleHelp },
 ];
 onMounted(connection.initializeApp);

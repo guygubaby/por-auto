@@ -33,7 +33,7 @@ jobs:
           pnpm test:adb-paths
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Verify native credential storage
-        run: cargo test --manifest-path src-tauri/Cargo.toml desktop_credentials_are_not_serialized -- --ignored
+        run: cargo test --manifest-path src-tauri/Cargo.toml desktop_credentials -- --ignored
       - run: pnpm tauri build --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

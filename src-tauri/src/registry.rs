@@ -37,6 +37,10 @@ pub struct Installed {
     pub input: Option<crate::send_input::SendInput>,
     #[serde(default)]
     pub hooks: crate::send_input::Hooks,
+    #[serde(default)]
+    pub execution_mode: crate::provider::ExecutionMode,
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -144,6 +148,7 @@ fn keep_official_first(store: &mut Store) -> Result<(), String> {
                 .iter()
                 .any(|w| w.key == key(DEFAULT_URL, "main", &workflow.id))
         {
+            let dry_run = workflow.sends_messages();
             store.installed.push(Installed {
                 key: key(DEFAULT_URL, "main", &workflow.id),
                 registry_url: DEFAULT_URL.into(),
@@ -152,6 +157,8 @@ fn keep_official_first(store: &mut Store) -> Result<(), String> {
                 workflow,
                 input: None,
                 hooks: Default::default(),
+                execution_mode: Default::default(),
+                dry_run,
             });
         }
     }
@@ -392,6 +399,17 @@ pub fn install(directory: &Path, url: &str, reference: &str, id: &str) -> Result
         .find(|w| w.key == item_key)
         .map(|w| w.hooks.clone())
         .unwrap_or_default();
+    let execution_mode = store
+        .installed
+        .iter()
+        .find(|w| w.key == item_key)
+        .map(|w| w.execution_mode.clone())
+        .unwrap_or_default();
+    let dry_run = store
+        .installed
+        .iter()
+        .find(|w| w.key == item_key)
+        .map_or_else(|| workflow.sends_messages(), |w| w.dry_run);
     let item = Installed {
         key: item_key,
         registry_url: url.into(),
@@ -404,6 +422,8 @@ pub fn install(directory: &Path, url: &str, reference: &str, id: &str) -> Result
         workflow,
         input,
         hooks,
+        execution_mode,
+        dry_run,
     };
     store.uninstalled_keys.remove(&item.key);
     store.installed.retain(|w| w.key != item.key);
@@ -428,6 +448,8 @@ pub fn configure(
     installed_key: &str,
     mut input: Option<crate::send_input::SendInput>,
     mut hooks: crate::send_input::Hooks,
+    execution_mode: crate::provider::ExecutionMode,
+    dry_run: bool,
     secrets: &std::collections::BTreeMap<String, String>,
 ) -> Result<Store, String> {
     hooks.validate()?;
@@ -450,8 +472,12 @@ pub fn configure(
         .iter_mut()
         .find(|w| w.key == installed_key)
         .ok_or("请先安装工作流")?;
-    if item.workflow.configurable() != input.is_some() {
-        return Err("此工作流的发送参数缺失或不适用".into());
+    item.workflow.validate_input(input.as_ref())?;
+    item.workflow.validate_run(dry_run)?;
+    if execution_mode == crate::provider::ExecutionMode::Visual
+        && item.workflow.package != "com.tencent.mm"
+    {
+        return Err("当前视觉执行模式仅支持微信工作流".into());
     }
     if let Some(input) = &mut input {
         input.save_secret(secrets.get("message").map(String::as_str))?;
@@ -459,6 +485,8 @@ pub fn configure(
     hooks.save_secrets(secrets)?;
     item.input = input;
     item.hooks = hooks;
+    item.execution_mode = execution_mode;
+    item.dry_run = dry_run;
     save(directory, &store)?;
     Ok(store)
 }
@@ -520,6 +548,8 @@ mod tests {
                 before_run: None,
                 after_run: Some(request.clone()),
             },
+            crate::provider::ExecutionMode::Visual,
+            true,
             &Default::default(),
         )
         .unwrap();
@@ -531,6 +561,11 @@ mod tests {
             .unwrap();
         assert_eq!(updated.input, Some(input));
         assert_eq!(updated.hooks.after_run, Some(request));
+        assert_eq!(
+            updated.execution_mode,
+            crate::provider::ExecutionMode::Visual
+        );
+        assert!(updated.dry_run);
         assert!(!serde_json::to_string(&installed.registries)
             .unwrap()
             .contains("example.com/hook"));
@@ -651,6 +686,18 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let mut store = load(&dir).unwrap();
         let original = store.installed[0].clone();
+        assert!(store
+            .installed
+            .iter()
+            .filter(|w| w.workflow.sends_messages())
+            .all(|w| w.dry_run));
+        let mut legacy_item = serde_json::to_value(&store.installed[3]).unwrap();
+        legacy_item.as_object_mut().unwrap().remove("dryRun");
+        assert!(
+            !serde_json::from_value::<Installed>(legacy_item)
+                .unwrap()
+                .dry_run
+        );
         store.registries[0].workflows[0].version = "1.0.1".into();
         store.registries[0].commit = "a".repeat(40);
         save(&dir, &store).unwrap();
