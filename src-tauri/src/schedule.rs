@@ -187,6 +187,7 @@ impl Scheduler {
                 }
                 validate_fields(&task.name, &task.serials)?;
                 task.snapshot.workflow.validate()?;
+                task.snapshot.bind_saved_http_credentials();
                 upcoming(&task.cron, &task.timezone, history::now(), 1)?;
                 // Restart never replays missed work or a possibly completed device action.
                 if task.last_status.as_deref() == Some("running") {
@@ -507,6 +508,33 @@ mod tests {
             })
             .unwrap();
         scheduler
+    }
+
+    #[test]
+    fn restart_binds_http_credentials_in_frozen_snapshots() {
+        let scheduler = scheduler();
+        let path = scheduler.root.join("schedules.json");
+        let mut store: FileStore = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let id = Uuid::new_v4().to_string();
+        store.tasks[0].snapshot.hooks.before_run = Some(crate::send_input::Request {
+            url: "https://example.com/cron-data".into(),
+            method: "GET".into(),
+            query: vec![],
+            headers: vec![],
+            auth: crate::send_input::Auth::Bearer {
+                credential: id.clone(),
+            },
+            body: None,
+            response: crate::send_input::Response::Text,
+            timeout_seconds: 5,
+        });
+        fs::write(&path, serde_json::to_vec(&store).unwrap()).unwrap();
+        assert!(crate::credentials::check_http(&id, "https://example.com/cron-data").is_err());
+        let reopened = Scheduler::open(scheduler.root.clone());
+        assert!(reopened.view().unwrap().error.is_none());
+        assert!(crate::credentials::check_http(&id, "https://example.com/cron-data").is_ok());
+        assert!(crate::credentials::check_http(&id, "https://different.example/").is_err());
+        fs::remove_dir_all(scheduler.root).unwrap();
     }
 
     #[test]

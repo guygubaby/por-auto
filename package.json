@@ -9,6 +9,7 @@
     "build": "pnpm mobile:check && vue-tsc --noEmit && vite build",
     "test:devices": "node --test scripts/test-device-batch.mjs",
     "test:schedules": "node --test scripts/test-schedules.mjs",
+    "test:http-editor": "node --test scripts/test-http-editor.mjs",
     "test:updates": "node --test scripts/test-release.mjs scripts/test-app-updater.mjs",
     "release:check": "node scripts/release-manifest.mjs --check",
     "tauri": "tauri",

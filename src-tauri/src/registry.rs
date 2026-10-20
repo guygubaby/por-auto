@@ -42,6 +42,23 @@ pub struct Installed {
     #[serde(default)]
     pub dry_run: bool,
 }
+impl Installed {
+    pub fn bind_saved_http_credentials(&self) {
+        if let Some(crate::send_input::SendInput {
+            message: crate::send_input::Message::Http { request, .. },
+            ..
+        }) = &self.input
+        {
+            request.bind_saved_credential();
+        }
+        for request in [&self.hooks.before_run, &self.hooks.after_run]
+            .into_iter()
+            .flatten()
+        {
+            request.bind_saved_credential();
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,6 +194,8 @@ pub fn load(directory: &Path) -> Result<Store, String> {
         }
         for item in &store.installed {
             item.workflow.validate()?;
+            // Bind only saved files, never a new request supplied through IPC.
+            item.bind_saved_http_credentials();
         }
         keep_official_first(&mut store)?;
         return Ok(store);
@@ -494,6 +513,59 @@ pub fn configure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loading_saved_workflows_binds_message_and_both_hooks_without_rewriting_files() {
+        let root = std::env::temp_dir().join(format!("por-http-binding-{}", uuid::Uuid::new_v4()));
+        let mut store = load(&root).unwrap();
+        let ids: Vec<_> = (0..3).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+        let request = |index: usize| crate::send_input::Request {
+            url: format!("https://example.com/{index}"),
+            method: "GET".into(),
+            query: vec![],
+            headers: vec![],
+            auth: crate::send_input::Auth::Bearer {
+                credential: ids[index].clone(),
+            },
+            body: None,
+            response: crate::send_input::Response::Text,
+            timeout_seconds: 5,
+        };
+        let item = store
+            .installed
+            .iter_mut()
+            .find(|item| item.workflow.id == "wechat-broadcast")
+            .unwrap();
+        item.input = Some(crate::send_input::SendInput {
+            message: crate::send_input::Message::Http {
+                request: request(0),
+                refresh: crate::send_input::Refresh::Run,
+            },
+            recipients: crate::send_input::Recipients {
+                scope: crate::send_input::Scope::Groups,
+                mode: crate::send_input::Selection::All,
+                names: vec![],
+            },
+            interval_ms: 1000,
+        });
+        item.hooks.before_run = Some(request(1));
+        item.hooks.after_run = Some(request(2));
+        save(&root, &store).unwrap();
+        let original = fs::read(root.join("workflow-store.json")).unwrap();
+        assert!(crate::credentials::check_http(&ids[0], "https://example.com/0").is_err());
+        load(&root).unwrap();
+        for (index, id) in ids.iter().enumerate() {
+            assert!(
+                crate::credentials::check_http(id, &format!("https://example.com/{index}")).is_ok()
+            );
+            assert!(crate::credentials::check_http(id, "https://different.example/").is_err());
+        }
+        assert_eq!(
+            fs::read(root.join("workflow-store.json")).unwrap(),
+            original
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn every_published_workflow_matches_the_registry_and_native_contract() {

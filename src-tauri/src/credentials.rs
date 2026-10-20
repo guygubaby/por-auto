@@ -5,6 +5,27 @@ use std::{
 
 type Cache = BTreeMap<(String, String, String), Result<String, String>>;
 static VALUES: OnceLock<Mutex<Cache>> = OnceLock::new();
+static HTTP_ENDPOINTS: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
+
+// Only saved local configurations and freshly supplied secrets establish a binding.
+pub fn bind_http(id: &str, endpoint: &str) {
+    if uuid::Uuid::parse_str(id).is_ok() {
+        if let Ok(mut bindings) = HTTP_ENDPOINTS.get_or_init(Default::default).lock() {
+            bindings.entry(id.into()).or_insert_with(|| endpoint.into());
+        }
+    }
+}
+
+pub fn check_http(id: &str, endpoint: &str) -> Result<(), String> {
+    let bindings = HTTP_ENDPOINTS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "鉴权地址绑定不可用")?;
+    if bindings.get(id).map(String::as_str) != Some(endpoint) {
+        return Err("请求地址已改变或鉴权未保存，请重新填写鉴权值后保存或测试".into());
+    }
+    Ok(())
+}
 
 pub fn read_once(
     service: &str,

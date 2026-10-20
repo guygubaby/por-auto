@@ -23,6 +23,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm registry:check
       - run: pnpm test:mobile
+      - run: pnpm test:http-editor
       - run: pnpm prepare:adb windows
       - run: pnpm prepare:u2
       - name: Verify Windows ADB resource paths

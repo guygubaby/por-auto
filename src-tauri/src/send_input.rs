@@ -181,6 +181,15 @@ pub fn validate_message(text: &str) -> Result<(), String> {
 }
 
 impl Request {
+    fn validate_reference(&self, reference: &str) -> Result<(), String> {
+        uuid::Uuid::parse_str(reference).map_err(|_| "鉴权引用无效")?;
+        crate::credentials::check_http(reference, &self.url)
+    }
+    pub fn bind_saved_credential(&self) {
+        if let Some(id) = self.auth.credential() {
+            crate::credentials::bind_http(id, &self.url);
+        }
+    }
     pub fn save_secret(&mut self, secret: Option<&str>) -> Result<(), String> {
         if matches!(self.auth, Auth::None) {
             return Ok(());
@@ -193,10 +202,12 @@ impl Request {
             credential(&id)?
                 .set_password(secret)
                 .map_err(|_| "保存系统凭据失败，配置未更新")?;
+            crate::credentials::bind_http(&id, &self.url);
             let _ = crate::credentials::read_once("http", &id, &self.url, || Ok(secret.into()));
             self.auth.set_credential(id);
         } else {
             let id = self.auth.credential().unwrap_or("");
+            self.validate_reference(id)?;
             crate::credentials::read_once("http", id, &self.url, || {
                 credential(id)?
                     .get_password()
@@ -372,6 +383,7 @@ impl Request {
             if id.is_empty() {
                 return Err("请先填写并保存鉴权信息".into());
             }
+            self.validate_reference(id)?;
             stored = crate::credentials::read_once("http", id, &self.url, || {
                 credential(id)?.get_password().map_err(|_| {
                     "无法读取系统凭据，请重新保存鉴权信息；本次会话不再重复请求".into()
@@ -583,6 +595,99 @@ mod tests {
         net::TcpListener,
         thread,
     };
+
+    #[test]
+    fn an_unbound_credential_reference_is_rejected_before_any_http_request() {
+        use std::sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc,
+        };
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        server.set_nonblocking(true).unwrap();
+        let address = server.local_addr().unwrap();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let count = Arc::new(AtomicUsize::new(0));
+        let stop = stopped.clone();
+        let seen = count.clone();
+        let worker = thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match server.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
+                        let mut bytes = [0; 4096];
+                        let _ = stream.read(&mut bytes);
+                        seen.fetch_add(1, Ordering::SeqCst);
+                        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOk").unwrap();
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5))
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        });
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = Request {
+            url: format!("http://{address}/changed-address"),
+            method: "GET".into(),
+            query: vec![],
+            headers: vec![],
+            auth: Auth::Bearer {
+                credential: id.clone(),
+            },
+            body: None,
+            response: Response::Text,
+            timeout_seconds: 2,
+        };
+        // Emulate the OS returning a previously stored password, without touching the real keychain.
+        crate::credentials::read_once("http", &id, &request.url, || Ok("test-only".into()))
+            .unwrap();
+        let result = request.fetch(None);
+        stopped.store(true, Ordering::SeqCst);
+        worker.join().unwrap();
+        crate::credentials::forget("http", &id);
+        assert!(
+            result.is_err(),
+            "an incoming bare reference must not reuse a password for an unbound URL"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn saved_credential_binding_preserves_legacy_ids_and_rejects_url_changes() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = Request {
+            url: "https://original.example/message".into(),
+            method: "GET".into(),
+            query: vec![],
+            headers: vec![],
+            auth: Auth::Bearer {
+                credential: id.clone(),
+            },
+            body: None,
+            response: Response::Text,
+            timeout_seconds: 2,
+        };
+        let before = serde_json::to_value(&request).unwrap();
+        request.bind_saved_credential();
+        assert!(request.validate_reference(&id).is_ok());
+        assert_eq!(
+            before,
+            serde_json::to_value(&request).unwrap(),
+            "loading an old configuration must not rewrite its reference or other fields"
+        );
+        let mut changed = request.clone();
+        changed.url = "https://different.example/message".into();
+        assert!(changed.validate_reference(&id).is_err());
+        changed.bind_saved_credential();
+        assert!(
+            changed.validate_reference(&id).is_err(),
+            "the first saved origin for a reference cannot be overwritten"
+        );
+        assert!(request.validate_reference(&id).is_ok());
+    }
 
     #[test]
     #[ignore = "requires the desktop OS credential store"]

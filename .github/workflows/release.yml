@@ -61,6 +61,7 @@ jobs:
           pnpm release:check --tag "$RELEASE_TAG"
           pnpm registry:check
           pnpm test:mobile
+          pnpm test:http-editor
           pnpm test:devices
           pnpm test:schedules
           pnpm test:updates
