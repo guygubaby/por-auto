@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 pub enum Asset {
     Launcher,
     Workflows,
+    InputComponent,
 }
 impl Asset {
     fn file(&self) -> (&'static str, &'static str, &'static [u8]) {
@@ -21,6 +22,11 @@ impl Asset {
                 "PorAuto-mobile-scripts.json",
                 "json",
                 include_bytes!("../../mobile-workflows/offline-bundle.json"),
+            ),
+            Self::InputComponent => (
+                "PorAuto-input-component.apk",
+                "apk",
+                include_bytes!("../../native/android-input/artifacts/por-input.apk"),
             ),
         }
     }
@@ -45,9 +51,9 @@ pub fn export(app: &AppHandle, kind: Asset) -> Result<Option<String>, String> {
     let Some(file) = app
         .dialog()
         .file()
-        .set_title("保存手机脚本")
+        .set_title("保存手机文件")
         .set_file_name(name)
-        .add_filter("手机脚本", &[extension])
+        .add_filter("手机文件", &[extension])
         .blocking_save_file()
     else {
         return Ok(None);
@@ -77,7 +83,7 @@ mod tests {
     fn bundled_mobile_assets_export_exact_bytes_and_failed_replacement_preserves_the_destination() {
         let root = std::env::temp_dir().join(format!("por-mobile-assets-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
-        for asset in [Asset::Launcher, Asset::Workflows] {
+        for asset in [Asset::Launcher, Asset::Workflows, Asset::InputComponent] {
             let (name, _, bytes) = asset.file();
             let path = root.join(name);
             fs::write(&path, "previous version").unwrap();

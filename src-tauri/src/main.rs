@@ -4,6 +4,7 @@ mod android;
 mod awake;
 mod credentials;
 mod history;
+mod input;
 mod jobs;
 mod markers;
 mod mobile_assets;

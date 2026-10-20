@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, lstat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Script } from 'node:vm';
+import { readInputArtifact } from './input-artifact.mjs';
 
 const require = createRequire(import.meta.url);
 const core = require('../mobile/autojs6/updater-core.cjs');
@@ -92,6 +93,11 @@ export function assertVersionProgress(previous, current) {
 async function main() {
   const command = process.argv[2] || 'check';
   assert.ok(['check', 'bundle'].includes(command), 'Use check or bundle');
+  const input = await readInputArtifact();
+  const inputPath = resolve(root,'mobile-workflows/wechat-suite/src/input-apk.js');
+  const inputCode = '// GENERATED from the signed native Android input component.\nmodule.exports = '+JSON.stringify({versionCode:input.versionCode,sha256:input.sha256,certificateSha256:input.certificateSha256,size:input.bytes.length})+';\nmodule.exports.base64 = '+JSON.stringify(input.bytes.toString('base64').match(/.{1,32000}/g))+'.join(\'\');\n';
+  if(command==='bundle')await writeFile(inputPath,inputCode);
+  else assert.equal(await readFile(inputPath,'utf8'),inputCode,'Input component asset is stale; run pnpm mobile:bundle');
   const definitions = await mobileWechatDefinitions();
   const definitionsPath = resolve(root, 'mobile-workflows/wechat-suite/src/definitions.js');
   if (command === 'bundle') await writeFile(definitionsPath, definitions);

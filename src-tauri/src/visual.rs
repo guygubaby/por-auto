@@ -168,6 +168,25 @@ impl Screen {
         {
             return Err("视觉页面无法可靠识别，已停止，未猜测点击位置".into());
         }
+        let valid_home = ["微信", "通讯录", "发现", "我"].iter().all(|label| {
+            self.items
+                .iter()
+                .filter(|i| i.role == "tab" && i.complete && i.text == *label)
+                .count()
+                == 1
+        }) && ["search", "more"].iter().all(|role| {
+            self.items
+                .iter()
+                .filter(|i| i.role == *role && i.complete)
+                .count()
+                == 1
+        });
+        if (self.page == "home" && !valid_home)
+            || (self.page == "groups"
+                && !["选择一个群", "选择群聊", "选择一个已有的群"].contains(&self.title.trim()))
+        {
+            return Err("页面标题、导航或搜索入口不完整，需重新读取，未继续枚举或操作".into());
+        }
         Ok(())
     }
     fn unique(&self, role: &str) -> Result<&Item, String> {
@@ -282,6 +301,7 @@ pub struct Session<'a> {
     height: u32,
     observations: usize,
     dry_run: bool,
+    native_input: Option<crate::input::Session>,
 }
 impl<'a> Session<'a> {
     pub fn start(
@@ -316,6 +336,7 @@ impl<'a> Session<'a> {
             height: 0,
             observations: 0,
             dry_run,
+            native_input: None,
         })
     }
     fn shell(&mut self, args: &[&str]) -> Result<String, String> {
@@ -401,7 +422,7 @@ impl<'a> Session<'a> {
                 return self.observe_attempt(attempt + 1, hint);
             }
         }
-        let screen = parsed?;
+        let mut screen = parsed?;
         if screen.protected() {
             fs::write(
                 self.folder.join("visual-last.json"),
@@ -410,6 +431,19 @@ impl<'a> Session<'a> {
             .map_err(|e| e.to_string())?;
             history::log(self.folder, 0, "blocked", wechat::VERIFICATION_REQUIRED)?;
             return Err(wechat::VERIFICATION_REQUIRED.into());
+        }
+        if let Some(input) = &self.native_input {
+            if let Some(frame) = input.observed()? {
+                if screen.page == "chat" {
+                    if let Some(editor) = &mut screen.editor {
+                        editor.text = Some(frame.text);
+                    }
+                } else if screen.page == "search" && frame.ime_action == 3 {
+                    for field in screen.items.iter_mut().filter(|i| i.role == "search_input") {
+                        field.value = Some(frame.text.clone());
+                    }
+                }
+            }
         }
         (self.check)("视觉页面已返回，核对当前目标")?;
         fs::write(
@@ -803,6 +837,16 @@ impl<'a> Session<'a> {
         Err("未能确认会话列表末尾，未开始发送".into())
     }
     fn type_text(&mut self, text: &str, chat: Option<&Chat>) -> Result<(), String> {
+        if let Some(input) = &mut self.native_input {
+            input.write(text)?;
+            history::log(
+                self.folder,
+                0,
+                "input_connection",
+                "通过原生输入连接写入文字并完整回读",
+            )?;
+            return Ok(());
+        }
         if !text.is_empty() && text.bytes().all(|b| b.is_ascii_alphanumeric()) {
             self.shell(&["input", "text", text])?;
             return Ok(());
@@ -836,9 +880,22 @@ impl<'a> Session<'a> {
                 field.point.clone()
             };
             self.click(&point)?;
-            let state = self.shell(&["dumpsys", "input_method"])?;
-            if android::text_input_active(&state, PACKAGE) {
-                return Ok(());
+            if let Some(input) = &self.native_input {
+                if let Some(frame) = input.read()? {
+                    if !frame.text.is_empty() {
+                        return Err("原生输入框已有草稿，未覆盖".into());
+                    }
+                    if (chat.is_none() && frame.ime_action == 3)
+                        || (chat.is_some() && frame.ime_action != 3)
+                    {
+                        return Ok(());
+                    }
+                }
+            } else {
+                let state = self.shell(&["dumpsys", "input_method"])?;
+                if android::text_input_active(&state, PACKAGE) {
+                    return Ok(());
+                }
             }
             if attempt < 2 {
                 screen = self.observe_for("Locate the actual text input: top search field on page search; bottom message editor on page chat. Report its center precisely in normalized coordinates and the exact existing text. Do not report a message bubble or voice-record button as an editable field.")?;
@@ -900,12 +957,22 @@ impl<'a> Session<'a> {
                 "draft_verified",
                 "演练通过：输入内容已核对，未点击发送",
             )?;
-            let mut keys = vec!["input", "keyevent", "KEYCODE_MOVE_END"];
-            keys.extend(std::iter::repeat_n(
-                "KEYCODE_DEL",
-                text.encode_utf16().count(),
-            ));
-            self.shell(&keys)?;
+            if let Some(input) = &mut self.native_input {
+                input.clear(text)?;
+                history::log(
+                    folder,
+                    0,
+                    "input_connection",
+                    "通过原生输入连接清理本轮草稿并完整回读",
+                )?;
+            } else {
+                let mut keys = vec!["input", "keyevent", "KEYCODE_MOVE_END"];
+                keys.extend(std::iter::repeat_n(
+                    "KEYCODE_DEL",
+                    text.encode_utf16().count(),
+                ));
+                self.shell(&keys)?;
+            }
             thread::sleep(Duration::from_millis(500));
             let cleared = self.observe()?;
             cleared.check_chat(&chat.title)?;
@@ -928,6 +995,9 @@ impl<'a> Session<'a> {
             return Err("发送按钮与输入框位置不符，未点击".into());
         }
         (self.check)("核对完成，即将点击一次发送")?;
+        if let Some(input) = &self.native_input {
+            input.verify_owned(text)?;
+        }
         history::log(
             folder,
             0,
@@ -1261,156 +1331,187 @@ pub fn execute(
     let mut check =
         |message: &str| report(current_step.get(), workflow.steps.len(), message, "started");
     let mut device = Session::start(root, adb, serial, folder, dry_run, &mut check)?;
-    for (index, step) in workflow.steps.iter().enumerate() {
-        current_step.set(index + 1);
-        (device.check)(&format!(
-            "{}/{} · {}",
-            index + 1,
-            workflow.steps.len(),
-            step.name
-        ))?;
-        match &step.action {
-            Action::ChatHome
-            | Action::ChatProfile { .. }
-            | Action::ChatFirstChat { .. }
-            | Action::ChatOpenChat { .. }
-            | Action::ChatSendText { .. }
-            | Action::ChatBroadcast => {
-                return Err("此工作流使用原生控件，不支持截图执行模式".into())
-            }
-            Action::Wake => {
-                device.shell(&["input", "keyevent", "KEYCODE_WAKEUP"])?;
-            }
-            Action::Launch { activity } => {
-                let result = device.shell(&[
-                    "am",
-                    "start",
-                    "-n",
-                    &format!("{}/{activity}", workflow.package),
-                ])?;
-                if result.contains("Error") || result.contains("Exception") {
-                    return Err("无法打开微信".into());
-                }
-                thread::sleep(Duration::from_millis(650));
-            }
-            Action::Wait { ms } => thread::sleep(Duration::from_millis(*ms)),
-            Action::Back => device.back()?,
-            Action::WechatHome => {
-                device.home()?;
-                chat = None;
-            }
-            Action::WechatFirstChat { output } => {
-                let target = device.open_first()?;
-                outputs.insert(output.clone(), target.title.clone());
-                chat = Some(target);
-            }
-            Action::WechatOpenChat { target, output } => {
-                let target = device.open_named(target)?;
-                outputs.insert(output.clone(), target.title.clone());
-                chat = Some(target);
-            }
-            Action::WechatSendText { text } => {
-                let target = chat.as_ref().ok_or("尚未核对目标会话，未发送")?;
-                let status = device.send(target, text, folder)?;
-                outputs.insert("message".into(), text.clone());
-                outputs.insert("send_status".into(), status);
-            }
-            Action::Tap {
-                selector,
-                skip_if,
-                recover_back,
-            } => device.tap_selector(selector, skip_if, *recover_back)?,
-            Action::ReadRow {
-                page,
-                labels,
-                output,
-            } => {
-                let screen = device.observe()?;
-                if screen.page != "profile"
-                    || ![page.as_str(), "个人信息", "个人资料"].contains(&screen.title.as_str())
-                {
-                    return Err("视觉页面未能确认个人信息页，未读取昵称".into());
-                }
-                let rows: Vec<_> = screen
-                    .items
-                    .iter()
-                    .filter(|i| i.role == "row" && i.complete && labels.contains(&i.text))
-                    .collect();
-                if rows.len() != 1 {
-                    return Err("昵称所在行无法唯一识别".into());
-                }
-                let value = rows[0]
-                    .value
-                    .as_ref()
-                    .filter(|v| !v.trim().is_empty())
-                    .ok_or("昵称内容无法完整读取")?;
-                outputs.insert(output.clone(), value.clone());
-            }
-            Action::WechatBroadcast => {
-                let input = input.ok_or("缺少消息配置")?;
-                fs::write(
-                    folder.join("input.json"),
-                    serde_json::to_vec_pretty(&input.redacted()).map_err(|e| e.to_string())?,
-                )
-                .map_err(|e| e.to_string())?;
-                let context = json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running","mode":if dry_run {"rehearsal"} else {"send"}}});
-                let frozen = if input.refresh_each() {
-                    None
-                } else {
-                    Some(input.message_for(&context)?)
-                };
-                let list = device.discover(input.recipients.scope)?;
-                let mut resolved = input.clone();
-                if resolved.recipients.mode == crate::send_input::Selection::Selected {
-                    for name in &mut resolved.recipients.names {
-                        let matches: Vec<_> = list
-                            .items
-                            .iter()
-                            .filter(|c| name_key(&c.title) == name_key(name))
-                            .collect();
-                        if matches.len() != 1 {
-                            return Err(format!("指定会话「{name}」未能唯一匹配，已停止"));
-                        }
-                        *name = matches[0].title.clone();
-                    }
-                }
-                // Both execution modes share HTTP timing, recipient selection and durable delivery records.
-                let result = wechat::broadcast_to(
-                    folder,
-                    &resolved,
-                    &context,
-                    list,
-                    frozen,
-                    dry_run,
-                    |message| report(current_step.get(), workflow.steps.len(), message, "started"),
-                    |action| match action {
-                        wechat::TargetAction::Open(target, _) => {
-                            if input.recipients.scope == Scope::Groups {
-                                device.open_group(&target.title)?;
-                            } else {
-                                device.open_named(&target.title)?;
-                            }
-                            Ok(())
-                        }
-                        wechat::TargetAction::Send(target, text, child) => {
-                            device.send(target, text, child).map(|_| ())
-                        }
-                    },
-                )?;
-                outputs.extend(result);
-                device.home()?;
-            }
+    let result = (|| {
+        if workflow.steps.iter().any(|step| {
+            matches!(
+                step.action,
+                Action::WechatOpenChat { .. }
+                    | Action::WechatSendText { .. }
+                    | Action::WechatBroadcast
+            )
+        }) {
+            (device.check)("准备原生输入组件；首次使用请在手机确认安装")?;
+            device.native_input = Some(crate::input::Session::start(
+                adb,
+                serial,
+                &root.join("components"),
+                PACKAGE,
+            )?);
         }
-        history::log_step(
-            folder,
-            index + 1,
-            step.id.as_deref(),
-            "completed",
-            &step.name,
-        )?;
+        for (index, step) in workflow.steps.iter().enumerate() {
+            current_step.set(index + 1);
+            (device.check)(&format!(
+                "{}/{} · {}",
+                index + 1,
+                workflow.steps.len(),
+                step.name
+            ))?;
+            match &step.action {
+                Action::ChatHome
+                | Action::ChatProfile { .. }
+                | Action::ChatFirstChat { .. }
+                | Action::ChatOpenChat { .. }
+                | Action::ChatSendText { .. }
+                | Action::ChatBroadcast => {
+                    return Err("此工作流使用原生控件，不支持截图执行模式".into())
+                }
+                Action::Wake => {
+                    device.shell(&["input", "keyevent", "KEYCODE_WAKEUP"])?;
+                }
+                Action::Launch { activity } => {
+                    let result = device.shell(&[
+                        "am",
+                        "start",
+                        "-n",
+                        &format!("{}/{activity}", workflow.package),
+                    ])?;
+                    if result.contains("Error") || result.contains("Exception") {
+                        return Err("无法打开微信".into());
+                    }
+                    thread::sleep(Duration::from_millis(650));
+                }
+                Action::Wait { ms } => thread::sleep(Duration::from_millis(*ms)),
+                Action::Back => device.back()?,
+                Action::WechatHome => {
+                    device.home()?;
+                    chat = None;
+                }
+                Action::WechatFirstChat { output } => {
+                    let target = device.open_first()?;
+                    outputs.insert(output.clone(), target.title.clone());
+                    chat = Some(target);
+                }
+                Action::WechatOpenChat { target, output } => {
+                    let target = device.open_named(target)?;
+                    outputs.insert(output.clone(), target.title.clone());
+                    chat = Some(target);
+                }
+                Action::WechatSendText { text } => {
+                    let target = chat.as_ref().ok_or("尚未核对目标会话，未发送")?;
+                    let status = device.send(target, text, folder)?;
+                    outputs.insert("message".into(), text.clone());
+                    outputs.insert("send_status".into(), status);
+                }
+                Action::Tap {
+                    selector,
+                    skip_if,
+                    recover_back,
+                } => device.tap_selector(selector, skip_if, *recover_back)?,
+                Action::ReadRow {
+                    page,
+                    labels,
+                    output,
+                } => {
+                    let screen = device.observe()?;
+                    if screen.page != "profile"
+                        || ![page.as_str(), "个人信息", "个人资料"].contains(&screen.title.as_str())
+                    {
+                        return Err("视觉页面未能确认个人信息页，未读取昵称".into());
+                    }
+                    let rows: Vec<_> = screen
+                        .items
+                        .iter()
+                        .filter(|i| i.role == "row" && i.complete && labels.contains(&i.text))
+                        .collect();
+                    if rows.len() != 1 {
+                        return Err("昵称所在行无法唯一识别".into());
+                    }
+                    let value = rows[0]
+                        .value
+                        .as_ref()
+                        .filter(|v| !v.trim().is_empty())
+                        .ok_or("昵称内容无法完整读取")?;
+                    outputs.insert(output.clone(), value.clone());
+                }
+                Action::WechatBroadcast => {
+                    let input = input.ok_or("缺少消息配置")?;
+                    fs::write(
+                        folder.join("input.json"),
+                        serde_json::to_vec_pretty(&input.redacted()).map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let context = json!({"workflow":{"id":workflow.id,"name":workflow.name,"version":workflow.version},"device":{"serial":serial},"run":{"id":folder.file_name().unwrap_or_default().to_string_lossy(),"status":"running","mode":if dry_run {"rehearsal"} else {"send"}}});
+                    let frozen = if input.refresh_each() {
+                        None
+                    } else {
+                        Some(input.message_for(&context)?)
+                    };
+                    let list = device.discover(input.recipients.scope)?;
+                    let mut resolved = input.clone();
+                    if resolved.recipients.mode == crate::send_input::Selection::Selected {
+                        for name in &mut resolved.recipients.names {
+                            let matches: Vec<_> = list
+                                .items
+                                .iter()
+                                .filter(|c| name_key(&c.title) == name_key(name))
+                                .collect();
+                            if matches.len() != 1 {
+                                return Err(format!("指定会话「{name}」未能唯一匹配，已停止"));
+                            }
+                            *name = matches[0].title.clone();
+                        }
+                    }
+                    // Both execution modes share HTTP timing, recipient selection and durable delivery records.
+                    let result = wechat::broadcast_to(
+                        folder,
+                        &resolved,
+                        &context,
+                        list,
+                        frozen,
+                        dry_run,
+                        |message| {
+                            report(current_step.get(), workflow.steps.len(), message, "started")
+                        },
+                        |action| match action {
+                            wechat::TargetAction::Open(target, _) => {
+                                if input.recipients.scope == Scope::Groups {
+                                    device.open_group(&target.title)?;
+                                } else {
+                                    device.open_named(&target.title)?;
+                                }
+                                Ok(())
+                            }
+                            wechat::TargetAction::Send(target, text, child) => {
+                                device.send(target, text, child).map(|_| ())
+                            }
+                        },
+                    )?;
+                    outputs.extend(result);
+                    device.home()?;
+                }
+            }
+            history::log_step(
+                folder,
+                index + 1,
+                step.id.as_deref(),
+                "completed",
+                &step.name,
+            )?;
+        }
+        outputs.insert("execution_mode".into(), "视觉 AI".into());
+        Ok(outputs)
+    })();
+    let cleanup = device
+        .native_input
+        .as_mut()
+        .map(|input| input.restore())
+        .transpose();
+    match (result, cleanup) {
+        (Ok(outputs), Ok(_)) => Ok(outputs),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(cleanup)) => Err(format!("{error}；{cleanup}")),
     }
-    outputs.insert("execution_mode".into(), "视觉 AI".into());
-    Ok(outputs)
 }
 
 #[cfg(test)]
@@ -1535,6 +1636,40 @@ mod tests {
         assert!(page.unique("send").is_err());
         value["items"][0]["role"] = json!("group");
         assert!(parse_screen(value).is_err());
+    }
+    #[test]
+    fn a_covered_group_header_cannot_be_accepted_as_a_home_list() {
+        let mut page = screen();
+        page.editor = None;
+        page.page = "home".into();
+        page.title.clear();
+        assert!(page.validate().is_err());
+        page.items = ["微信", "通讯录", "发现", "我"]
+            .iter()
+            .enumerate()
+            .map(|(index, label)| Item {
+                role: "tab".into(),
+                text: (*label).into(),
+                value: None,
+                point: Point([125 + index as u16 * 250, 950]),
+                complete: true,
+            })
+            .collect();
+        for role in ["search", "more"] {
+            page.items.push(Item {
+                role: role.into(),
+                text: "".into(),
+                value: None,
+                point: Point([850, 70]),
+                complete: true,
+            });
+        }
+        page.validate().unwrap();
+        page.page = "groups".into();
+        assert!(page.validate().is_err());
+        page.title = "选择一个群".into();
+        page.items.clear();
+        page.validate().unwrap();
     }
     #[test]
     fn pixel_coordinates_and_incomplete_protocol_are_rejected_before_any_action() {
@@ -1688,13 +1823,26 @@ mod tests {
             .map(|s| Workflow::parse(s.as_bytes()).unwrap())
             .find(|w| w.id == id)
             .expect("known bundled workflow");
+        let selected_names: Option<Vec<String>> = std::env::var("POR_VISUAL_TARGET_NAMES")
+            .ok()
+            .map(|value| serde_json::from_str(&value).expect("valid selected target names"));
+        if let Some(names) = &selected_names {
+            assert!(
+                dry_run && !names.is_empty(),
+                "selected-target acceptance is rehearsal only"
+            );
+        }
         let input = if workflow.configurable() {
             Some(SendInput {
                 message: crate::send_input::Message::Manual { text: "Ok".into() },
                 recipients: crate::send_input::Recipients {
                     scope: Scope::Groups,
-                    mode: crate::send_input::Selection::All,
-                    names: vec![],
+                    mode: if selected_names.is_some() {
+                        crate::send_input::Selection::Selected
+                    } else {
+                        crate::send_input::Selection::All
+                    },
+                    names: selected_names.unwrap_or_default(),
                 },
                 interval_ms: 1000,
             })

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "applicationId": "com.por.auto.input",
+  "versionCode": 1,
+  "minSdk": 26,
+  "bytes": 29360,
+  "sha256": "7fad6e01421128c53755ac6a7ac5523ec160e22f237eaa7487e646a536cd3d89",
+  "certificateSha256": "5ea6dc0f8484d80bea44e4e56463f9a95de97381b17c6b57f10a0e9d6505c627",
+  "sources": {
+    "app/build.gradle.kts": "f77c1bedbfb6a8f70f9def8699e120cb52e572681bcba80266bf35be11582c93",
+    "app/src/main/AndroidManifest.xml": "eec266db69d02199766363ac1978ff2c5a4f491e0cc1ba7960dac116a95c2f9b",
+    "app/src/main/java/com/por/auto/input/DraftGuard.kt": "4429c7b2ea458cc6ded6c429c44f84ac60af77ae75745e5cf700fe39c8c1f78d",
+    "app/src/main/java/com/por/auto/input/InputProvider.kt": "5401902348b286d7a8d6a80c73adf5ffbf2b38066f3ff85bc35c4513d47b124d",
+    "app/src/main/java/com/por/auto/input/PorInputMethod.kt": "5771695bb736a1feb195d784c4360218e9f7f992b0ced7f77e1d4d71188f7c49",
+    "app/src/main/res/values/strings.xml": "6b598f4e684f9e0d25902e0e390728167e9da7a8e85d1c5964bcaeaf24663518",
+    "app/src/main/res/xml/method.xml": "c2610b78efc40c47a8f78c716a370f4d1822834c3e463fd5e0b8eb5ce1176249",
+    "app/src/test/java/com/por/auto/input/DraftGuardTest.kt": "e9adb22bff6545947a702b0a5450a66fdb4ac09c1fbad9d955a8afa37e169022",
+    "build.gradle.kts": "f209b9adc57eda11229414b45615ba4988a7ad51f86763cee14255bb8908a05c",
+    "gradle/libs.versions.toml": "ad0f9fba2f49f011aba4bad6ccee9ba7e21f5cc317d8b909f08154eecb11a433",
+    "gradle/wrapper/gradle-wrapper.jar": "498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17",
+    "gradle/wrapper/gradle-wrapper.properties": "3d91f0932da99885c41e9dc4e85c9f9a2d3bfef4f0ad87473014dc0827a94884",
+    "gradle.properties": "10bbfa0b0a15f2e3fc598a87c7f944a537060d92b5fb03791e6b60e6cd226ff6",
+    "gradlew": "a3648413b47ef77af21d5ebc36c687c7d103aaef3e17f33de7d4f080a6f300a3",
+    "gradlew.bat": "2209f919a22528af59a2af2ad97e8d056cca18e39f7d87aa3fd549a73b180150",
+    "settings.gradle.kts": "056df91366cc86e330f93e4edc9088467afe9ed60b7334844ae49332d6e1b9f7"
+  }
+}

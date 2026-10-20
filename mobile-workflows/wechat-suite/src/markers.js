@@ -99,4 +99,25 @@ function inputInstruction(kind) {
 function inputConfirmed(value, kind, expected) {
   if (['search_input', 'message_editor'].indexOf(kind) < 0 || !value || value.certain !== true || value.kind !== kind || typeof value.text !== 'string' || value.text !== expected) throw new Error('输入区域或现有文字未能精确核对，未覆盖内容');
 }
-module.exports = { detect: detect, selected: selected, candidates: candidates, instruction: instruction, unchanged: unchanged, navigationTop: navigationTop, inputTarget: inputTarget, inputInstruction: inputInstruction, inputConfirmed: inputConfirmed };
+function composerTarget(width, height, metrics) {
+  var field = inputTarget(width,height,metrics,'message_editor');
+  return {point:field.point,keyboard:[Math.floor((metrics.bounds[0]+(metrics.bounds[2]-metrics.bounds[0])*.06)*1000/width),field.point[1]],crop:[metrics.bounds[0],field.crop[1],metrics.bounds[2]-metrics.bounds[0],field.crop[3]],density:metrics.density};
+}
+function headerTarget(width,height,metrics,role){
+  if(['search','more'].indexOf(role)<0)throw new Error('不支持的顶部入口');
+  var field=inputTarget(width,height,metrics,'search_input'),b=metrics.bounds,y=field.crop[1]+field.crop[3]/2;
+  var search=b[2]-60*metrics.density,more=b[2]-24*metrics.density;
+  if(search<=b[0]||more>=b[2])throw new Error('顶部入口未完整显示');
+  return {crop:[b[0],field.crop[1],b[2]-b[0],field.crop[3]],point:[Math.floor((role==='search'?search:more)*1000/width),Math.floor(y*1000/height)],search:[search-b[0],field.crop[3]/2],more:[more-b[0],field.crop[3]/2]};
+}
+function emptyComposerCenter(pixels,width,height,target) {
+  var x=Math.floor(target.point[0]*width/1000),y=Math.floor(target.point[1]*height/1000),radius=Math.round(target.density*12),top=y-Math.round(target.density*6),bottom=y+Math.round(target.density*6);
+  if(pixels.length!==width*height||x-radius<0||x+radius>=width||top<0||bottom>=height)return false;
+  var first=pixels[top*width+x-radius];
+  for(var row=top;row<=bottom;row++)for(var column=x-radius;column<=x+radius;column++){
+    var color=pixels[row*width+column];
+    if(Math.abs((color>>>16&255)-(first>>>16&255))>20||Math.abs((color>>>8&255)-(first>>>8&255))>20||Math.abs((color&255)-(first&255))>20)return false;
+  }
+  return true;
+}
+module.exports = { detect: detect, selected: selected, candidates: candidates, instruction: instruction, unchanged: unchanged, navigationTop: navigationTop, inputTarget: inputTarget, inputInstruction: inputInstruction, inputConfirmed: inputConfirmed, composerTarget:composerTarget, emptyComposerCenter:emptyComposerCenter, headerTarget:headerTarget };

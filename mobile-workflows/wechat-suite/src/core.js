@@ -91,7 +91,14 @@ function create(io) {
         if (attempt < 2 && object(value) && (value.certain === false || value.page === 'chat' && typeof value.title === 'string' && !value.title.trim())) {
           io.log('observation_wait', '页面被遮挡或标题不完整，等待后重新读取，未执行操作'); io.sleep(1500); continue;
         }
-        return screen(value);
+        var result = screen(value);
+        if (!io.package || io.package === 'com.tencent.mm') {
+          var validHome=['微信','通讯录','发现','我'].every(function(label) {
+            return result.items.filter(function(i) { return i.role === 'tab' && i.complete && i.text === label; }).length === 1;
+          }) && (io.clickHeader || ['search','more'].every(function(role) {return result.items.filter(function(i) {return i.role===role&&i.complete;}).length===1;}));
+          if (result.page === 'home' && !validHome || result.page === 'groups' && ['选择一个群','选择群聊','选择一个已有的群'].indexOf(result.title.trim()) < 0) invalidObservation('页面标题、导航或搜索入口不完整，未继续枚举或操作');
+        }
+        return result;
       } catch (error) {
         if (attempt >= 2 || error.code !== 'INVALID_OBSERVATION') throw error;
         io.log('observation_rejected', '页面格式或坐标无效，重新读取，未执行操作'); io.sleep(800);
@@ -99,6 +106,15 @@ function create(io) {
     }
   }
   function click(p) { if (!point(p)) fail('点击坐标无效'); io.click(p); io.sleep(800); }
+  function header(s,role){if(io.clickHeader){io.clickHeader(role);io.sleep(800);}else click(unique(s,role).point);}
+  function transitioned(matches,waiting,hint){
+    for(var attempt=0;attempt<4;attempt++){
+      var s=observe(hint);if(matches(s))return s;
+      if(waiting.indexOf(s.page)<0)break;
+      io.log('navigation_transition_wait','页面尚未切换，等待后重新读取，未重放点击');io.sleep(800);
+    }
+    fail('页面未完成切换，未继续输入或发送');
+  }
   function home() {
     if (io.home) return screen(io.home());
     for (var n = 0; n < 8; n++) {
@@ -125,10 +141,10 @@ function create(io) {
     if (io.recipientPage) return screen(io.recipientPage(scope));
     var s = home();
     if (scope === 'groups') {
-      click(unique(s, 'more').point); s = observe();
-      click(unique(s, 'new_chat').point); s = observe();
+      header(s,'more');s=transitioned(function(value){return value.page==='other'&&value.items.some(function(i){return i.complete&&i.text==='发起群聊';});},['home'],'核对微信菜单中的发起群聊入口。');
+      click(unique(s, 'new_chat').point); s = transitioned(function(value){return value.page==='new_chat';},['other'],'核对已打开现有联系人选择页面。');
       if (s.page !== 'new_chat') fail('没有打开现有群聊选择入口');
-      click(unique(s, 'choose_group').point); s = observe();
+      click(unique(s, 'choose_group').point); s = transitioned(function(value){return value.page==='groups';},['new_chat'],'核对现有群聊列表的完整标题与名称。');
       if (s.page !== 'groups') fail('无法确认现有群聊列表');
     }
     return s;
@@ -170,7 +186,7 @@ function create(io) {
     var s = home(), found = s.items.filter(function (i) { return ['chat', 'group'].indexOf(i.role) >= 0 && i.complete && key(i.text) === key(title); });
     if (found.length > 1) return null;
     if (!found.length) {
-      click(unique(s, 'search').point); s = observe('核对全局搜索页及搜索框，输入框显示搜索本地或网络结果时 value 为空字符串。');
+      header(s,'search'); s = transitioned(function(value){return value.page==='search';},['home'],'核对全局搜索页及搜索框，输入框显示搜索本地或网络结果时 value 为空字符串。');
       if (s.page !== 'search') fail('没有确认微信全局搜索页，未输入');
       var search = unique(s, 'search_input');
       if (search.value !== '') fail('搜索框已有内容或无法读取，未覆盖');
@@ -200,7 +216,8 @@ function create(io) {
   function send(title, text, dryRun, intent) {
     message(text);
     var s = observe(); checkChat(s, title);
-    if (!s.editor) { click(unique(s, 'keyboard').point); s = observe(); checkChat(s, title); }
+    if (io.ensureEditor) { s=screen(io.ensureEditor(title));checkChat(s,title); }
+    else if (!s.editor) { click(unique(s, 'keyboard').point); s = observe(); checkChat(s, title); }
     if (!s.editor) fail('无法确认文字输入框');
     if (dryRun && s.editor.text === text) { io.log('draft_verified', { title: title, retained: true }); return; }
     if (s.editor.text !== '') fail('会话有已有草稿或无法完整读取，未覆盖');

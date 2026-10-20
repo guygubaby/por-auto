@@ -18,7 +18,7 @@ function create(por, config) {
   function foreground() {
     io.requireAccessibility();
     if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
-    if (String(currentPackage()) !== PACKAGE) fail('企业微信不在前台，已停止');
+    if (io.focusedPackage() !== PACKAGE) fail('企业微信不在前台，已停止');
   }
   function tree() {
     foreground(); var kept = [], nodes = [], windows = auto.service.getWindows();
@@ -170,6 +170,7 @@ function create(por, config) {
     if (!rawAction('i_6',ACTION.ACTION_SET_TEXT,{ expected: expected, text: text })) fail('原生文字输入未完成'); sleep(250);
   }
   io.package = PACKAGE;
+  delete io.clickHeader;
   io.prepare = function () {
     io.requireAccessibility();
     if (por.screenSession) por.screenSession.check();
@@ -178,6 +179,7 @@ function create(por, config) {
   io.finish = function () { if (ownedAwake) { ownedAwake = false; device.cancelKeepingAwake(); } };
   io.launch = function () { if (!app.launchPackage(PACKAGE)) fail('请先安装并登录企业微信'); sleep(1000); };
   io.observe = observe; io.home = home; io.recipientPage = recipientPage; io.openNamed = openNamed; io.openRow = openRow; io.scroll = scroll;
+  io.ensureEditor = function(title) { var s=observe();if(s.page!=='chat'||!sameChat(title,s.title)||!s.editor)fail('没有确认目标会话的原生文字输入框');return s; };
   io.back = function () { foreground(); if (!back()) fail('返回操作未完成'); };
   io.type = function (text, p, title) { lastTitle = title; edit('',text); };
   io.clear = function (text) { commit=null;edit(text,''); };

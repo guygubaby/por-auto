@@ -23,11 +23,77 @@ const definitions = loadMobile(mobilePath + 'definitions.js');
 const markers = loadMobile(mobilePath + 'markers.js');
 const provider = loadMobile(mobilePath + 'provider.js');
 const capture = loadMobile(mobilePath + 'capture.js');
+const nativeInput = loadMobile(mobilePath + 'native-input.js');
 const wecomNative = loadMobile(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)));
 const workflow = id => definitions.workflows.find(w => w.id === id);
 const pair = (role, text, point, value = null) => ({ role, text, point, value, complete: true });
 const request = (response = { type: 'text' }) => ({ url: 'https://example.invalid/message', method: 'GET', query: [], headers: [], auth: { type: 'none' }, body: null, response, timeoutSeconds: 20 });
 const input = (message = { type: 'manual', text: 'Ok' }, names = ['群甲', '群乙']) => ({ message, recipients: { scope: 'groups', mode: 'selected', names }, intervalMs: 1000 });
+
+test('a covered group heading cannot be mistaken for the homepage without its four bottom tabs', () => {
+  const hidden = {page:'home',title:'',certain:true,items:[],editor:null,outgoing:[],listEmpty:true};
+  const group = {...hidden,page:'groups',title:'选择一个群'};
+  let reads=0;
+  const runner=core.create({observe:()=>structuredClone(reads++ ? group : hidden),log(){},sleep(){}});
+  assert.equal(runner.observe().page,'groups');assert.equal(reads,2);
+  assert.throws(()=>core.create({observe:()=>({...group,title:''}),log(){},sleep(){}}).observe(),/页面|标题/);
+  assert.equal(core.create({package:'com.tencent.wework',observe:()=>({...hidden,title:'消息'}),log(){},sleep(){}}).observe().page,'home');
+});
+
+test('native input uses exact session ownership, preserves changed drafts and never retries a mutation', () => {
+  let text='', session='session-a', count=0, unknown=false;
+  const calls=[];
+  const client=nativeInput.create((method,data)=>{
+    calls.push(method);assert.equal(data.protocolVersion,1);assert.equal(data.packageName,'com.tencent.mm');
+    if(method==='write') { if(unknown)throw Error('timeout');text=data.text; }
+    if(method==='clearOwned') { assert.equal(data.ownerId,'owner');text=''; }
+    return {ok:true,protocolVersion:1,versionCode:1,packageName:'com.tencent.mm',sessionId:session,text,complete:true,imeAction:6,ownerId:method==='write'?'owner':undefined};
+  },()=>String(++count),'com.tencent.mm');
+  client.write('1');text='用户的草稿';assert.throws(()=>client.clear('1'),/草稿/);assert.equal(calls.includes('clearOwned'),false);
+  text='1';client.clear('1');assert.equal(text,'');assert.equal(client.observed().text,'');
+  session='session-b';assert.equal(client.observed(),null);
+  unknown=true;const before=calls.filter(x=>x==='write').length;
+  assert.throws(()=>client.write('Ok'),/timeout/);assert.equal(calls.filter(x=>x==='write').length,before+1);
+});
+
+test('the input-row probe keeps text mode even when a full-screen observation omits the editor', () => {
+  const {io,state}=fixture();const observe=io.observe,click=io.click;let grounded=false,toggles=0;
+  io.observe=()=>{const s=observe();if(s.page==='chat'&&!grounded){s.editor=null;s.items=[pair('keyboard','',[62,966])];}return s;};
+  io.ensureEditor=title=>{assert.equal(title,state.title);grounded=true;return observe();};
+  io.click=p=>{if(String(p)==='62,966'){toggles++;throw Error('must not toggle an unverified keyboard icon');}return click(p);};
+  core.create(io).run(workflow('wechat-send-hello'),{dryRun:true});
+  assert.equal(toggles,0);assert.equal(state.clears,1);assert.equal(state.sendClicks,0);
+});
+
+test('native composer geometry fixes the probe points and rejects a press-to-talk label at an allegedly empty center', () => {
+  const target=markers.composerTarget(1080,2280,{bounds:[0,0,1080,2280],density:3,statusBar:84,keyboardTop:null,navigationTop:null});
+  assert.deepEqual(target.point,[450,963]);assert.deepEqual(target.keyboard,[60,963]);assert.deepEqual(target.crop,[0,2112,1080,168]);
+  const pixels=new Int32Array(1080*2280).fill(0xff282828);
+  assert.equal(markers.emptyComposerCenter(pixels,1080,2280,target),true);
+  pixels[Math.floor(2280*.963)*1080+486]=0xffeeeeee;
+  assert.equal(markers.emptyComposerCenter(pixels,1080,2280,target),false);
+});
+
+test('a homepage with a covered search control is reread before lookup instead of failing mid-batch', () => {
+  const {io,state}=fixture();state.page='home';const observe=io.observe;let reads=0;
+  io.observe=()=>{const s=observe();if(!reads++)s.items=s.items.filter(i=>i.role!=='search');return s;};
+  assert.equal(core.create(io).observe().items.filter(i=>i.role==='search').length,1);assert.equal(reads,2);
+});
+
+test('native header navigation ignores full-screen coordinates and waits for the search transition without a second click', () => {
+  const {io,state}=fixture();const observe=io.observe;let stale=null,clicks=0;
+  io.observe=()=>{if(stale){const previous=stale;stale=null;return previous;}const s=observe();if(s.page==='home')s.items=s.items.filter(i=>i.role!=='search');return s;};
+  io.clickHeader=role=>{const s=observe();assert.equal(role,'search');clicks++;const target=s.items.find(i=>i.role===role);io.click(target.point);stale=s;};
+  core.create(io).run(workflow('wechat-send-hello'),{dryRun:true});
+  assert.equal(clicks,1);assert.deepEqual(state.typed,['1']);assert.equal(state.clears,1);assert.equal(state.sendClicks,0);
+});
+
+test('top toolbar points are fixed by native dimensions and never copied from a model observation', () => {
+  const metrics={bounds:[0,0,1080,2280],density:3,statusBar:84,keyboardTop:null,navigationTop:null};
+  assert.deepEqual(markers.headerTarget(1080,2280,metrics,'search').point,[833,73]);
+  assert.deepEqual(markers.headerTarget(1080,2280,metrics,'more').point,[933,73]);
+  assert.throws(()=>markers.headerTarget(1080,2280,metrics,'send'),/不支持/);
+});
 
 test('a sliding WeCom sidebar cannot be mistaken for the normal messages page', () => {
   const nodes = [
@@ -90,7 +156,7 @@ function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '
     else if (s.page === 'search') { s.items = [pair('search_input', '搜索', [500, 80], state.query)]; if (state.query) s.items.push(pair('chat', state.query, [500, 250])); }
     else if (s.page === 'other') { s.title = '微信菜单'; s.items = [pair('new_chat', '发起群聊', [700, 150])]; }
     else if (s.page === 'new_chat') s.items = [pair('choose_group', '选择一个已有的群', [500, 150])];
-    else if (s.page === 'groups') s.items = rows('group');
+    else if (s.page === 'groups') { s.title = '选择一个群'; s.items = rows('group'); }
     else if (s.page === 'chat') { s.title = state.title + (groupTitles ? '(12)' : ''); s.editor = { point: [500, 900], text: state.draft }; s.outgoing = state.outgoing; if (state.draft) s.items.push(pair('send', '发送', [900, 900])); }
     return structuredClone(s);
   }
@@ -293,7 +359,7 @@ test('an unconfirmed search page stops before any text input', () => {
   const { runner, io, state } = fixture();
   const observe = io.observe;
   io.observe = hint => { const s = observe(hint); if (s.page === 'search') { s.page = 'home'; s.items = []; } return s; };
-  assert.throws(() => runner.run(workflow('wechat-send-hello'), { dryRun: true }), /没有确认微信全局搜索页/);
+  assert.throws(() => runner.run(workflow('wechat-send-hello'), { dryRun: true }), /没有确认微信全局搜索页|页面标题.*不完整/);
   assert.equal(state.query, ''); assert.deepEqual(state.typed, []); assert.equal(state.sendClicks, 0);
 });
 

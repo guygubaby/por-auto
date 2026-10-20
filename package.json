@@ -1,12 +1,12 @@
 {
   "name": "wechat-connection-demo",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "pnpm mobile:check && vue-tsc --noEmit && vite build",
+    "build": "pnpm prepare:input && pnpm mobile:check && vue-tsc --noEmit && vite build",
     "test:devices": "node --test scripts/test-device-batch.mjs",
     "test:schedules": "node --test scripts/test-schedules.mjs",
     "test:http-editor": "node --test scripts/test-http-editor.mjs",
@@ -19,10 +19,11 @@
     "build:windows": "bash scripts/build-windows.sh",
     "build:mac": "pnpm prepare:adb macos && pnpm prepare:u2 && tauri build --bundles app,dmg",
     "prepare:u2": "node scripts/prepare-u2.mjs",
+    "prepare:input": "node scripts/input-artifact.mjs",
     "test:adb-paths": "node scripts/test-adb-paths.mjs",
     "mobile:bundle": "node scripts/mobile-scripts.mjs bundle",
     "mobile:check": "node scripts/mobile-scripts.mjs check",
-    "test:mobile": "node --test scripts/test-mobile-updater.mjs scripts/test-mobile-workflows.mjs scripts/test-mobile-schedules.mjs scripts/test-mobile-runtime.mjs"
+    "test:mobile": "node --test scripts/test-mobile-updater.mjs scripts/test-mobile-workflows.mjs scripts/test-mobile-schedules.mjs scripts/test-mobile-runtime.mjs scripts/test-input-artifact.mjs"
   },
   "dependencies": {
     "@lucide/vue": "^1.57.0",

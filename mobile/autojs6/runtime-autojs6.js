@@ -88,6 +88,22 @@ function createAutoJs6Runtime() {
     var prefix = String(context.getPackageName()) + '/';
     if (!auto.service || !value.split(':').some(function (item) { return item.indexOf(prefix) === 0; })) throw new Error('AutoJs6 无障碍服务已关闭或断开，请在手机恢复后重新运行');
   }
+  function focusedPackage() {
+    requireAccessibility();
+    var windows = auto.service.getWindows(), found = '';
+    for (var n = 0; n < windows.size(); n++) {
+      var window = windows.get(n); if (!window.isFocused()) continue;
+      if (window.getType() === 2) {var keyboard=window.getRoot();try{if(keyboard&&String(keyboard.getPackageName())==='android')return '';}finally{if(keyboard)keyboard.recycle();}continue;}
+      if (window.getType() !== 1) return '';
+      var root = window.getRoot(); if (!root) return '';
+      try {
+        var name = String(root.getPackageName() || '');
+        if (found && found !== name) return '';
+        found = name;
+      } finally { root.recycle(); }
+    }
+    return found;
+  }
   var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
   function releaseScreenSession() {
     if (!screenActive.get()) return;
@@ -96,6 +112,7 @@ function createAutoJs6Runtime() {
     finally { try { device.cancelKeepingAwake(); } finally { if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } } }
   }
   var screenSession = {
+    focusedPackage: focusedPackage,
     isActive: function () { return !!screenActive.get(); },
     hasCapture: function () { return !!sessionCapture; },
     check: function () {
@@ -107,7 +124,7 @@ function createAutoJs6Runtime() {
       if (screenActive.get()) return;
       requireAccessibility();
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
-      if (String(currentPackage()) !== String(context.getPackageName())) throw new Error('请在 AutoJs6 前台开启手机定时执行');
+      if (focusedPackage() !== String(context.getPackageName())) throw new Error('请在 AutoJs6 前台开启手机定时执行');
       var services = context.getSystemService(android.content.Context.ACTIVITY_SERVICE).getRunningServices(1000), active = false;
       for (var n = 0; n < services.size(); n++) if (String(services.get(n).service.getClassName()) === 'org.autojs.autojs.external.foreground.AppForegroundService') active = true;
       if (!active) {

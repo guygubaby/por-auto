@@ -14,7 +14,7 @@ test('native task session keeps the phone active without requesting or releasing
   assert.equal(value.calls.startForeground, 1); assert.equal(value.calls.stopForeground, 1);
 });
 
-function runtimeFixture({ foregroundActive = false, captureAllowed = true, locked = false, failWake = false, accessibilityEnabled = true } = {}) {
+function runtimeFixture({ foregroundActive = false, captureAllowed = true, locked = false, failWake = false, accessibilityEnabled = true, reportedPackage = 'org.autojs.autojs6', focusedApplication = 'org.autojs.autojs6', focusedSystemDialog = false, focusedInputPicker = false } = {}) {
   const events = [], calls = { capture: 0, stopCapture: 0, startForeground: 0, stopForeground: 0, keepAwake: 0, releaseAwake: 0 };
   class File {
     constructor(parent, child) { this.path = child ? String(parent) + '/' + child : String(parent); }
@@ -34,8 +34,8 @@ function runtimeFixture({ foregroundActive = false, captureAllowed = true, locke
       getSystemService: name => name === 'keyguard' ? { isKeyguardLocked: () => locked } : { getRunningServices: () => ({ size: () => foregroundActive ? 1 : 0, get: () => ({ service: { getClassName: () => 'org.autojs.autojs.external.foreground.AppForegroundService' } }) }) },
       startForegroundService() { calls.startForeground++; return {}; }, stopService() { calls.stopForeground++; }
     },
-    events: { on: (name, callback) => { assert.equal(name, 'exit'); events.push(callback); } }, auto: { service: {} },
-    currentPackage: () => 'org.autojs.autojs6', requestScreenCapture: () => { calls.capture++; return captureAllowed; },
+    events: { on: (name, callback) => { assert.equal(name, 'exit'); events.push(callback); } }, auto: { service: { getWindows: () => ({ size: () => 2, get: index => ({ isFocused: () => true, getType: () => index ? 1 : focusedSystemDialog ? 3 : 2, getRoot: () => ({ getPackageName: () => index ? focusedApplication : focusedInputPicker ? 'android' : 'com.por.auto.input', recycle() {} }) }) }) } },
+    currentPackage: () => reportedPackage, requestScreenCapture: () => { calls.capture++; return captureAllowed; },
     images: { stopScreenCapture() { calls.stopCapture++; } },
     device: { keepScreenDim() { calls.keepAwake++; if (failWake) throw Error('wake failed'); }, cancelKeepingAwake() { calls.releaseAwake++; } }
   };
@@ -43,6 +43,21 @@ function runtimeFixture({ foregroundActive = false, captureAllowed = true, locke
   const io = vm.runInContext(readFileSync(new URL('../mobile/autojs6/runtime-autojs6.js', import.meta.url), 'utf8') + '\ncreateAutoJs6Runtime();', sandbox);
   return { io, calls, setLocked(value) { locked = value; }, exit() { events.forEach(callback => callback()); } };
 }
+
+test('the focused application stays authoritative when the last accessibility event belongs to an input method', () => {
+  const value=runtimeFixture({reportedPackage:'com.por.auto.input'});
+  value.io.screenSession.acquire(false);value.io.screenSession.release();
+  assert.equal(value.calls.keepAwake,1);
+  const other=runtimeFixture({focusedApplication:'com.tencent.mm'});
+  assert.throws(()=>other.io.screenSession.acquire(false),/AutoJs6 前台/);
+  assert.equal(other.calls.startForeground,0);
+  const dialog=runtimeFixture({focusedSystemDialog:true});
+  assert.throws(()=>dialog.io.screenSession.acquire(false),/AutoJs6 前台/);
+  assert.equal(dialog.calls.startForeground,0);
+  const picker=runtimeFixture({focusedInputPicker:true});
+  assert.throws(()=>picker.io.screenSession.acquire(false),/AutoJs6 前台/);
+  assert.equal(picker.calls.startForeground,0);
+});
 
 test('a stale service object does not bypass a disabled accessibility service', () => {
   const value=runtimeFixture({accessibilityEnabled:false});

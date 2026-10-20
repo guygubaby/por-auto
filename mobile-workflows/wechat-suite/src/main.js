@@ -8,7 +8,7 @@ module.exports = function (por) {
   var io = require(native ? './wecom.js' : './android.js').create(por, config);
   function execute(workflow) {
     var result, error = null;
-    try { io.prepare(); result = core.create(io).run(workflow, config); }
+    try { io.prepare(workflow); result = core.create(io).run(workflow, config); }
     catch (e) { error = e; }
     finally { try { io.finish(); } catch (e) { error = error || e; } }
     if (error) throw error;
@@ -149,9 +149,19 @@ module.exports = function (por) {
     por.schedules.save({ name: name, cron: expression, timezone: timezone, enabled: true }, { workflowId: workflow.id, dryRun: dryRun });
     dialogs.alert('定时任务已保存', '回到商店「更多 → 定时任务」管理启停或立即运行。修改消息或接收范围后，请重新创建任务以使用新配置。');
   }
+  function inputComponent(){
+    var setup=require('./input-setup.js'),status=setup.state();
+    var choice=pick('输入组件 · '+(status.installed?'已安装':'待安装')+' / '+(status.enabled?'已启用':'待启用')+'\n运行时自动切换，结束后恢复先前的键盘。', ['安装或更新输入组件','在系统中启用组件','选择日常键盘','返回']);
+    if(choice===0){setup.install();return true;}
+    if(choice===1){setup.settings();return true;}
+    if(choice===2){setup.pick();return true;}
+    return false;
+  }
   while (true) {
-    var choice = dialogs.select(label + '手机工作流', ['运行工作流', '配置消息内容', '选择接收对象', '前置 / 结束请求', native ? '原生控件说明' : '模型与截图设置', '导出上次运行结果', '新建定时任务', '退出']);
-    if (choice < 0 || choice === 7) return;
+    var menu=['运行工作流','配置消息内容','选择接收对象','前置 / 结束请求',native?'原生控件说明':'模型与截图设置','导出上次运行结果','新建定时任务'];
+    if(!native)menu.push('输入组件');menu.push('退出');
+    var choice = dialogs.select(label + '手机工作流',menu);
+    if (choice < 0 || choice === menu.length-1) return;
     try {
       if (choice === 0) {
         var workflow = definitions.workflows[pick('选择工作流', definitions.workflows.map(function (w) { return w.name + ' · v' + w.version; }))];
@@ -176,6 +186,7 @@ module.exports = function (por) {
       } else if (choice === 4) { if (native) dialogs.alert('原生控件执行', '企业微信通过系统控件读取和输入，不需要截图授权或图像模型。'); else provider(); }
       else if (choice === 5) exportLast();
       else if (choice === 6) schedule();
+      else if (choice === 7 && !native) {if(inputComponent())return;}
     } catch (e) {
       if (String(e.message || e) === '已取消') continue;
       if (choice === 0) throw e;
