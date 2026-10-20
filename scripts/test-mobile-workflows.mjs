@@ -49,6 +49,10 @@ function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '
     scroll(up) { state.pageIndex = Math.max(0, Math.min(Math.ceil(targets.length / 20) - 1, state.pageIndex + (up ? -1 : 1))); },
     observe, back() { state.page = 'home'; },
     beforeCommit() {},
+    clickTab(label) {
+      const matches = observe().items.filter(i => i.role === 'tab' && i.text === label);
+      assert.equal(matches.length, 1); io.click(matches[0].point);
+    },
     openRow(title, page) {
       assert.equal(state.page, page);
       const matches = observe().items.filter(i => ['chat', 'group'].includes(i.role) && i.text === title);
@@ -117,6 +121,13 @@ test('nickname accepts the profile page and name label used by newer WeChat vers
   assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
   assert.equal(state.records.at(-1).status, 'completed');
   assert.equal(state.sendClicks, 0);
+});
+
+test('bottom navigation uses named native controls instead of inaccurate model coordinates', () => {
+  const { runner, io } = fixture();
+  const observe = io.observe;
+  io.observe = hint => { const s = observe(hint); s.items.filter(i => i.role === 'tab').forEach(i => { i.point = [500, 500]; }); return s; };
+  assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
 });
 
 test('screen capture releases the host frame and never copies a missing frame or reuses its cached image', () => {

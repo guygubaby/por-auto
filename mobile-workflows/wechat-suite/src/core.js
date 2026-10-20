@@ -96,7 +96,7 @@ function create(io) {
       var s = observe('定位底部四个导航项，识别当前页面。');
       if (['微信', '通讯录', '发现', '我'].every(function (label) { return s.items.some(function (i) { return i.role === 'tab' && i.text === label; }); })) {
         if (s.page === 'home') return s;
-        click(s.items.filter(function (i) { return i.role === 'tab' && i.text === '微信'; })[0].point);
+        io.clickTab('微信'); io.sleep(800);
       } else { io.back(); io.sleep(650); }
     }
     fail('未能返回微信第一个页面');
@@ -210,12 +210,16 @@ function create(io) {
       return s.items.filter(function (i) { return i.complete && ((select.text || []).indexOf(i.text) >= 0 || (select.prefix || []).some(function (p) { return i.text.indexOf(p) === 0 || i.role === 'profile' && i.text.split(/\s+/).some(function (part) { return part.indexOf(p) === 0; }); })); });
     }
     for (var n = 0; n <= (recover || 0); n++) {
-      var s = observe();
+      var s = observe('定位工作流控件：' + JSON.stringify(selector) + '。底部四个导航项必须作为 role tab，不要把聊天内容当作导航。');
       if ((skipIf || []).some(function (p) { return (p.text || []).indexOf(s.title) >= 0 || matches(s, p).length > 0; })) return;
       var found = matches(s, selector);
       if (selector.bottom) found = found.filter(function (i) { return i.role === 'tab'; });
       if ((selector.peers || []).some(function (p) { return !s.items.some(function (i) { return i.text === p; }); })) found = [];
-      if (found.length === 1) { click(found[0].point); return; }
+      if (found.length === 1) {
+        if (selector.bottom) { io.clickTab(found[0].text); io.sleep(800); }
+        else click(found[0].point);
+        return;
+      }
       if (n < (recover || 0)) { io.back(); io.sleep(500); }
     }
     fail('未找到唯一匹配的工作流控件');

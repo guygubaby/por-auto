@@ -223,6 +223,31 @@ function create(por, config) {
       if (fresh.width !== lastWidth || fresh.height !== lastHeight || !markers.unchanged(lastPixels, fresh.pixels, fresh.width, fresh.height, p, true)) throw new Error('标题或输入区域在识别后发生变化，未发送或清理草稿');
     } finally { fresh.image.recycle(); }
   }
+  function clickTab(label) {
+    var labels = ['微信', '通讯录', '发现', '我'], index = labels.indexOf(label);
+    if (index < 0) throw new Error('不支持的微信导航项');
+    var photo = photograph(), windows = auto.service.getWindows(), bounds = null, density = Number(context.getResources().getDisplayMetrics().density), p;
+    try {
+      for (var w = 0; w < windows.size(); w++) if (windows.get(w).isFocused() && windows.get(w).getType() === 1) {
+        var root = windows.get(w).getRoot(); if (!root) continue;
+        try { if (String(root.getPackageName()) === PACKAGE) { bounds = new android.graphics.Rect(); windows.get(w).getBoundsInScreen(bounds); break; } }
+        finally { root.recycle(); }
+      }
+      if (!bounds || bounds.width() <= 0 || bounds.height() <= 0 || bounds.left < 0 || bounds.right > photo.width || bounds.top < 0 || bounds.bottom > photo.height || photo.width >= photo.height) throw new Error('无法确认微信竖屏窗口，未点击底部导航');
+      // shortcut: standard four-tab portrait layout; recheck the native 64 dp footer when WeChat changes its navigation.
+      var footer = Math.round(64 * density), top = bounds.bottom - footer;
+      if (top < bounds.top) throw new Error('微信窗口不足以显示底部导航');
+      var crop = images.clip(photo.image, bounds.left, top, bounds.width(), footer), image;
+      try { image = encoded(crop); } finally { crop.recycle(); }
+      var selection = model(image, 'Inspect this cropped WeChat bottom navigation bar. Return JSON only: {"certain":true,"labels":["微信","通讯录","发现","我"]} only if all four labels are fully visible in exactly that left-to-right order. Otherwise return {"certain":false,"labels":[]}. Do not return coordinates or invent hidden labels.');
+      if (!selection || selection.certain !== true || !Array.isArray(selection.labels) || selection.labels.join('\n') !== labels.join('\n')) throw new Error('没有确认完整的微信底部导航，未点击');
+      p = [Math.floor((bounds.left + bounds.width() * (index + .5) / 4) * 1000 / photo.width), Math.floor((bounds.bottom - footer / 2) * 1000 / photo.height)];
+    } finally { photo.image.recycle(); }
+    var fresh = photograph();
+    try { if (fresh.width !== photo.width || fresh.height !== photo.height || !markers.unchanged(photo.pixels, fresh.pixels, fresh.width, fresh.height, p, false)) throw new Error('底部导航在核对后变化，未点击'); }
+    finally { fresh.image.recycle(); }
+    por.log('tab_opened', { text: label, point: p }); clickPoint(p);
+  }
   function openRow(title, page, approximate) {
     if (['home', 'search', 'groups'].indexOf(page) < 0) throw new Error('当前不是会话列表');
     var photo = photograph(), points, p = null, attempts = [];
@@ -363,7 +388,7 @@ function create(por, config) {
   return {
     prepare: prepare, finish: finish, checkModel: checkImageSupport, saveSecret: saveSecret, secret: secret, parseUrl: parsed, request: request,
     base64: function (text) { return base64(bytes(text)); }, now: Date.now, runId: por.runId, observe: observe,
-    click: clickPoint, openRow: openRow, beforeCommit: beforeCommit, type: typeValue, clear: clear, sleep: sleep,
+    click: clickPoint, clickTab: clickTab, openRow: openRow, beforeCommit: beforeCommit, type: typeValue, clear: clear, sleep: sleep,
     wake: function () { device.wakeUpIfNeeded(); },
     launch: function () { if (!app.launchPackage(PACKAGE)) throw new Error('微信没有安装或无法打开'); sleep(1000); },
     back: function () { foreground(); if (!back()) throw new Error('返回操作没有完成'); },

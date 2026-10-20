@@ -29,15 +29,15 @@
       "name": "微信手机工作流（预览）",
       "description": "预览版，微信页面兼容性正在验收。在手机独立执行打开微信、读取昵称、首个会话、文件传输助手和批量消息工作流。支持消息配置、HTTP 获取和生命周期请求；默认预演，不点击发送。需要无障碍服务、截图授权和可访问的图像模型接口。",
       "version": "1.0.0",
-      "versionCode": 16,
+      "versionCode": 17,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
           "path": "android.js",
-          "size": 27570,
-          "sha256": "87561caede6305395242901235c967bae3e0e08a4147e568409b668e5ac6fad1"
+          "size": 30167,
+          "sha256": "d4188f121f23a270b827662c96d4e9b39c41631f0eb48668bf3daf1da6d5f130"
         },
         {
           "path": "capture.js",
@@ -46,8 +46,8 @@
         },
         {
           "path": "core.js",
-          "size": 20755,
-          "sha256": "226895608e91e07e275dd62aa0847f1e564112ce7669469527d9953129c1be34"
+          "size": 20940,
+          "sha256": "5031b24b1bce15ee0d05fc96005eb69ce962b8cfecddb664e8bc0e9c49b5ef25"
         },
         {
           "path": "definitions.js",
