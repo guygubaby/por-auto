@@ -216,6 +216,19 @@ test('an unconfirmed search page stops before any text input', () => {
   assert.equal(state.query, ''); assert.deepEqual(state.typed, []); assert.equal(state.sendClicks, 0);
 });
 
+test('opening a chat waits for the page transition without repeating the row click', () => {
+  const { io, runner, state } = fixture();
+  const observe = io.observe, open = io.openRow; let delayed = 0, rowClicks = 0;
+  io.openRow = (...args) => { rowClicks++; return open(...args); };
+  io.observe = hint => {
+    const current = observe(hint);
+    if (state.page === 'chat' && hint?.startsWith('核对是否已进入目标聊天') && delayed++ < 3) return { page: 'search', title: '', certain: true, items: [pair('search_input', '搜索', [500, 80], '文件传输助手')], editor: null, outgoing: [], listEmpty: false };
+    return current;
+  };
+  runner.run(workflow('wechat-send-hello'), { dryRun: true });
+  assert.equal(rowClicks, 1); assert.equal(state.sendClicks, 0); assert.deepEqual(state.typed, ['1']); assert.equal(state.clears, 1);
+});
+
 test('invalid image coordinates are reread with no action until valid; transport and verification failures are not retried', () => {
   const { runner, state, io } = fixture();
   const observe = io.observe; let reads = 0;

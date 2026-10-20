@@ -136,8 +136,14 @@ function create(io) {
     fail('没有确认列表末尾，未开始发送');
   }
   function confirm(title) {
-    var s = observe('核对是否已进入目标聊天，标题必须为 ' + JSON.stringify(title) + '；搜索结果不是聊天页面。');
-    checkChat(s, title); return s;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (attempt) io.sleep(800);
+      var s = observe('核对是否已进入目标聊天，标题必须为 ' + JSON.stringify(title) + '；搜索结果不是聊天页面。');
+      if (s.page === 'chat') { checkChat(s, title); return s; }
+      if (['home', 'search', 'groups'].indexOf(s.page) < 0) break;
+      io.log('chat_transition_wait', '尚未观察到目标聊天，等待后重新读取；未重复点击');
+    }
+    fail('目标会话未完成页面切换，未继续输入或发送');
   }
   function openFirst() {
     var s = beginning(home()), list = names(s, 'home');
