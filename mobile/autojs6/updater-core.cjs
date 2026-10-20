@@ -4,6 +4,7 @@ var LAUNCHER_VERSION = 1;
 var MAX_FILE = 2 * 1024 * 1024;
 var MAX_PACKAGE = 10 * 1024 * 1024;
 var MAX_CATALOG = 256 * 1024;
+var MAX_RESULT = 2 * 1024 * 1024;
 
 function fail(message) { throw new Error(message); }
 function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
@@ -256,6 +257,12 @@ function create(io, root, inputSource) {
         var result = entry({ id: p.id, version: p.version, versionCode: p.versionCode, runId: runId, dataDir: store + '/data/' + p.id,
           readConfig: function () { return readJson(configFile, {}); },
           saveConfig: function (value) { if (!object(value)) fail('配置必须是 JSON 对象'); writeJson(configFile, value); },
+          recordResult: function (value) {
+            if (!object(value)) fail('运行结果必须是 JSON 对象');
+            var text = JSON.stringify(value, null, 2);
+            if (!object(JSON.parse(text)) || io.encode(text).length > MAX_RESULT) fail('运行结果无效或超过 2 MiB');
+            io.writeAtomic(folder + '/result.json', text + '\n');
+          },
           log: log });
         if (result && typeof result.then === 'function') fail('脚本入口必须同步完成，不能返回 Promise');
         summary.status = 'completed'; log('脚本运行完成');
@@ -278,7 +285,11 @@ function create(io, root, inputSource) {
         var folder = root + '/runs/' + name;
         var summary = readJson(folder + '/summary.json', null);
         if (summary && summary.status === 'running') { summary.status = 'interrupted'; summary.error = '上次运行未完成或宿主被停止，未自动重试'; }
-        return { summary: summary, events: io.exists(folder + '/events.jsonl') ? io.readText(folder + '/events.jsonl') : '' };
+        var result = readJson(folder + '/result.json', null);
+        if (summary && ['failed', 'interrupted'].indexOf(summary.status) >= 0 && object(result) && result.status === 'running') {
+          result.status = summary.status; result.error = summary.error;
+        }
+        return { summary: summary, result: result, events: io.exists(folder + '/events.jsonl') ? io.readText(folder + '/events.jsonl') : '' };
       }) };
     });
   }

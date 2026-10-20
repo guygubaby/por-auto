@@ -173,6 +173,39 @@ test('script failures are logged once without replay and installed-byte tamperin
   assert.equal(manager.exportLogs().records.length, 1);
 }));
 
+test('debug exports include 1000 durable recipient results across restarts and failures', async () => fixture((env, manager) => {
+  manager.importBundle(script(1, `module.exports = function (por) {
+    por.recordResult({schemaVersion:1,runId:por.runId,status:'completed',targets:Array.from({length:1000},function(_,i){return {title:'测试群'+i,status:'rehearsed'};})});
+  };`).bundle);
+  assert.equal(manager.run('hello').status, 'completed');
+  const restarted = core.create(env.io, env.root, origin);
+  let records = restarted.exportLogs().records;
+  assert.equal(records[0].result.targets.length, 1000);
+  assert.equal(records[0].result.targets[999].title, '测试群999');
+  assert.ok(records[0].result.targets.every(t => t.status === 'rehearsed'));
+  manager.importBundle(script(2, `module.exports = function (por) {
+    por.recordResult({schemaVersion:1,runId:por.runId,status:'running',targets:[{title:'群甲',status:'uncertain'},{title:'群乙',status:'skipped'}]});throw Error('execution interrupted');
+  };`).bundle);
+  const failed = manager.run('hello'); assert.equal(failed.status, 'failed');
+  records = restarted.exportLogs().records;
+  const result = records.find(r => r.summary.id === failed.id).result;
+  assert.equal(result.status, 'failed'); assert.equal(result.error, 'execution interrupted');
+  assert.deepEqual(result.targets.map(t => t.status), ['uncertain', 'skipped']);
+  assert.equal(JSON.parse(fs.readFileSync(join(env.root,'runs',failed.id,'result.json'))).status, 'running', 'exports do not rewrite the original evidence');
+}));
+
+test('invalid result snapshots do not replace saved evidence or replay entry actions', async () => fixture((env, manager) => {
+  for (const invalid of ['null', '[]', "{text:'中'.repeat(800000)}", '{toJSON:function(){return null;}}']) {
+    const payload = script(1, `module.exports = function (por) { por.recordResult({status:'running',targets:[{title:'群甲',status:'pending'}]}); por.recordResult(${invalid}); por.log('must not run'); };`);
+    const isolated = core.create(env.io, env.root, { url: 'https://github.com/example/repo-' + sha(payload.bytes).slice(0,8) });
+    isolated.importBundle(payload.bundle);
+    const run = isolated.run('hello'); assert.equal(run.status, 'failed');
+    const saved = JSON.parse(fs.readFileSync(join(env.root, 'runs', run.id, 'result.json')));
+    assert.equal(saved.status, 'running'); assert.equal(saved.targets[0].title, '群甲');
+    assert.ok(!fs.readFileSync(join(env.root, 'runs', run.id, 'events.jsonl'), 'utf8').includes('must not run'));
+  }
+}));
+
 test('rejects traversal, duplicate paths, oversized packages and unsupported launchers', async () => fixture((env, manager) => {
   for (const path of ['../x.js', '/x.js', 'a/../../x.js', 'a\\x.js', 'a//x.js', 'a/NUL.txt', 'a/x.', 'a:b.js']) assert.throws(() => core.relative(path));
   for (const url of ['http://github.com/a/b', 'https://github.com.evil/a/b', 'https://token@github.com/a/b', 'https://github.com/a/b/tree/main']) assert.throws(() => core.source({ url }));

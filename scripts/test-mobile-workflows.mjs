@@ -130,6 +130,46 @@ test('bottom navigation uses named native controls instead of inaccurate model c
   assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
 });
 
+test('input geometry follows native window insets and the keyboard instead of model coordinates', () => {
+  const window = { bounds: [0, 0, 1080, 2280], density: 3, statusBar: 84, navigationTop: 2238, keyboardTop: null };
+  const search = markers.inputTarget(1080, 2280, window, 'search_input');
+  assert.deepEqual(search.point, [540, 73]);
+  assert.deepEqual(search.crop, [173, 84, 821, 168]);
+  assert.deepEqual(markers.inputTarget(1080, 2280, { ...window, bounds: [0, 84, 1080, 2238] }, 'search_input'), search, 'status bar insets must not be applied twice');
+  const composer = markers.inputTarget(1080, 2280, window, 'message_editor');
+  const raised = markers.inputTarget(1080, 2280, { ...window, keyboardTop: 1400 }, 'message_editor');
+  assert.deepEqual(composer.point, [450, 944]);
+  assert.deepEqual(raised.point, [450, 577]);
+  assert.equal(raised.crop[1] + raised.crop[3], 1400);
+  const scaled = markers.inputTarget(720, 1520, { bounds: [0, 0, 720, 1520], density: 2, statusBar: 56, navigationTop: 1492 }, 'search_input');
+  assert.ok(scaled.point.every((n, i) => Math.abs(n - search.point[i]) <= 1), 'pixel rounding may differ by at most one normalized unit');
+  for (const invalid of [{ ...window, density: NaN }, { ...window, bounds: [-1, 0, 1080, 2280] }, { ...window, keyboardTop: -1 }, { ...window, statusBar: 2280 }]) assert.throws(() => markers.inputTarget(1080, 2280, invalid, 'search_input'));
+  assert.throws(() => markers.inputTarget(2280, 1080, window, 'search_input'));
+  assert.throws(() => markers.inputTarget(1080, 2280, window, 'password'));
+  assert.doesNotThrow(() => markers.inputConfirmed({ certain: true, kind: 'search_input', text: '' }, 'search_input', ''));
+  for (const value of [{ certain: false, kind: 'search_input', text: '' }, { certain: true, kind: 'message_editor', text: '' }, { certain: true, kind: 'search_input', text: '已有内容' }, { certain: true, kind: 'search_input', text: null }]) assert.throws(() => markers.inputConfirmed(value, 'search_input', ''), /未覆盖/);
+});
+
+test('gesture navigation does not move the composer above its actual input row', () => {
+  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 2238, 1080, 2280]), null);
+  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 2136, 1080, 2280]), 2136);
+  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 0, 1080, 84]), null);
+  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 570, 66, 2280]), null);
+  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 0, 1080, 2280]), null);
+  const value = markers.inputTarget(1080, 2280, { bounds: [0, 0, 1080, 2280], statusBar: 84, density: 3, navigationTop: null }, 'message_editor');
+  assert.deepEqual(value.crop, [108, 2112, 756, 168]);
+  assert.deepEqual(value.point, [450, 963]);
+});
+
+test('search input verification allows its blinking caret but rejects changed contents', () => {
+  const width = 200, height = 600, before = new Array(width * height).fill(0), caret = before.slice();
+  for (let y = 42; y < 70; y++) caret[y * width + 80] = 0xffffff;
+  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], 'search'), true);
+  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], true), false, 'chat titles must still be unchanged');
+  for (let x = 80; x < 100; x++) caret[60 * width + x] = 0xffffff;
+  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], 'search'), false);
+});
+
 test('screen capture releases the host frame and never copies a missing frame or reuses its cached image', () => {
   let recycled = false, copies = 0, fallback = false;
   const source = { recycle() { recycled = true; } }, copy = {};

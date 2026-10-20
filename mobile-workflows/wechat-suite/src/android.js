@@ -223,6 +223,48 @@ function create(por, config) {
       if (fresh.width !== lastWidth || fresh.height !== lastHeight || !markers.unchanged(lastPixels, fresh.pixels, fresh.width, fresh.height, p, true)) throw new Error('标题或输入区域在识别后发生变化，未发送或清理草稿');
     } finally { fresh.image.recycle(); }
   }
+  function windowMetrics(photo) {
+    var windows = auto.service.getWindows(), bounds = null, keyboardTop = null, navigationTop = null;
+    var resources = context.getResources(), density = Number(resources.getDisplayMetrics().density);
+    for (var w = 0; w < windows.size(); w++) {
+      var window = windows.get(w), b = new android.graphics.Rect(); window.getBoundsInScreen(b);
+      if (window.isFocused() && window.getType() === 1) {
+        var root = window.getRoot();
+        if (root) { try { if (String(root.getPackageName()) === PACKAGE) bounds = [b.left, b.top, b.right, b.bottom]; } finally { root.recycle(); } }
+      }
+      if (window.getType() === 2 && b.width() >= photo.width * .8 && b.top > 0) keyboardTop = keyboardTop === null ? b.top : Math.min(keyboardTop, b.top);
+      if (window.getType() === 3) {
+        var owner = window.getRoot();
+        try {
+          if (owner && ['com.android.systemui', 'com.vivo.upslide'].indexOf(String(owner.getPackageName())) >= 0) {
+            var edge = markers.navigationTop(photo.width, photo.height, density, [b.left, b.top, b.right, b.bottom]);
+            if (edge !== null) navigationTop = navigationTop === null ? edge : Math.min(navigationTop, edge);
+          }
+        } finally { if (owner) owner.recycle(); }
+      }
+    }
+    var status = resources.getIdentifier('status_bar_height', 'dimen', 'android');
+    if (!bounds || !status) throw new Error('没有读取到微信输入窗口的系统边界');
+    return { bounds: bounds, density: density, statusBar: Number(resources.getDimensionPixelSize(status)), keyboardTop: keyboardTop, navigationTop: navigationTop };
+  }
+  function readScreen(hint) {
+    return require('./core.js').create({ observe: observe, log: por.log, sleep: sleep }).observe(hint);
+  }
+  function groundInput(expected, kind) {
+    var photo = photograph(), target;
+    try {
+      target = markers.inputTarget(photo.width, photo.height, windowMetrics(photo), kind);
+      var c = target.crop, crop = images.clip(photo.image, c[0], c[1], c[2], c[3]), image;
+      try { images.save(crop, directory + '/latest-input-candidate.png', 'png'); image = encoded(crop); } finally { crop.recycle(); }
+      markers.inputConfirmed(model(image, markers.inputInstruction(kind)), kind, expected);
+      write(directory + '/latest-input-grounding.json', { kind: kind, point: target.point, crop: target.crop, confirmed: true });
+    } finally { photo.image.recycle(); }
+    var fresh = photograph();
+    try {
+      if (fresh.width !== photo.width || fresh.height !== photo.height || !markers.unchanged(photo.pixels, fresh.pixels, fresh.width, fresh.height, target.point, kind === 'search_input' ? 'search' : true)) throw new Error('输入区域在核对后变化，未输入或清理文字');
+    } finally { fresh.image.recycle(); }
+    por.log('input_grounded', { kind: kind, point: target.point }); return target.point;
+  }
   function clickTab(label) {
     var labels = ['微信', '通讯录', '发现', '我'], index = labels.indexOf(label);
     if (index < 0) throw new Error('不支持的微信导航项');
@@ -281,7 +323,7 @@ function create(por, config) {
     var nodes = id('android:id/floating_toolbar_menu_item_text').text(label).find();
     if (nodes.size() > 1) throw new Error('文字编辑按钮重名，已停止');
     if (nodes.size() === 1) { if (!nodes.get(0).click()) throw new Error('文字编辑按钮未响应'); sleep(400); return; }
-    var s = require('./core.js').validateScreen(observe('只定位当前 Android 文字编辑工具栏中的「' + label + '」，把该项作为 role row。不要定位聊天消息中的同名文字。'));
+    var s = readScreen('只定位当前 Android 文字编辑工具栏中的「' + label + '」，把该项作为 role row。不要定位聊天消息中的同名文字。');
     var found = s.items.filter(function (i) { return i.role === 'row' && i.complete && i.text === label; });
     if (found.length !== 1) throw new Error('找不到文字编辑按钮「' + label + '」，未猜坐标');
     clickPoint(found[0].point); sleep(400);
@@ -290,25 +332,31 @@ function create(por, config) {
   function typeValue(value, p, title) {
     foreground();
     if (setNative('', value, p)) return;
+    var kind = title ? 'message_editor' : 'search_input';
+    p = groundInput('', kind);
     clickPoint(p); sleep(500);
-    var core = require('./core.js'), page = core.validateScreen(observe('定位键盘弹出后的实际文字输入框，完整读取现有输入内容。')), field;
+    var core = require('./core.js'), page = readScreen('定位键盘弹出后的实际文字输入框，完整读取现有输入内容。');
     if (title) {
       if (page.page !== 'chat' || !core.sameTitle(page.title, title) || !page.editor || page.editor.text !== '') throw new Error('键盘弹出后没有确认目标会话与空输入框，未输入');
-      field = page.editor;
     } else {
       var fields = page.items.filter(function (i) { return i.role === 'search_input' && i.complete && i.value === ''; });
       if (page.page !== 'search' || fields.length !== 1) throw new Error('键盘弹出后没有确认空搜索框，未输入');
-      field = fields[0];
     }
-    p = field.point;
+    p = groundInput('', kind);
     if (setNative('', value, p)) return;
     if (!clipboardSaved) throw new Error('没有保存剪贴板，未粘贴');
     var clip = android.content.ClipData.newPlainText('Por Auto', value);
     if (android.os.Build.VERSION.SDK_INT >= 24) { var extras = new android.os.PersistableBundle(); extras.putBoolean('android.content.extra.IS_SENSITIVE', true); clip.getDescription().setExtras(extras); }
-    clipboard.setPrimaryClip(clip); lastOwnClipAt = Date.now(); owned.push(value); longPress(p); toolbar('粘贴');
+    clipboard.setPrimaryClip(clip); lastOwnClipAt = Date.now(); owned.push(value);
+    if (android.os.Build.VERSION.SDK_INT < 29) {
+      var saved = clipboard.getPrimaryClip();
+      if (!saved || saved.getItemCount() !== 1 || String(saved.getDescription().getLabel()) !== 'Por Auto' || String(saved.getItemAt(0).getText()) !== value) throw new Error('系统没有接受本次输入文字，未点击粘贴');
+    }
+    longPress(p); toolbar('粘贴');
   }
   function clear(value, p) {
     foreground(); if (setNative(value, '', p)) return;
+    p = groundInput(value, 'message_editor');
     longPress(p);
     var all = id('android:id/floating_toolbar_menu_item_text').text('全选').find();
     if (all.size() > 1) throw new Error('不能唯一确认全选按钮');
@@ -394,7 +442,11 @@ function create(por, config) {
     back: function () { foreground(); if (!back()) throw new Error('返回操作没有完成'); },
     scroll: function (up) { foreground(); if (!swipe(Math.floor(width / 2), Math.floor(height * (up ? 0.35 : 0.73)), Math.floor(width / 2), Math.floor(height * (up ? 0.73 : 0.35)), 650)) throw new Error('列表滚动没有完成'); sleep(700); },
     log: por.log,
-    record: function (result) { write(directory + '/runs/' + por.runId + '/result.json', result); write(directory + '/last-result.json', result); }
+    record: function (result) {
+      if (typeof por.recordResult === 'function') por.recordResult(result);
+      else write(directory + '/runs/' + por.runId + '/result.json', result);
+      write(directory + '/last-result.json', result);
+    }
   };
 }
 module.exports = { create: create };

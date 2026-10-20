@@ -307,6 +307,6 @@ function create(io) {
     if (error) fail(error);
     return outputs;
   }
-  return { run: run, discover: discover };
+  return { run: run, discover: discover, observe: observe };
 }
 module.exports = { create: create, validateScreen: screen, validateInput: input, validateMessage: message, sameTitle: same, mergeNames: merge };
