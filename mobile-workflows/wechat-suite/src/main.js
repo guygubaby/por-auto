@@ -6,6 +6,20 @@ module.exports = function (por) {
   if (!config.input) config.input = { message: { type: 'manual', text: 'Ok' }, recipients: { scope: 'groups', mode: 'selected', names: [] }, intervalMs: 1000 };
   if (!config.hooks) config.hooks = {};
   var io = require('./android.js').create(por, config);
+  function execute(workflow) {
+    var result, error = null;
+    try { io.prepare(); result = core.create(io).run(workflow, config); }
+    catch (e) { error = e; }
+    finally { try { io.finish(); } catch (e) { error = error || e; } }
+    if (error) throw error;
+    return result;
+  }
+  if (por.execution) {
+    var selected = definitions.workflows.filter(function (workflow) { return workflow.id === por.execution.workflowId; });
+    if (selected.length !== 1 || typeof por.execution.dryRun !== 'boolean') throw new Error('定时任务的工作流或运行方式无效');
+    config.dryRun = por.execution.dryRun;
+    return execute(selected[0]);
+  }
   function pick(title, choices) { var n = dialogs.select(title, choices); if (n < 0) throw new Error('已取消'); return n; }
   function ask(title, previous) { var value = dialogs.rawInput(title, previous === undefined ? '' : String(previous)); if (value === null) throw new Error('已取消'); return String(value); }
   function secret(title) {
@@ -115,9 +129,29 @@ module.exports = function (por) {
     if (!files.copy(path, output)) throw new Error('导出失败');
     dialogs.alert('已导出结果', output + '\n包含每个接收会话的状态，不包含 API Key。'); app.viewFile(output);
   }
+  function schedule() {
+    if (!por.schedules) throw new Error('请重新导入最新版手机商店启动脚本，再设置定时任务；原配置保留');
+    var workflow = definitions.workflows[pick('定时运行哪个工作流', definitions.workflows.map(function (item) { return item.name; }))];
+    var sender = workflow.steps.some(function (step) { return ['wechat_send_text', 'wechat_broadcast'].indexOf(step.action.type) >= 0; });
+    var dryRun = !sender || pick('定时运行方式', ['预演：核对草稿后清理，不发送', '正式发送：每个目标发送一次']) === 0;
+    if (workflow.id === 'wechat-broadcast') core.validateInput(config.input);
+    if (!config.provider || !config.provider.allowScreenshots) throw new Error('请先完成模型与截图设置');
+    if (config.hooks.beforeRun) requests.validate(config.hooks.beforeRun, io);
+    if (config.hooks.afterRun) requests.validate(config.hooks.afterRun, io);
+    if (config.input.message.type === 'http') requests.validate(config.input.message.request, io);
+    var name = ask('任务名称', workflow.name).trim();
+    var expression = ask('五段 Cron：分 时 日 月 周\n每天 9 点：0 9 * * *\n每 30 分钟：*/30 * * * *', '0 9 * * *').trim();
+    var timezone = ask('执行时区', por.schedules.timezone).trim();
+    var times = por.schedules.preview(expression, timezone);
+    if (!dialogs.confirm('保存定时任务', name + '\n' + expression + ' · ' + timezone + '\n\n接下来三次：\n' + times.map(function (time) { return por.schedules.formatTime(time, timezone); }).join('\n')
+        + '\n\n固定当前工作流版本、消息和接收配置。错过不补跑，执行中不重复触发。\n保存后，在商店「更多」开启手机定时执行。')) return;
+    por.saveConfig(config);
+    por.schedules.save({ name: name, cron: expression, timezone: timezone, enabled: true }, { workflowId: workflow.id, dryRun: dryRun });
+    dialogs.alert('定时任务已保存', '回到商店「更多 → 定时任务」管理启停或立即运行。修改消息或接收范围后，请重新创建任务以使用新配置。');
+  }
   while (true) {
-    var choice = dialogs.select('微信手机工作流', ['运行工作流', '配置消息内容', '选择接收对象', '前置 / 结束请求', '模型与截图设置', '导出上次运行结果', '退出']);
-    if (choice < 0 || choice === 6) return;
+    var choice = dialogs.select('微信手机工作流', ['运行工作流', '配置消息内容', '选择接收对象', '前置 / 结束请求', '模型与截图设置', '导出上次运行结果', '新建定时任务', '退出']);
+    if (choice < 0 || choice === 7) return;
     try {
       if (choice === 0) {
         var workflow = definitions.workflows[pick('选择工作流', definitions.workflows.map(function (w) { return w.name + ' · v' + w.version; }))];
@@ -127,11 +161,7 @@ module.exports = function (por) {
         var scope = config.input.recipients;
         var detail = workflow.id === 'wechat-broadcast' ? '\n接收：' + (scope.mode === 'all' ? '全部' : scope.names.length + ' 个指定') + (scope.scope === 'groups' ? '群聊' : '首页会话') : '';
         if (!dialogs.confirm('开始' + (sender ? config.dryRun ? '预演' : '发送' : '运行'), workflow.name + detail + '\n\n运行中请保持手机解锁，不要手动切换页面。')) continue;
-        var result, executionError = null;
-        try { io.prepare(); result = core.create(io).run(workflow, config); }
-        catch (e) { executionError = e; }
-        finally { try { io.finish(); } catch (e) { executionError = executionError || e; } }
-        if (executionError) throw executionError;
+        var result = execute(workflow);
         var labels = { nickname: '微信昵称', chat_title: '当前会话', target_count: '已处理对象', message_status: '处理状态' };
         var statuses = { rehearsed: '预演完成', observed: '已在界面看到新消息' };
         dialogs.alert('工作流已完成', workflow.name + '\n\n' + Object.keys(result).map(function (k) { return (labels[k] || '结果') + '：' + (k === 'message_status' ? statuses[result[k]] || result[k] : result[k]); }).join('\n') + (sender && config.dryRun ? '\n\n预演完成，未点击发送。' : ''));
@@ -145,6 +175,7 @@ module.exports = function (por) {
         por.saveConfig(config);
       } else if (choice === 4) provider();
       else if (choice === 5) exportLast();
+      else if (choice === 6) schedule();
     } catch (e) {
       if (String(e.message || e) === '已取消') continue;
       if (choice === 0) throw e;

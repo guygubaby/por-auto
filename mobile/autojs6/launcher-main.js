@@ -1,4 +1,4 @@
-function launchMobileScripts(core, io, bundled) {
+function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   if (!/^org\.autojs\.autojs6(?:\.|$)/.test(String(context.getPackageName()))) throw new Error('请使用官方 AutoJs6 运行启动器');
   if (!core.versionAtLeast(io.hostVersion, '6.7.0')) throw new Error('请先将 AutoJs6 更新到 6.7.0 或更新版本');
   var defaultSource = { url: 'https://github.com/guygubaby/por-auto', reference: 'main' };
@@ -6,6 +6,10 @@ function launchMobileScripts(core, io, bundled) {
   var settings = io.exists(settingsFile) ? JSON.parse(io.readText(settingsFile)) : { source: defaultSource };
   settings.source = core.source(settings.source || defaultSource);
   var manager = core.create(io, io.root, settings.source);
+  var scheduler = schedulerCore.create(io, io.root, core, cron, function (snapshot, trigger) { return core.create(io, io.root, snapshot.source).runPinned(snapshot, trigger); });
+  io.scheduling = scheduler;
+  var timerThread = null, timerStop = null;
+  function timerRunning() { return timerThread !== null && timerThread.isAlive(); }
   var token = ''; // Repository credentials remain in memory for this launcher session only.
   var state = { installed: [], available: [] }, filter = 'all', busy = false, closed = false;
   var green = '#75D9AE', muted = '#A5B9AE', background = '#101A15';
@@ -19,6 +23,7 @@ function launchMobileScripts(core, io, bundled) {
     + '<horizontal gravity="center_vertical"><text text="Por Auto" textColor="#75D9AE" textSize="13sp" layout_weight="1"/><button id="more" text="更多" w="64" h="48" textSize="13sp" textColor="#EFF5F1"/></horizontal>'
     + '<text text="手机工作流商店" textSize="21sp" textStyle="bold" textColor="#EFF5F1" margin="0 4 0 4"/>'
     + '<text text="从你的仓库安装工作流，配置与记录留在本机" textSize="12sp" textColor="#A5B9AE" marginBottom="12"/>'
+    + '<text id="timerStatus" text="手机定时：未开启" textSize="12sp" textColor="#A5B9AE" marginBottom="8"/>'
     + '<card cardCornerRadius="10dp" cardElevation="0dp" cardBackgroundColor="#1A2921"><vertical padding="12">'
     + '<text text="工作流来源" textSize="11sp" textColor="#A5B9AE"/><text id="source" textSize="13sp" textColor="#EFF5F1" maxLines="2"/>'
     + '<horizontal><button id="sourceSettings" text="来源设置" w="0" h="48" layout_weight="1" textSize="13sp" textColor="#EFF5F1"/><button id="refresh" text="刷新目录" w="0" h="48" layout_weight="1" textSize="13sp" textColor="#75D9AE"/></horizontal>'
@@ -45,6 +50,64 @@ function launchMobileScripts(core, io, bundled) {
     dialog.show(); return result.blockedGet();
   }
   function version(p) { return 'v' + p.version + ' · ' + p.versionCode; }
+  function startTimer() {
+    if (timerRunning()) return '手机定时执行已开启';
+    if (!dialogs.confirm('开启手机定时执行', '会申请本次截图授权，并保持手机唤醒。请保持手机解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
+    var ready = threads.disposable(); timerStop = new java.util.concurrent.atomic.AtomicBoolean(false);
+    timerThread = threads.start(function () {
+      var notified = false, failure = null;
+      try {
+        io.withLock(io.root + '/scheduler-session.lock', function () {
+          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(); scheduler.recover(); });
+          ready.setAndNotify(null); notified = true;
+          ui.run(function () { if (!closed) { ui.timerStatus.setText('手机定时：执行会话已开启'); ui.timerStatus.attr('textColor', green); } });
+          while (!timerStop.get()) {
+            io.screenSession.check();
+            var result = scheduler.tick();
+            if (result) ui.run(function () { if (!closed) ui.timerStatus.setText('手机定时：' + (result.status === 'completed' ? '上一轮完成' : result.status === 'skipped_busy' ? '操作占用，已跳过本轮' : '上一轮未完成，请查看记录')); });
+            sleep(1000);
+          }
+        });
+      } catch (e) { failure = String(e.message || e); if (!notified) { ready.setAndNotify(failure); notified = true; } }
+      finally {
+        // Manual runs may share this engine's projection; let them finish before releasing it.
+        while (io.screenSession.isActive()) {
+          try { io.withLock(io.root + '/operation.lock', function () { io.screenSession.release(); }); }
+          catch (e) { if (e.code !== 'BUSY') { failure = failure || String(e.message || e); break; } sleep(250); }
+        }
+        ui.run(function () { if (!closed) { ui.timerStatus.setText(failure ? '手机定时已停止：' + failure : '手机定时：已停止后续执行'); ui.timerStatus.attr('textColor', failure ? '#FFB4A8' : muted); } });
+      }
+    });
+    var error = ready.blockedGet(); if (error) throw new Error(error);
+    return '手机定时执行已开启，可在「更多」查看任务或停止后续执行';
+  }
+  function manageSchedules() {
+    var tasks = scheduler.list();
+    if (!tasks.length) { show('暂无定时任务', '在工作流卡片「运行 / 配置 → 新建定时任务」保存任务。'); return; }
+    var index = dialogs.select('手机定时任务', tasks.map(function (task) { return (task.enabled ? '已启用 · ' : '已暂停 · ') + task.name; }));
+    if (index < 0) return;
+    var task = tasks[index];
+    var action = dialogs.select(task.name, ['查看详情和结果', '修改名称和时间', task.enabled ? '暂停后续执行' : '启用后续执行', '立即执行一次', '删除任务']);
+    if (action === 0) {
+      var labels = { completed: '完成', failed: '失败', running: '正在执行', interrupted: '上轮中断', skipped_busy: '操作占用，已跳过', missed: '错过时间，未补跑', overlap: '上一轮未结束，已跳过', busy: '手机正在处理其他任务，已跳过' };
+      show(task.name, task.scriptName + ' · v' + task.version + ' (' + task.versionCode + ')' + '\n' + (task.dryRun ? '预演，不发送' : '正式发送')
+        + '\n' + task.cron + ' · ' + task.timezone + '\n下次：' + (task.nextAt === null ? '已暂停' : io.formatTime(task.nextAt, task.timezone))
+        + '\n上次：' + (task.lastRun ? labels[task.lastRun.status] || task.lastRun.status : '尚未执行') + (task.lastRun && task.lastRun.error ? '\n' + task.lastRun.error : '')
+        + (task.lastSkip ? '\n最近跳过：' + (labels[task.lastSkip.status] || task.lastSkip.status) + '\n' + io.formatTime(task.lastSkip.at, task.timezone) : '')
+        + '\n\n代码与业务配置使用保存时的快照。运行日志可从「更多」导出。');
+    } else if (action === 1) {
+      var name = dialogs.rawInput('任务名称', task.name); if (name === null) return;
+      var expression = dialogs.rawInput('Cron：分 时 日 月 周', task.cron); if (expression === null) return;
+      var timezone = dialogs.rawInput('IANA 时区', task.timezone); if (timezone === null) return;
+      var upcoming = scheduler.preview(String(expression).trim(), String(timezone).trim());
+      if (dialogs.confirm('修改执行时间', upcoming.map(function (at) { return io.formatTime(at, String(timezone).trim()); }).join('\n') + '\n\n消息、接收对象和代码版本仍保持原快照。')) scheduler.reschedule(task.id, { name: String(name), cron: String(expression).trim(), timezone: String(timezone).trim() });
+    } else if (action === 2) scheduler.enable(task.id, !task.enabled);
+    else if (action === 3) {
+      if (!timerRunning() || timerStop.get()) throw new Error('请先从「更多」开启手机定时执行，完成本次截图授权');
+      if (!dialogs.confirm('立即执行一次', task.name + '\n' + (task.dryRun ? '预演，不点击发送' : '正式发送，每个目标发送一次') + '\n\n使用保存时的消息和接收配置，不改变之后的计划时间。')) return;
+      var result = scheduler.runNow(task.id); if (result.status !== 'completed') throw new Error(result.error || '任务未完成，请查看运行记录');
+    } else if (action === 4 && dialogs.confirm('删除定时任务', task.name + '\n任务配置会删除，已有运行记录保留。')) scheduler.remove(task.id);
+  }
   function render() {
     ui.source.setText(manager.source.owner + '/' + manager.source.repo + ' · ' + manager.source.reference + (token ? ' · 已设置令牌' : ''));
     var items = core.storeItems(state), count = items.filter(function (item) { return item.update; }).length;
@@ -91,7 +154,7 @@ function launchMobileScripts(core, io, bundled) {
         perform('移除工作流…', function () {
           if (!dialogs.confirm('删除工作流', item.name + '\n\n配置与运行记录会保留，之后可以重新安装。')) return '已取消删除';
           var removed = manager.uninstall(item.id);
-          return removed.warning || '工作流已删除，配置与记录保留';
+          return removed.warning || '工作流已删除，相关定时任务已暂停，配置与记录保留';
         });
       });
       ui.cards.addView(card);
@@ -157,7 +220,7 @@ function launchMobileScripts(core, io, bundled) {
   }));
   ui.more.on('click', function () {
     perform('更多操作', function () {
-      var choice = dialogs.select('手机工作流商店', ['导入本地工作流包', '导出最近运行日志', '退出商店']);
+      var choice = dialogs.select('手机工作流商店', ['导入本地工作流包', '导出最近运行日志', '定时任务', timerRunning() ? '停止后续定时执行' : '开启手机定时执行', '退出商店']);
       if (choice === 0) {
         var path = dialogs.rawInput('本地工作流包路径', files.path('./PorAuto-mobile-scripts.json'));
         if (!path) return '已取消导入';
@@ -165,16 +228,21 @@ function launchMobileScripts(core, io, bundled) {
         var imported = manager.importBundle(io.importFile(String(path))); show('导入结果', summary(imported));
         return imported.errors.length ? '部分工作流未能导入，请查看结果' : '工作流包已校验并导入';
       }
-      if (choice === 1) { var output = io.exportFile(manager.exportLogs()); show('日志已导出', output + '\n\n包含版本和运行日志，不包含仓库令牌。'); app.viewFile(output); return '运行日志已导出'; }
-      if (choice === 2) { closed = true; token = ''; ui.run(function () { ui.finish(); }); }
+      if (choice === 1) { var debug = manager.exportLogs(); debug.schedules = scheduler.list(); var output = io.exportFile(debug); show('日志已导出', output + '\n\n包含版本、运行结果和定时状态，不包含配置快照或仓库令牌。'); app.viewFile(output); return '运行日志已导出'; }
+      if (choice === 2) { manageSchedules(); return '定时任务配置保存在本机'; }
+      if (choice === 3) {
+        if (!timerRunning()) return startTimer();
+        timerStop.set(true); return '已停止后续触发，当前执行结束后释放运行会话';
+      }
+      if (choice === 4) { if (timerRunning()) return '请先停止后续定时执行，再退出商店'; closed = true; token = ''; ui.run(function () { ui.finish(); }); }
       return '工作流配置与记录保存在本机';
     });
   });
   ui.emitter.on('back_pressed', function (event) {
-    if (busy) { event.consumed = true; toast('操作正在进行，请等待完成'); }
+    if (busy || timerRunning()) { event.consumed = true; toast(timerRunning() ? '请在「更多」先停止定时执行，再退出商店' : '操作正在进行，请等待完成'); }
     else { token = ''; closed = true; }
   });
-  events.on('exit', function () { token = ''; closed = true; });
+  events.on('exit', function () { if (timerStop) timerStop.set(true); token = ''; closed = true; });
   perform('正在加载本机工作流…', function () {
     if (!settings.initialized) {
       if (manager.source.url === defaultSource.url && manager.source.reference === defaultSource.reference && !manager.list().installed.length) manager.importBundle(bundled);

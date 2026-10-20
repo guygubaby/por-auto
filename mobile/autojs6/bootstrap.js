@@ -193,11 +193,12 @@ function create(io, root, inputSource) {
     return locked(function () {
       var current = state();
       if (!current.installed.some(function (p) { return p.id === packageId; })) return { removed: false, warning: null };
+      var retained = io.scheduling ? io.scheduling.pausePackage(origin, packageId) : [];
       current.installed = current.installed.filter(function (p) { return p.id !== packageId; });
       writeJson(stateFile, current);
       try {
         var pattern = new RegExp('^' + packageId + '-[0-9]+-[a-f0-9]{64}$');
-        io.list(store + '/versions').filter(function (name) { return pattern.test(name); }).forEach(function (name) { io.removeTree(store + '/versions/' + name); });
+        io.list(store + '/versions').filter(function (name) { return pattern.test(name) && retained.indexOf(name) < 0; }).forEach(function (name) { io.removeTree(store + '/versions/' + name); });
         return { removed: true, warning: null };
       } catch (_) { return { removed: true, warning: '工作流已移除，部分缓存未能清理；配置与日志仍保留。' }; }
     });
@@ -234,15 +235,22 @@ function create(io, root, inputSource) {
       return result;
     });
   }
-  function run(packageId) {
+  function run(packageId, pinned, trigger) {
     return locked(function () {
       var p = state().installed.filter(function (item) { return item.id === packageId; })[0];
       if (!p) fail('请先安装脚本');
+      if (pinned) {
+        if (source(pinned.source).url !== origin.url || source(pinned.source).reference !== origin.reference || !pinned.config || typeof pinned.config !== 'object' || Array.isArray(pinned.config)
+            || !object(pinned.execution) || !id(pinned.execution.workflowId) || typeof pinned.execution.dryRun !== 'boolean') fail('定时任务配置快照无效');
+        p = catalog({ schemaVersion: 1, workflows: [pinned.package] }).workflows[0];
+        if (p.id !== packageId || pinned.cacheName !== p.id + '-' + p.versionCode + '-' + digest(p)) fail('定时任务代码快照无效');
+      }
       compatible(p); verifyInstalled(p);
       var runId = String(io.now()) + '-' + io.uuid();
       var folder = root + '/runs/' + runId;
       io.mkdir(folder);
       var summary = { id: runId, scriptId: p.id, name: p.name, version: p.version, versionCode: p.versionCode, packageSha256: digest(p), source: origin.url, timestamp: io.now(), status: 'running', error: null };
+      if (trigger) { summary.scheduleId = trigger.scheduleId; summary.scheduledAt = trigger.scheduledAt; summary.trigger = trigger.trigger; }
       writeJson(folder + '/summary.json', summary);
       var configFile = store + '/config/' + p.id + '.json';
       var eventCount = 0;
@@ -261,8 +269,16 @@ function create(io, root, inputSource) {
         io.mkdir(store + '/data/' + p.id);
         // shortcut: entry functions must join their workers before returning; isolated async engines need separate lifecycle tracking.
         var result = entry({ id: p.id, version: p.version, versionCode: p.versionCode, runId: runId, dataDir: store + '/data/' + p.id,
-          readConfig: function () { return readJson(configFile, {}); },
-          saveConfig: function (value) { if (!object(value)) fail('配置必须是 JSON 对象'); writeJson(configFile, value); },
+          execution: pinned ? JSON.parse(JSON.stringify(pinned.execution)) : null,
+          screenSession: io.screenSession && io.screenSession.isActive() ? io.screenSession : null,
+          schedules: !pinned && io.scheduling ? {
+            timezone: io.localTimezone(), preview: io.scheduling.preview, formatTime: io.formatTime,
+            save: function (options, execution) {
+              return io.scheduling.save(options, { source: origin, package: p, cacheName: p.id + '-' + p.versionCode + '-' + digest(p), config: readJson(configFile, {}), execution: execution });
+            }
+          } : null,
+          readConfig: function () { return pinned ? JSON.parse(JSON.stringify(pinned.config)) : readJson(configFile, {}); },
+          saveConfig: function (value) { if (pinned) fail('定时运行不能修改固定配置'); if (!object(value)) fail('配置必须是 JSON 对象'); writeJson(configFile, value); },
           recordResult: function (value) {
             if (!object(value)) fail('运行结果必须是 JSON 对象');
             var text = JSON.stringify(value, null, 2);
@@ -299,10 +315,223 @@ function create(io, root, inputSource) {
       }) };
     });
   }
-  return { refresh: function (token) { return locked(function () { return refresh(token); }); }, check: check, install: installOnline, uninstall: uninstall, importBundle: importBundle, run: run, list: list, exportLogs: exportLogs, source: origin };
+  return { refresh: function (token) { return locked(function () { return refresh(token); }); }, check: check, install: installOnline, uninstall: uninstall, importBundle: importBundle,
+    run: function (id) { return run(id); }, runPinned: function (snapshot, trigger) { return run(snapshot.package.id, snapshot, trigger); }, list: list, exportLogs: exportLogs, source: origin };
 }
 
 module.exports = { create: create, catalog: catalog, storeItems: storeItems, source: source, relative: relative, versionAtLeast: versionAtLeast, launcherVersion: LAUNCHER_VERSION, limits: { file: MAX_FILE, package: MAX_PACKAGE, catalog: MAX_CATALOG } };
+
+return module.exports; })();
+var cron = (function () { var module = { exports: {} };
+'use strict';
+
+function parse(expression) {
+  if (typeof expression !== 'string' || expression.length > 200) throw new Error('Cron 表达式无效');
+  var parts = expression.trim().toUpperCase().split(/\s+/);
+  if (parts.length !== 5) throw new Error('Cron 需要五段：分 时 日 月 周');
+  var months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  var weekdays = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  function field(text, min, max, aliases, sunday) {
+    var values = [];
+    function number(text) {
+      var index = aliases.indexOf(text);
+      var value = index < 0 ? /^\d{1,2}$/.test(text) ? Number(text) : NaN : index + min;
+      if (!isFinite(value) || value % 1 || value < min || value > max) throw new Error('Cron 字段超出范围或格式无效');
+      return value;
+    }
+    text.split(',').forEach(function (item) {
+      var step = item.split('/');
+      if (step.length > 2 || !step[0] || step.length === 2 && !/^\d{1,2}$/.test(step[1])) throw new Error('Cron 步长无效');
+      var stride = step.length === 2 ? Number(step[1]) : 1;
+      if (!stride || stride > max - min + 1) throw new Error('Cron 步长超出范围');
+      var range = step[0] === '*' ? [min, max] : step[0].split('-').map(number);
+      if (!range.length || range.length > 2 || range.length === 2 && range[0] > range[1]) throw new Error('Cron 范围无效');
+      var end = range.length === 2 ? range[1] : step.length === 2 ? max : range[0];
+      for (var n = range[0]; n <= end; n += stride) {
+        var actual = sunday && n === 7 ? 0 : n;
+        if (values.indexOf(actual) < 0) values.push(actual);
+      }
+    });
+    return { values: values.sort(function (a, b) { return a - b; }), wildcard: text === '*' };
+  }
+  return [field(parts[0], 0, 59, []), field(parts[1], 0, 23, []), field(parts[2], 1, 31, []), field(parts[3], 1, 12, months), field(parts[4], 0, 7, weekdays, true)];
+}
+
+function next(expression, timezone, after, io) {
+  var fields = parse(expression);
+  io.validateZone(timezone);
+  if (typeof after !== 'number' || !isFinite(after) || after % 1 || after < 0 || after > 250000000000000) throw new Error('计算时间超出支持范围');
+  function has(index, value) { return fields[index].values.indexOf(value) >= 0; }
+  // ZoneOffset is bounded by +/-18 h; scanning civil days this way also covers midnight clock changes.
+  var day = Math.floor((after - 18 * 3600000) / 86400000) * 86400000, best = null;
+  for (var i = 0; i <= 146097 + 2; i++, day += 86400000) {
+    if (best !== null && day - 18 * 3600000 > best) return best;
+    var date = new Date(day), dom = has(2, date.getUTCDate()), dow = has(4, date.getUTCDay());
+    if (!has(3, date.getUTCMonth() + 1) || !(fields[2].wildcard || fields[4].wildcard ? dom && dow : dom || dow)) continue;
+    fields[1].values.forEach(function (hour) {
+      fields[0].values.forEach(function (minute) {
+        var nominal = day + hour * 3600000 + minute * 60000;
+        if (nominal + 18 * 3600000 <= after || best !== null && nominal - 18 * 3600000 >= best) return;
+        // The adapter returns no instant in a DST gap and only the first instant in a repeated minute.
+        var instant = io.cronInstant(timezone, date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), hour, minute);
+        if (instant !== null && (typeof instant !== 'number' || !isFinite(instant) || instant % 1 || Math.abs(instant - nominal) > 18 * 3600000)) throw new Error('时区计算结果无效');
+        if (instant !== null && instant > after && (best === null || instant < best)) best = instant;
+      });
+    });
+  }
+  if (best !== null) return best;
+  throw new Error('Cron 没有可用的未来时间，请检查日期');
+}
+
+module.exports = { parse: parse, next: next };
+
+return module.exports; })();
+var schedulerCore = (function () { var module = { exports: {} };
+'use strict';
+
+function create(io, root, core, cron, execute) {
+  var file = root + '/schedules.json';
+  function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
+  function validId(value) { return typeof value === 'string' && /^[a-f0-9-]{16,80}$/.test(value); }
+  function clone(value) { return JSON.parse(JSON.stringify(value)); }
+  function origin(value) { var normalized = core.source(value); return normalized.url + '\n' + normalized.reference; }
+  function time(value) { return typeof value === 'number' && value % 1 === 0 && value >= 0; }
+  function state() {
+    if (!io.exists(file)) return { schemaVersion: 1, tasks: [] };
+    var value;
+    try { value = JSON.parse(io.readText(file)); } catch (_) { throw new Error('定时任务配置损坏，原文件已保留'); }
+    if (!object(value) || value.schemaVersion !== 1 || !Array.isArray(value.tasks) || value.tasks.length > 100) throw new Error('定时任务列表格式无效，原文件已保留');
+    var ids = [];
+    value.tasks.forEach(function (task) {
+      if (!object(task) || !validId(task.id) || ids.indexOf(task.id) >= 0 || !validId(task.revision) || typeof task.name !== 'string' || !task.name.trim() || task.name.length > 100
+          || typeof task.enabled !== 'boolean' || (task.enabled ? !time(task.nextAt) : task.nextAt !== null) || !/^[a-f0-9]{64}$/.test(task.snapshotSha256)
+          || typeof task.scriptId !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(task.scriptId)
+          || typeof task.cacheName !== 'string' || !new RegExp('^' + task.scriptId + '-[0-9]+-[a-f0-9]{64}$').test(task.cacheName)) throw new Error('定时任务数据无效，原文件已保留');
+      origin(task.source); cron.parse(task.cron); io.validateZone(task.timezone); ids.push(task.id);
+    });
+    return value;
+  }
+  function locked(action) { return io.withLock(root + '/schedule.lock', action); }
+  function persist(value) { io.writeAtomic(file, JSON.stringify(value, null, 2) + '\n'); }
+  function next(task, after) { return cron.next(task.cron, task.timezone, after, io); }
+  function snapshotFile(task) { return root + '/schedules/' + task.id + '/' + task.revision + '.json'; }
+  function publicTask(task) {
+    var value = clone(task); delete value.snapshotSha256; delete value.cacheName; return value;
+  }
+  function save(options, snapshot) {
+    if (!object(options) || typeof options.name !== 'string' || !options.name.trim() || options.name.length > 100 || /[\x00-\x1f\x7f]/.test(options.name)
+        || typeof options.enabled !== 'boolean' || !object(snapshot) || !object(snapshot.config) || !object(snapshot.execution)
+        || !/^[a-zA-Z0-9_-]{1,80}$/.test(snapshot.execution.workflowId || '') || typeof snapshot.execution.dryRun !== 'boolean') throw new Error('定时任务名称、配置或运行方式无效');
+    var p = core.catalog({ schemaVersion: 1, workflows: [snapshot.package] }).workflows[0];
+    var source = core.source(snapshot.source), nextAt = cron.next(options.cron, options.timezone, io.now(), io);
+    var text = JSON.stringify(snapshot);
+    if (io.encode(text).length > 2 * 1024 * 1024) throw new Error('定时任务配置快照超过 2 MiB');
+    if (typeof snapshot.cacheName !== 'string' || !new RegExp('^' + p.id + '-' + p.versionCode + '-[a-f0-9]{64}$').test(snapshot.cacheName)) throw new Error('定时任务代码快照无效');
+    return locked(function () {
+      var current = state(), previous = null;
+      if (options.id) {
+        previous = current.tasks.filter(function (task) { return task.id === options.id; })[0];
+        if (!previous || origin(previous.source) !== origin(source) || previous.scriptId !== p.id) throw new Error('找不到当前工作流的定时任务');
+        if (previous.lastRun && previous.lastRun.status === 'running') throw new Error('任务正在执行，请结束后再编辑');
+      } else if (current.tasks.length >= 100) throw new Error('最多保存 100 个手机定时任务');
+      var task = { id: previous ? previous.id : io.uuid(), revision: io.uuid(), name: options.name.trim(), source: source,
+        scriptId: p.id, scriptName: p.name, version: p.version, versionCode: p.versionCode, workflowId: snapshot.execution.workflowId, dryRun: snapshot.execution.dryRun,
+        cacheName: snapshot.cacheName, snapshotSha256: io.sha256(io.encode(text)), cron: options.cron.trim().replace(/\s+/g, ' '), timezone: options.timezone,
+        enabled: options.enabled, nextAt: options.enabled ? nextAt : null, createdAt: previous ? previous.createdAt : io.now(), updatedAt: io.now(), lastRun: previous ? previous.lastRun : null, lastSkip: previous ? previous.lastSkip : null };
+      io.mkdir(root + '/schedules/' + task.id); io.writeAtomic(snapshotFile(task), text);
+      current.tasks = current.tasks.filter(function (item) { return item.id !== task.id; }); current.tasks.push(task); persist(current);
+      if (previous) { try { io.removeTree(snapshotFile(previous)); } catch (_) {} }
+      return publicTask(task);
+    });
+  }
+  function find(current, id) { var task = current.tasks.filter(function (item) { return item.id === id; })[0]; if (!task) throw new Error('定时任务不存在'); return task; }
+  function skip(task, status, scheduledAt, at) { task.lastSkip = { status: status, scheduledAt: scheduledAt, at: at }; }
+  function recover() {
+    return locked(function () {
+      var current = state(), now = io.now();
+      current.tasks.forEach(function (task) {
+        if (task.lastRun && task.lastRun.status === 'running') { task.lastRun.status = 'interrupted'; task.lastRun.error = '执行会话已停止，未自动重试'; task.lastRun.finishedAt = now; }
+        if (task.enabled && task.nextAt <= now) { skip(task, 'missed', task.nextAt, now); task.nextAt = next(task, now); }
+      }); persist(current);
+    });
+  }
+  function loadSnapshot(task) {
+    var bytes = io.readBytes(snapshotFile(task));
+    if (bytes.length > 2 * 1024 * 1024 || io.sha256(bytes) !== task.snapshotSha256) throw new Error('定时任务快照缺失或完整性校验失败');
+    var value = JSON.parse(io.decode(bytes));
+    if (!object(value) || !object(value.config) || !object(value.execution) || value.execution.workflowId !== task.workflowId || value.execution.dryRun !== task.dryRun
+        || origin(value.source) !== origin(task.source) || value.package.id !== task.scriptId || value.package.versionCode !== task.versionCode || value.cacheName !== task.cacheName) throw new Error('定时任务快照与计划不匹配');
+    return value;
+  }
+  function claim(id) {
+    return locked(function () {
+      var current = state(), now = io.now(), selected = id ? find(current, id) : null, changed = false;
+      if (!id) {
+        current.tasks.sort(function (a, b) { return (a.nextAt || Infinity) - (b.nextAt || Infinity); });
+        current.tasks.forEach(function (task) {
+          if (!task.enabled || task.nextAt > now) return;
+          if (now - task.nextAt > 10000) { skip(task, 'missed', task.nextAt, now); task.nextAt = next(task, now); changed = true; }
+          else if (!selected) selected = task;
+        });
+      }
+      if (!selected) { if (changed) persist(current); return null; }
+      if (selected.lastRun && selected.lastRun.status === 'running') {
+        if (id) throw new Error('任务正在执行，未重复启动');
+        skip(selected, 'overlap', selected.nextAt, now); selected.nextAt = next(selected, now); persist(current); return null;
+      }
+      var scheduledAt = id ? now : selected.nextAt;
+      // Advance and save before any network or phone action; a crash cannot replay this occurrence.
+      if (!id) selected.nextAt = next(selected, now);
+      selected.lastRun = { status: 'running', scheduledAt: scheduledAt, startedAt: now, finishedAt: null, runId: null, trigger: id ? 'manual' : 'cron', error: null };
+      persist(current); return clone(selected);
+    });
+  }
+  function run(id) {
+    var task = claim(id); if (!task) return null;
+    var status = 'failed', error = null, summary = null;
+    try {
+      summary = execute(loadSnapshot(task), { scheduleId: task.id, scheduledAt: task.lastRun.scheduledAt, trigger: task.lastRun.trigger });
+      if (!summary || ['completed', 'failed'].indexOf(summary.status) < 0) throw new Error('执行器没有返回有效结果，未自动重试');
+      status = summary.status; error = summary.error;
+    } catch (e) { status = e.code === 'BUSY' ? 'skipped_busy' : 'failed'; error = String(e.message || e).slice(0, 2000); }
+    locked(function () {
+      var current = state(), now = io.now();
+      current.tasks.forEach(function (item) {
+        if (item.id === task.id && item.revision === task.revision) { item.lastRun.status = status; item.lastRun.error = error; item.lastRun.runId = summary ? summary.id : null; item.lastRun.finishedAt = now; }
+        if (item.enabled && item.nextAt <= now) { skip(item, item.id === task.id ? 'overlap' : 'busy', item.nextAt, now); item.nextAt = next(item, now); }
+      }); persist(current);
+    });
+    return { id: task.id, status: status, error: error };
+  }
+  function enable(id, enabled) {
+    if (typeof enabled !== 'boolean') throw new Error('启停状态无效');
+    return locked(function () { var current = state(), task = find(current, id); if (enabled) loadSnapshot(task); task.enabled = enabled; task.nextAt = enabled ? next(task, io.now()) : null; persist(current); return publicTask(task); });
+  }
+  function remove(id) {
+    return locked(function () { var current = state(), task = find(current, id); if (task.lastRun && task.lastRun.status === 'running') throw new Error('任务正在执行，请结束后再删除'); current.tasks = current.tasks.filter(function (item) { return item.id !== id; }); persist(current); try { io.removeTree(root + '/schedules/' + id); } catch (_) {} });
+  }
+  function reschedule(id, options) {
+    if (!object(options) || typeof options.name !== 'string' || !options.name.trim() || options.name.length > 100 || /[\x00-\x1f\x7f]/.test(options.name)) throw new Error('定时任务名称无效');
+    var nextAt = cron.next(options.cron, options.timezone, io.now(), io);
+    return locked(function () {
+      var current = state(), task = find(current, id);
+      if (task.lastRun && task.lastRun.status === 'running') throw new Error('任务正在执行，请结束后再编辑');
+      task.name = options.name.trim(); task.cron = options.cron.trim().replace(/\s+/g, ' '); task.timezone = options.timezone; task.nextAt = task.enabled ? nextAt : null; task.updatedAt = io.now(); persist(current); return publicTask(task);
+    });
+  }
+  function pausePackage(source, packageId) {
+    return locked(function () {
+      var current = state(), retained = [];
+      current.tasks.forEach(function (task) { if (origin(task.source) === origin(source) && task.scriptId === packageId) { task.enabled = false; task.nextAt = null; retained.push(task.cacheName); } });
+      persist(current); return retained;
+    });
+  }
+  return { save: save, recover: recover, tick: function () { return run(null); }, runNow: function (id) { if (!validId(id)) throw new Error('定时任务标识无效'); return run(id); }, enable: enable, remove: remove, reschedule: reschedule, pausePackage: pausePackage,
+    list: function () { return locked(function () { return state().tasks.map(publicTask); }); },
+    preview: function (expression, timezone) { var after = io.now(), values = []; for (var n = 0; n < 3; n++) { after = cron.next(expression, timezone, after, io); values.push(after); } return values; } };
+}
+
+module.exports = { create: create };
 
 return module.exports; })();
 // Android-only adapter. The updater core has no Android or Node dependencies.
@@ -376,14 +605,56 @@ function createAutoJs6Runtime() {
     var handle = new java.io.RandomAccessFile(file(path), 'rw');
     var lease;
     try { lease = handle.getChannel().tryLock(); }
-    catch (_) { handle.close(); throw new Error('另一启动器正在运行任务或更新，请等待完成'); }
-    if (lease === null) { handle.close(); throw new Error('另一启动器正在运行任务或更新，请等待完成'); }
+    catch (_) { handle.close(); var conflict = new Error('另一启动器正在运行任务或更新，请等待完成'); conflict.code = 'BUSY'; throw conflict; }
+    if (lease === null) { handle.close(); var busy = new Error('另一启动器正在运行任务或更新，请等待完成'); busy.code = 'BUSY'; throw busy; }
     var lock = { handle: handle, lease: lease, done: false };
     heldLocks.push(lock);
     try { return action(); } finally { release(lock); }
   }
+  var zones = Object.create(null);
+  function zone(name) {
+    if (android.os.Build.VERSION.SDK_INT < 26) throw new Error('手机定时执行需要 Android 8 或更新版本');
+    if (typeof name === 'string' && zones[name]) return zones[name];
+    if (typeof name !== 'string' || name.length > 100 || !java.time.ZoneId.getAvailableZoneIds().contains(name)) throw new Error('请填写 Asia/Shanghai 等 IANA 时区');
+    zones[name] = java.time.ZoneId.of(name); return zones[name];
+  }
+  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false;
+  var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
+  function releaseScreenSession() {
+    if (!screenActive.get()) return;
+    screenActive.set(false);
+    try { images.stopScreenCapture(); }
+    finally { try { device.cancelKeepingAwake(); } finally { if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } } }
+  }
+  var screenSession = {
+    isActive: function () { return !!screenActive.get(); },
+    check: function () {
+      if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
+      if (!auto.service) throw new Error('无障碍服务已停止，请恢复后重新开启手机定时执行');
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
+    },
+    acquire: function () {
+      if (screenActive.get()) return;
+      if (!auto.service) throw new Error('请先开启 AutoJs6 无障碍服务');
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
+      if (String(currentPackage()) !== String(context.getPackageName())) throw new Error('请在 AutoJs6 前台开启手机定时执行');
+      var services = context.getSystemService(android.content.Context.ACTIVITY_SERVICE).getRunningServices(1000), active = false;
+      for (var n = 0; n < services.size(); n++) if (String(services.get(n).service.getClassName()) === 'org.autojs.autojs.external.foreground.AppForegroundService') active = true;
+      if (!active) {
+        var started = android.os.Build.VERSION.SDK_INT >= 26 ? context.startForegroundService(foregroundIntent) : context.startService(foregroundIntent);
+        if (!started) throw new Error('无法开启 AutoJs6 前台运行服务');
+        sessionForeground = true;
+      }
+      try {
+        if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+        screenActive.set(true); device.keepScreenDim();
+      } catch (e) { if (screenActive.get()) releaseScreenSession(); else if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } throw e; }
+    },
+    release: releaseScreenSession
+  };
   mkdir(root);
   events.on('exit', function () {
+    try { releaseScreenSession(); } catch (_) {}
     var locks = heldLocks.slice();
     locks.forEach(function (lock) { try { release(lock); } catch (_) {} });
     client.dispatcher().cancelAll();
@@ -391,6 +662,14 @@ function createAutoJs6Runtime() {
   return {
     root: root, hostVersion: host, encode: encode, decode: decode,
     now: function () { return Date.now(); },
+    screenSession: screenSession,
+    localTimezone: function () { return String(java.util.TimeZone.getDefault().getID()); },
+    validateZone: zone,
+    formatTime: function (epoch, timezone) { return String(java.time.Instant.ofEpochMilli(epoch).atZone(zone(timezone)).format(java.time.format.DateTimeFormatter.ofPattern('yyyy-MM-dd HH:mm z'))); },
+    cronInstant: function (name, year, month, day, hour, minute) {
+      var rules = zone(name).getRules(), local = java.time.LocalDateTime.of(year, month, day, hour, minute), offsets = rules.getValidOffsets(local);
+      return offsets.isEmpty() ? null : Number(local.toInstant(offsets.get(0)).toEpochMilli());
+    },
     uuid: function () { return String(java.util.UUID.randomUUID()); },
     mkdir: mkdir, writeAtomic: writeAtomic, writeBytes: writeBytes, readBytes: readBytes, removeTree: removeTree, withLock: withLock,
     exists: function (path) { return file(path).exists(); },
@@ -457,7 +736,7 @@ function createAutoJs6Runtime() {
   };
 }
 
-function launchMobileScripts(core, io, bundled) {
+function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   if (!/^org\.autojs\.autojs6(?:\.|$)/.test(String(context.getPackageName()))) throw new Error('请使用官方 AutoJs6 运行启动器');
   if (!core.versionAtLeast(io.hostVersion, '6.7.0')) throw new Error('请先将 AutoJs6 更新到 6.7.0 或更新版本');
   var defaultSource = { url: 'https://github.com/guygubaby/por-auto', reference: 'main' };
@@ -465,6 +744,10 @@ function launchMobileScripts(core, io, bundled) {
   var settings = io.exists(settingsFile) ? JSON.parse(io.readText(settingsFile)) : { source: defaultSource };
   settings.source = core.source(settings.source || defaultSource);
   var manager = core.create(io, io.root, settings.source);
+  var scheduler = schedulerCore.create(io, io.root, core, cron, function (snapshot, trigger) { return core.create(io, io.root, snapshot.source).runPinned(snapshot, trigger); });
+  io.scheduling = scheduler;
+  var timerThread = null, timerStop = null;
+  function timerRunning() { return timerThread !== null && timerThread.isAlive(); }
   var token = ''; // Repository credentials remain in memory for this launcher session only.
   var state = { installed: [], available: [] }, filter = 'all', busy = false, closed = false;
   var green = '#75D9AE', muted = '#A5B9AE', background = '#101A15';
@@ -478,6 +761,7 @@ function launchMobileScripts(core, io, bundled) {
     + '<horizontal gravity="center_vertical"><text text="Por Auto" textColor="#75D9AE" textSize="13sp" layout_weight="1"/><button id="more" text="更多" w="64" h="48" textSize="13sp" textColor="#EFF5F1"/></horizontal>'
     + '<text text="手机工作流商店" textSize="21sp" textStyle="bold" textColor="#EFF5F1" margin="0 4 0 4"/>'
     + '<text text="从你的仓库安装工作流，配置与记录留在本机" textSize="12sp" textColor="#A5B9AE" marginBottom="12"/>'
+    + '<text id="timerStatus" text="手机定时：未开启" textSize="12sp" textColor="#A5B9AE" marginBottom="8"/>'
     + '<card cardCornerRadius="10dp" cardElevation="0dp" cardBackgroundColor="#1A2921"><vertical padding="12">'
     + '<text text="工作流来源" textSize="11sp" textColor="#A5B9AE"/><text id="source" textSize="13sp" textColor="#EFF5F1" maxLines="2"/>'
     + '<horizontal><button id="sourceSettings" text="来源设置" w="0" h="48" layout_weight="1" textSize="13sp" textColor="#EFF5F1"/><button id="refresh" text="刷新目录" w="0" h="48" layout_weight="1" textSize="13sp" textColor="#75D9AE"/></horizontal>'
@@ -504,6 +788,64 @@ function launchMobileScripts(core, io, bundled) {
     dialog.show(); return result.blockedGet();
   }
   function version(p) { return 'v' + p.version + ' · ' + p.versionCode; }
+  function startTimer() {
+    if (timerRunning()) return '手机定时执行已开启';
+    if (!dialogs.confirm('开启手机定时执行', '会申请本次截图授权，并保持手机唤醒。请保持手机解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
+    var ready = threads.disposable(); timerStop = new java.util.concurrent.atomic.AtomicBoolean(false);
+    timerThread = threads.start(function () {
+      var notified = false, failure = null;
+      try {
+        io.withLock(io.root + '/scheduler-session.lock', function () {
+          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(); scheduler.recover(); });
+          ready.setAndNotify(null); notified = true;
+          ui.run(function () { if (!closed) { ui.timerStatus.setText('手机定时：执行会话已开启'); ui.timerStatus.attr('textColor', green); } });
+          while (!timerStop.get()) {
+            io.screenSession.check();
+            var result = scheduler.tick();
+            if (result) ui.run(function () { if (!closed) ui.timerStatus.setText('手机定时：' + (result.status === 'completed' ? '上一轮完成' : result.status === 'skipped_busy' ? '操作占用，已跳过本轮' : '上一轮未完成，请查看记录')); });
+            sleep(1000);
+          }
+        });
+      } catch (e) { failure = String(e.message || e); if (!notified) { ready.setAndNotify(failure); notified = true; } }
+      finally {
+        // Manual runs may share this engine's projection; let them finish before releasing it.
+        while (io.screenSession.isActive()) {
+          try { io.withLock(io.root + '/operation.lock', function () { io.screenSession.release(); }); }
+          catch (e) { if (e.code !== 'BUSY') { failure = failure || String(e.message || e); break; } sleep(250); }
+        }
+        ui.run(function () { if (!closed) { ui.timerStatus.setText(failure ? '手机定时已停止：' + failure : '手机定时：已停止后续执行'); ui.timerStatus.attr('textColor', failure ? '#FFB4A8' : muted); } });
+      }
+    });
+    var error = ready.blockedGet(); if (error) throw new Error(error);
+    return '手机定时执行已开启，可在「更多」查看任务或停止后续执行';
+  }
+  function manageSchedules() {
+    var tasks = scheduler.list();
+    if (!tasks.length) { show('暂无定时任务', '在工作流卡片「运行 / 配置 → 新建定时任务」保存任务。'); return; }
+    var index = dialogs.select('手机定时任务', tasks.map(function (task) { return (task.enabled ? '已启用 · ' : '已暂停 · ') + task.name; }));
+    if (index < 0) return;
+    var task = tasks[index];
+    var action = dialogs.select(task.name, ['查看详情和结果', '修改名称和时间', task.enabled ? '暂停后续执行' : '启用后续执行', '立即执行一次', '删除任务']);
+    if (action === 0) {
+      var labels = { completed: '完成', failed: '失败', running: '正在执行', interrupted: '上轮中断', skipped_busy: '操作占用，已跳过', missed: '错过时间，未补跑', overlap: '上一轮未结束，已跳过', busy: '手机正在处理其他任务，已跳过' };
+      show(task.name, task.scriptName + ' · v' + task.version + ' (' + task.versionCode + ')' + '\n' + (task.dryRun ? '预演，不发送' : '正式发送')
+        + '\n' + task.cron + ' · ' + task.timezone + '\n下次：' + (task.nextAt === null ? '已暂停' : io.formatTime(task.nextAt, task.timezone))
+        + '\n上次：' + (task.lastRun ? labels[task.lastRun.status] || task.lastRun.status : '尚未执行') + (task.lastRun && task.lastRun.error ? '\n' + task.lastRun.error : '')
+        + (task.lastSkip ? '\n最近跳过：' + (labels[task.lastSkip.status] || task.lastSkip.status) + '\n' + io.formatTime(task.lastSkip.at, task.timezone) : '')
+        + '\n\n代码与业务配置使用保存时的快照。运行日志可从「更多」导出。');
+    } else if (action === 1) {
+      var name = dialogs.rawInput('任务名称', task.name); if (name === null) return;
+      var expression = dialogs.rawInput('Cron：分 时 日 月 周', task.cron); if (expression === null) return;
+      var timezone = dialogs.rawInput('IANA 时区', task.timezone); if (timezone === null) return;
+      var upcoming = scheduler.preview(String(expression).trim(), String(timezone).trim());
+      if (dialogs.confirm('修改执行时间', upcoming.map(function (at) { return io.formatTime(at, String(timezone).trim()); }).join('\n') + '\n\n消息、接收对象和代码版本仍保持原快照。')) scheduler.reschedule(task.id, { name: String(name), cron: String(expression).trim(), timezone: String(timezone).trim() });
+    } else if (action === 2) scheduler.enable(task.id, !task.enabled);
+    else if (action === 3) {
+      if (!timerRunning() || timerStop.get()) throw new Error('请先从「更多」开启手机定时执行，完成本次截图授权');
+      if (!dialogs.confirm('立即执行一次', task.name + '\n' + (task.dryRun ? '预演，不点击发送' : '正式发送，每个目标发送一次') + '\n\n使用保存时的消息和接收配置，不改变之后的计划时间。')) return;
+      var result = scheduler.runNow(task.id); if (result.status !== 'completed') throw new Error(result.error || '任务未完成，请查看运行记录');
+    } else if (action === 4 && dialogs.confirm('删除定时任务', task.name + '\n任务配置会删除，已有运行记录保留。')) scheduler.remove(task.id);
+  }
   function render() {
     ui.source.setText(manager.source.owner + '/' + manager.source.repo + ' · ' + manager.source.reference + (token ? ' · 已设置令牌' : ''));
     var items = core.storeItems(state), count = items.filter(function (item) { return item.update; }).length;
@@ -550,7 +892,7 @@ function launchMobileScripts(core, io, bundled) {
         perform('移除工作流…', function () {
           if (!dialogs.confirm('删除工作流', item.name + '\n\n配置与运行记录会保留，之后可以重新安装。')) return '已取消删除';
           var removed = manager.uninstall(item.id);
-          return removed.warning || '工作流已删除，配置与记录保留';
+          return removed.warning || '工作流已删除，相关定时任务已暂停，配置与记录保留';
         });
       });
       ui.cards.addView(card);
@@ -616,7 +958,7 @@ function launchMobileScripts(core, io, bundled) {
   }));
   ui.more.on('click', function () {
     perform('更多操作', function () {
-      var choice = dialogs.select('手机工作流商店', ['导入本地工作流包', '导出最近运行日志', '退出商店']);
+      var choice = dialogs.select('手机工作流商店', ['导入本地工作流包', '导出最近运行日志', '定时任务', timerRunning() ? '停止后续定时执行' : '开启手机定时执行', '退出商店']);
       if (choice === 0) {
         var path = dialogs.rawInput('本地工作流包路径', files.path('./PorAuto-mobile-scripts.json'));
         if (!path) return '已取消导入';
@@ -624,16 +966,21 @@ function launchMobileScripts(core, io, bundled) {
         var imported = manager.importBundle(io.importFile(String(path))); show('导入结果', summary(imported));
         return imported.errors.length ? '部分工作流未能导入，请查看结果' : '工作流包已校验并导入';
       }
-      if (choice === 1) { var output = io.exportFile(manager.exportLogs()); show('日志已导出', output + '\n\n包含版本和运行日志，不包含仓库令牌。'); app.viewFile(output); return '运行日志已导出'; }
-      if (choice === 2) { closed = true; token = ''; ui.run(function () { ui.finish(); }); }
+      if (choice === 1) { var debug = manager.exportLogs(); debug.schedules = scheduler.list(); var output = io.exportFile(debug); show('日志已导出', output + '\n\n包含版本、运行结果和定时状态，不包含配置快照或仓库令牌。'); app.viewFile(output); return '运行日志已导出'; }
+      if (choice === 2) { manageSchedules(); return '定时任务配置保存在本机'; }
+      if (choice === 3) {
+        if (!timerRunning()) return startTimer();
+        timerStop.set(true); return '已停止后续触发，当前执行结束后释放运行会话';
+      }
+      if (choice === 4) { if (timerRunning()) return '请先停止后续定时执行，再退出商店'; closed = true; token = ''; ui.run(function () { ui.finish(); }); }
       return '工作流配置与记录保存在本机';
     });
   });
   ui.emitter.on('back_pressed', function (event) {
-    if (busy) { event.consumed = true; toast('操作正在进行，请等待完成'); }
+    if (busy || timerRunning()) { event.consumed = true; toast(timerRunning() ? '请在「更多」先停止定时执行，再退出商店' : '操作正在进行，请等待完成'); }
     else { token = ''; closed = true; }
   });
-  events.on('exit', function () { token = ''; closed = true; });
+  events.on('exit', function () { if (timerStop) timerStop.set(true); token = ''; closed = true; });
   perform('正在加载本机工作流…', function () {
     if (!settings.initialized) {
       if (manager.source.url === defaultSource.url && manager.source.reference === defaultSource.reference && !manager.list().installed.length) manager.importBundle(bundled);
@@ -647,6 +994,6 @@ function launchMobileScripts(core, io, bundled) {
   });
 }
 
-try { launchMobileScripts(core, createAutoJs6Runtime(), {"schemaVersion":1,"catalog":{"schemaVersion":1,"name":"离线测试脚本","workflows":[{"id":"demo-hello","name":"手机脚本更新测试","description":"只显示你好并记录运行次数，不打开微信、不发送消息。用于验证安装、版本更新、配置保留和日志。","version":"1.0.0","versionCode":1,"minLauncher":1,"minAutoJs6":"6.7.0","entry":"main.js","files":[{"path":"lib/message.js","size":99,"sha256":"2e574061cf08bc158f46b3ae6619cf557e5a0ca89db3afdaa1a7097ea63a9670"},{"path":"main.js","size":341,"sha256":"3901374a4d60174cc9f66aeab55d3f9279ee6682f071aef6eb8d10d3a8c23948"}]}]},"files":[{"id":"demo-hello","path":"lib/message.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAodmVyc2lvbikgewogIHJldHVybiAn5L2g5aW977yM5omL5py66ISa5pys5bey6L+Q6KGMIMK3IHYnICsgdmVyc2lvbjsKfTsK"},{"id":"demo-hello","path":"main.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAocG9yKSB7CiAgdmFyIG1lc3NhZ2UgPSByZXF1aXJlKCcuL2xpYi9tZXNzYWdlLmpzJyk7CiAgdmFyIGNvbmZpZyA9IHBvci5yZWFkQ29uZmlnKCk7CiAgY29uZmlnLnJ1bnMgPSAodHlwZW9mIGNvbmZpZy5ydW5zID09PSAnbnVtYmVyJyA/IGNvbmZpZy5ydW5zIDogMCkgKyAxOwogIHBvci5zYXZlQ29uZmlnKGNvbmZpZyk7CiAgcG9yLmxvZyhtZXNzYWdlKHBvci52ZXJzaW9uKSwgeyBydW5zOiBjb25maWcucnVucyB9KTsKICB0b2FzdChtZXNzYWdlKHBvci52ZXJzaW9uKSArICdcbuesrCAnICsgY29uZmlnLnJ1bnMgKyAnIOasoei/kOihjCcpOwp9Owo="}]}); }
+try { launchMobileScripts(core, createAutoJs6Runtime(), {"schemaVersion":1,"catalog":{"schemaVersion":1,"name":"离线测试脚本","workflows":[{"id":"demo-hello","name":"手机脚本更新测试","description":"只显示你好并记录运行次数，不打开微信、不发送消息。用于验证安装、版本更新、配置保留和日志。","version":"1.0.0","versionCode":1,"minLauncher":1,"minAutoJs6":"6.7.0","entry":"main.js","files":[{"path":"lib/message.js","size":99,"sha256":"2e574061cf08bc158f46b3ae6619cf557e5a0ca89db3afdaa1a7097ea63a9670"},{"path":"main.js","size":341,"sha256":"3901374a4d60174cc9f66aeab55d3f9279ee6682f071aef6eb8d10d3a8c23948"}]}]},"files":[{"id":"demo-hello","path":"lib/message.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAodmVyc2lvbikgewogIHJldHVybiAn5L2g5aW977yM5omL5py66ISa5pys5bey6L+Q6KGMIMK3IHYnICsgdmVyc2lvbjsKfTsK"},{"id":"demo-hello","path":"main.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAocG9yKSB7CiAgdmFyIG1lc3NhZ2UgPSByZXF1aXJlKCcuL2xpYi9tZXNzYWdlLmpzJyk7CiAgdmFyIGNvbmZpZyA9IHBvci5yZWFkQ29uZmlnKCk7CiAgY29uZmlnLnJ1bnMgPSAodHlwZW9mIGNvbmZpZy5ydW5zID09PSAnbnVtYmVyJyA/IGNvbmZpZy5ydW5zIDogMCkgKyAxOwogIHBvci5zYXZlQ29uZmlnKGNvbmZpZyk7CiAgcG9yLmxvZyhtZXNzYWdlKHBvci52ZXJzaW9uKSwgeyBydW5zOiBjb25maWcucnVucyB9KTsKICB0b2FzdChtZXNzYWdlKHBvci52ZXJzaW9uKSArICdcbuesrCAnICsgY29uZmlnLnJ1bnMgKyAnIOasoei/kOihjCcpOwp9Owo="}]}, schedulerCore, cron); }
 catch (error) { dialogs.alert('启动器未能运行', String(error.message || error)); }
 })();

@@ -69,14 +69,56 @@ function createAutoJs6Runtime() {
     var handle = new java.io.RandomAccessFile(file(path), 'rw');
     var lease;
     try { lease = handle.getChannel().tryLock(); }
-    catch (_) { handle.close(); throw new Error('另一启动器正在运行任务或更新，请等待完成'); }
-    if (lease === null) { handle.close(); throw new Error('另一启动器正在运行任务或更新，请等待完成'); }
+    catch (_) { handle.close(); var conflict = new Error('另一启动器正在运行任务或更新，请等待完成'); conflict.code = 'BUSY'; throw conflict; }
+    if (lease === null) { handle.close(); var busy = new Error('另一启动器正在运行任务或更新，请等待完成'); busy.code = 'BUSY'; throw busy; }
     var lock = { handle: handle, lease: lease, done: false };
     heldLocks.push(lock);
     try { return action(); } finally { release(lock); }
   }
+  var zones = Object.create(null);
+  function zone(name) {
+    if (android.os.Build.VERSION.SDK_INT < 26) throw new Error('手机定时执行需要 Android 8 或更新版本');
+    if (typeof name === 'string' && zones[name]) return zones[name];
+    if (typeof name !== 'string' || name.length > 100 || !java.time.ZoneId.getAvailableZoneIds().contains(name)) throw new Error('请填写 Asia/Shanghai 等 IANA 时区');
+    zones[name] = java.time.ZoneId.of(name); return zones[name];
+  }
+  var screenActive = new java.util.concurrent.atomic.AtomicBoolean(false), sessionForeground = false;
+  var foregroundIntent = new android.content.Intent().setClassName(String(context.getPackageName()), 'org.autojs.autojs.external.foreground.AppForegroundService');
+  function releaseScreenSession() {
+    if (!screenActive.get()) return;
+    screenActive.set(false);
+    try { images.stopScreenCapture(); }
+    finally { try { device.cancelKeepingAwake(); } finally { if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } } }
+  }
+  var screenSession = {
+    isActive: function () { return !!screenActive.get(); },
+    check: function () {
+      if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
+      if (!auto.service) throw new Error('无障碍服务已停止，请恢复后重新开启手机定时执行');
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
+    },
+    acquire: function () {
+      if (screenActive.get()) return;
+      if (!auto.service) throw new Error('请先开启 AutoJs6 无障碍服务');
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('请先手动解锁手机');
+      if (String(currentPackage()) !== String(context.getPackageName())) throw new Error('请在 AutoJs6 前台开启手机定时执行');
+      var services = context.getSystemService(android.content.Context.ACTIVITY_SERVICE).getRunningServices(1000), active = false;
+      for (var n = 0; n < services.size(); n++) if (String(services.get(n).service.getClassName()) === 'org.autojs.autojs.external.foreground.AppForegroundService') active = true;
+      if (!active) {
+        var started = android.os.Build.VERSION.SDK_INT >= 26 ? context.startForegroundService(foregroundIntent) : context.startService(foregroundIntent);
+        if (!started) throw new Error('无法开启 AutoJs6 前台运行服务');
+        sessionForeground = true;
+      }
+      try {
+        if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+        screenActive.set(true); device.keepScreenDim();
+      } catch (e) { if (screenActive.get()) releaseScreenSession(); else if (sessionForeground) { sessionForeground = false; context.stopService(foregroundIntent); } throw e; }
+    },
+    release: releaseScreenSession
+  };
   mkdir(root);
   events.on('exit', function () {
+    try { releaseScreenSession(); } catch (_) {}
     var locks = heldLocks.slice();
     locks.forEach(function (lock) { try { release(lock); } catch (_) {} });
     client.dispatcher().cancelAll();
@@ -84,6 +126,14 @@ function createAutoJs6Runtime() {
   return {
     root: root, hostVersion: host, encode: encode, decode: decode,
     now: function () { return Date.now(); },
+    screenSession: screenSession,
+    localTimezone: function () { return String(java.util.TimeZone.getDefault().getID()); },
+    validateZone: zone,
+    formatTime: function (epoch, timezone) { return String(java.time.Instant.ofEpochMilli(epoch).atZone(zone(timezone)).format(java.time.format.DateTimeFormatter.ofPattern('yyyy-MM-dd HH:mm z'))); },
+    cronInstant: function (name, year, month, day, hour, minute) {
+      var rules = zone(name).getRules(), local = java.time.LocalDateTime.of(year, month, day, hour, minute), offsets = rules.getValidOffsets(local);
+      return offsets.isEmpty() ? null : Number(local.toInstant(offsets.get(0)).toEpochMilli());
+    },
     uuid: function () { return String(java.util.UUID.randomUUID()); },
     mkdir: mkdir, writeAtomic: writeAtomic, writeBytes: writeBytes, readBytes: readBytes, removeTree: removeTree, withLock: withLock,
     exists: function (path) { return file(path).exists(); },

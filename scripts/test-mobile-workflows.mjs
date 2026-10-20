@@ -107,6 +107,28 @@ test('all five workflows run through the mobile controller; rehearsal clears its
   }
 });
 
+test('scheduled mobile entries run all five workflows without menus and always release their task resources', () => {
+  function entry(io) {
+    const module = { exports: {} };
+    const wrapper = vm.runInThisContext('(function(require,module,exports){' + readFileSync(mobilePath + 'main.js', 'utf8') + '\n})');
+    wrapper(specifier => specifier === './android.js' ? { create: () => io } : loadMobile(createRequire(mobilePath + 'main.js').resolve(specifier)), module, module.exports);
+    return module.exports;
+  }
+  for (const id of definitions.workflows.map(workflow => workflow.id)) {
+    const { io, state } = fixture(); let prepared = 0, finished = 0;
+    io.prepare = () => prepared++; io.finish = () => finished++;
+    const por = { execution: { workflowId: id, dryRun: true }, readConfig: () => ({ input: input(), hooks: {}, dryRun: false }) };
+    entry(io)(por);
+    assert.equal(prepared, 1); assert.equal(finished, 1); assert.equal(state.sendClicks, 0);
+    assert.equal(state.records.at(-1).status, 'completed');
+  }
+  const { io } = fixture(); let finished = 0;
+  io.prepare = () => { throw Error('permission lost'); }; io.finish = () => finished++;
+  assert.throws(() => entry(io)({ execution: { workflowId: 'wechat-open', dryRun: true }, readConfig: () => ({}) }), /permission lost/);
+  assert.equal(finished, 1);
+  assert.throws(() => entry(io)({ execution: { workflowId: 'unknown', dryRun: true }, readConfig: () => ({}) }), /无效/);
+});
+
 test('all groups and all homepage conversations are enumerated before rehearsal', () => {
   for (const scope of ['groups', 'conversations']) {
     const { runner, state } = fixture();

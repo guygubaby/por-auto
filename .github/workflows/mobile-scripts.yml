@@ -3,9 +3,9 @@ name: AutoJs6 script packages
 on:
   push:
     branches: [main]
-    paths: ['mobile/**', 'mobile-workflows/**', 'workflows/**', 'src-tauri/src/visual.rs', 'scripts/mobile-scripts.mjs', 'scripts/test-mobile-*.mjs', '.github/workflows/mobile-scripts.yml', 'package.json', 'pnpm-lock.yaml']
+    paths: ['mobile/**', 'mobile-workflows/**', 'workflows/**', 'src-tauri/src/visual.rs', 'scripts/mobile-*.mjs', 'scripts/test-mobile-*.mjs', 'scripts/fixtures/cron-times.json', '.github/workflows/mobile-scripts.yml', 'package.json', 'pnpm-lock.yaml']
   pull_request:
-    paths: ['mobile/**', 'mobile-workflows/**', 'workflows/**', 'src-tauri/src/visual.rs', 'scripts/mobile-scripts.mjs', 'scripts/test-mobile-*.mjs', '.github/workflows/mobile-scripts.yml']
+    paths: ['mobile/**', 'mobile-workflows/**', 'workflows/**', 'src-tauri/src/visual.rs', 'scripts/mobile-*.mjs', 'scripts/test-mobile-*.mjs', 'scripts/fixtures/cron-times.json', '.github/workflows/mobile-scripts.yml']
   workflow_dispatch:
 
 permissions:

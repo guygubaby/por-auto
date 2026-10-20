@@ -79,7 +79,7 @@ function create(por, config) {
     } catch (_) { throw new Error('HTTP 连接失败或超时，未自动重试；请检查手机网络和接口地址'); }
     finally { if (response) response.close(); client.dispatcher().cancelAll(); client.connectionPool().evictAll(); }
   }
-  var width = 0, height = 0, captures = false, originalClip = null, clipboardSaved = false, owned = [];
+  var width = 0, height = 0, captures = false, captureOwned = false, originalClip = null, clipboardSaved = false, owned = [];
   var awake = false, foregroundOwned = false;
   // shortcut: AutoJs6 6.7.0's declared service; recheck the component when upgrading the host.
   var foregroundClass = 'org.autojs.autojs.external.foreground.AppForegroundService';
@@ -132,6 +132,7 @@ function create(por, config) {
   function prepare() {
     if (!auto.service) throw new Error('请先在手机设置中开启 AutoJs6 无障碍服务，再运行工作流');
     if (lock.isKeyguardLocked()) throw new Error('请先手动解锁手机');
+    if (por.execution && String(currentPackage()) !== AUTOJS && !returnHost()) throw new Error('定时任务未能返回 AutoJs6，未操作微信');
     if (String(currentPackage()) !== AUTOJS) throw new Error('请在 AutoJs6 前台启动工作流，以便保存并恢复剪贴板');
     originalClip = clipboard.getPrimaryClip(); clipboardSaved = true; owned = []; lastOwnClipAt = 0;
     var provider = config.provider;
@@ -149,10 +150,15 @@ function create(por, config) {
         foregroundOwned = true;
       }
     } catch (_) { throw new Error('不能启用 AutoJs6 前台服务，请检查当前版本兼容性与手机运行限制'); }
-    if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+    if (por.screenSession) {
+      if (!por.screenSession.isActive()) throw new Error('截图会话已停止，请重新开启手机定时执行');
+    } else {
+      if (!requestScreenCapture()) throw new Error('没有获得本次屏幕读取授权');
+      captureOwned = true;
+    }
     captures = true;
     if (lock.isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新运行');
-    device.keepScreenDim(); awake = true;
+    if (!por.screenSession) { device.keepScreenDim(); awake = true; }
   }
   function checkImageSupport(provider) {
     var headers = [];
@@ -415,7 +421,7 @@ function create(por, config) {
   }
   function finish() {
     try {
-    if (captures) { images.stopScreenCapture(); captures = false; }
+    if (captures) { if (captureOwned) images.stopScreenCapture(); captures = false; captureOwned = false; }
     var returned = returnHost();
     if (!returned) por.log('host_return_pending', '请手动返回 AutoJs6 查看运行结果');
     if (!clipboardSaved || !owned.length) { clipboardSaved = false; originalClip = null; return; }

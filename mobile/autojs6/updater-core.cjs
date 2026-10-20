@@ -187,11 +187,12 @@ function create(io, root, inputSource) {
     return locked(function () {
       var current = state();
       if (!current.installed.some(function (p) { return p.id === packageId; })) return { removed: false, warning: null };
+      var retained = io.scheduling ? io.scheduling.pausePackage(origin, packageId) : [];
       current.installed = current.installed.filter(function (p) { return p.id !== packageId; });
       writeJson(stateFile, current);
       try {
         var pattern = new RegExp('^' + packageId + '-[0-9]+-[a-f0-9]{64}$');
-        io.list(store + '/versions').filter(function (name) { return pattern.test(name); }).forEach(function (name) { io.removeTree(store + '/versions/' + name); });
+        io.list(store + '/versions').filter(function (name) { return pattern.test(name) && retained.indexOf(name) < 0; }).forEach(function (name) { io.removeTree(store + '/versions/' + name); });
         return { removed: true, warning: null };
       } catch (_) { return { removed: true, warning: '工作流已移除，部分缓存未能清理；配置与日志仍保留。' }; }
     });
@@ -228,15 +229,22 @@ function create(io, root, inputSource) {
       return result;
     });
   }
-  function run(packageId) {
+  function run(packageId, pinned, trigger) {
     return locked(function () {
       var p = state().installed.filter(function (item) { return item.id === packageId; })[0];
       if (!p) fail('请先安装脚本');
+      if (pinned) {
+        if (source(pinned.source).url !== origin.url || source(pinned.source).reference !== origin.reference || !pinned.config || typeof pinned.config !== 'object' || Array.isArray(pinned.config)
+            || !object(pinned.execution) || !id(pinned.execution.workflowId) || typeof pinned.execution.dryRun !== 'boolean') fail('定时任务配置快照无效');
+        p = catalog({ schemaVersion: 1, workflows: [pinned.package] }).workflows[0];
+        if (p.id !== packageId || pinned.cacheName !== p.id + '-' + p.versionCode + '-' + digest(p)) fail('定时任务代码快照无效');
+      }
       compatible(p); verifyInstalled(p);
       var runId = String(io.now()) + '-' + io.uuid();
       var folder = root + '/runs/' + runId;
       io.mkdir(folder);
       var summary = { id: runId, scriptId: p.id, name: p.name, version: p.version, versionCode: p.versionCode, packageSha256: digest(p), source: origin.url, timestamp: io.now(), status: 'running', error: null };
+      if (trigger) { summary.scheduleId = trigger.scheduleId; summary.scheduledAt = trigger.scheduledAt; summary.trigger = trigger.trigger; }
       writeJson(folder + '/summary.json', summary);
       var configFile = store + '/config/' + p.id + '.json';
       var eventCount = 0;
@@ -255,8 +263,16 @@ function create(io, root, inputSource) {
         io.mkdir(store + '/data/' + p.id);
         // shortcut: entry functions must join their workers before returning; isolated async engines need separate lifecycle tracking.
         var result = entry({ id: p.id, version: p.version, versionCode: p.versionCode, runId: runId, dataDir: store + '/data/' + p.id,
-          readConfig: function () { return readJson(configFile, {}); },
-          saveConfig: function (value) { if (!object(value)) fail('配置必须是 JSON 对象'); writeJson(configFile, value); },
+          execution: pinned ? JSON.parse(JSON.stringify(pinned.execution)) : null,
+          screenSession: io.screenSession && io.screenSession.isActive() ? io.screenSession : null,
+          schedules: !pinned && io.scheduling ? {
+            timezone: io.localTimezone(), preview: io.scheduling.preview, formatTime: io.formatTime,
+            save: function (options, execution) {
+              return io.scheduling.save(options, { source: origin, package: p, cacheName: p.id + '-' + p.versionCode + '-' + digest(p), config: readJson(configFile, {}), execution: execution });
+            }
+          } : null,
+          readConfig: function () { return pinned ? JSON.parse(JSON.stringify(pinned.config)) : readJson(configFile, {}); },
+          saveConfig: function (value) { if (pinned) fail('定时运行不能修改固定配置'); if (!object(value)) fail('配置必须是 JSON 对象'); writeJson(configFile, value); },
           recordResult: function (value) {
             if (!object(value)) fail('运行结果必须是 JSON 对象');
             var text = JSON.stringify(value, null, 2);
@@ -293,7 +309,8 @@ function create(io, root, inputSource) {
       }) };
     });
   }
-  return { refresh: function (token) { return locked(function () { return refresh(token); }); }, check: check, install: installOnline, uninstall: uninstall, importBundle: importBundle, run: run, list: list, exportLogs: exportLogs, source: origin };
+  return { refresh: function (token) { return locked(function () { return refresh(token); }); }, check: check, install: installOnline, uninstall: uninstall, importBundle: importBundle,
+    run: function (id) { return run(id); }, runPinned: function (snapshot, trigger) { return run(snapshot.package.id, snapshot, trigger); }, list: list, exportLogs: exportLogs, source: origin };
 }
 
 module.exports = { create: create, catalog: catalog, storeItems: storeItems, source: source, relative: relative, versionAtLeast: versionAtLeast, launcherVersion: LAUNCHER_VERSION, limits: { file: MAX_FILE, package: MAX_PACKAGE, catalog: MAX_CATALOG } };

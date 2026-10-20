@@ -510,6 +510,29 @@ mod tests {
     }
 
     #[test]
+    fn cron_times_match_mobile_contract() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../scripts/fixtures/cron-times.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let actual = upcoming(
+                case["cron"].as_str().unwrap(),
+                case["timezone"].as_str().unwrap(),
+                time(case["after"].as_str().unwrap()),
+                1,
+            );
+            if case["next"].is_null() {
+                assert!(actual.is_err(), "{case}");
+            } else {
+                assert_eq!(
+                    actual.unwrap(),
+                    vec![time(case["next"].as_str().unwrap())],
+                    "{case}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn standard_cron_timezones_and_dst() {
         assert_eq!(
             upcoming(
