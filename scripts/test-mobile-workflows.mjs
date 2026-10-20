@@ -392,6 +392,14 @@ test('phone avatar labels and stale-screen guards match the desktop geometry and
   assert.equal(markers.unchanged(image, title, width, height, [500, 900], true), false);
 });
 
+test('mobile row candidates retain all visible titles when incoming messages reorder conversations', () => {
+  const points = { 1: [87, 100], 2: [87, 260], 3: [87, 420], 4: [87, 580], 5: [87, 740] };
+  const candidates = markers.candidates(points, 400, 1000, [500, 260]);
+  assert.equal(candidates[0].id, 2);
+  assert.equal(candidates.length, 5, 'the model point only ranks candidates; it must not exclude visible rows');
+  assert.ok(candidates.some(candidate => candidate.id === 5));
+});
+
 test('explicit text-only image providers are rejected while absent capability metadata stays unknown', () => {
   const value = { data: [
     { id: 'text', modalities: { input: ['text'] } },

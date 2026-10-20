@@ -159,7 +159,8 @@ impl Frame {
         let mut order: Vec<_> = (0..rows.len()).collect();
         order.sort_by_key(|&i| rows[i].1[1].abs_diff(approximate[1]));
         let mut result = Vec::new();
-        for i in order.into_iter().take(3) {
+        // Incoming messages can move the target beyond its previously observed neighbours.
+        for i in order {
             let (&id, point) = rows[i];
             let y = usize::from(point[1]) * height / 1000;
             let previous_gap = if i > 0 {
@@ -215,6 +216,26 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn candidates_cover_visible_rows_after_chat_order_changes() {
+        let frame = Frame {
+            image: Image {
+                width: 400,
+                height: 1000,
+                rgb: vec![0; 400 * 1000 * 3],
+            },
+            points: (1..=5).map(|id| (id, [87, 100 + (id - 1) * 160])).collect(),
+        };
+        let candidates = frame.candidates([500, 260]).unwrap();
+        assert_eq!(candidates.first().unwrap().id, 2);
+        assert_eq!(
+            candidates.len(),
+            5,
+            "an old model coordinate must not hide another visible exact-name row"
+        );
+        assert!(candidates.iter().any(|candidate| candidate.id == 5));
+    }
+
     #[test]
     fn avatar_markers_replace_inaccurate_coordinates_and_reject_missing_or_foreign_labels() {
         let (w, h) = (400usize, 800usize);

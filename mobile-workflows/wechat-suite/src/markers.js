@@ -51,7 +51,7 @@ function unchanged(a, b, width, height, point, editor) {
 function candidates(points, width, height, approximate) {
   if (!Array.isArray(approximate) || approximate.length !== 2 || approximate.some(function (n) { return typeof n !== 'number' || n % 1 || n <= 0 || n >= 1000; })) throw new Error('会话观察位置无效');
   var rows = Object.keys(points).map(function (id) { return { id: Number(id), point: points[id] }; }).sort(function (a, b) { return a.point[1] - b.point[1]; });
-  return rows.map(function (row, index) { return index; }).sort(function (a, b) { return Math.abs(rows[a].point[1] - approximate[1]) - Math.abs(rows[b].point[1] - approximate[1]); }).slice(0, 3).map(function (i) {
+  return rows.map(function (row, index) { return index; }).sort(function (a, b) { return Math.abs(rows[a].point[1] - approximate[1]) - Math.abs(rows[b].point[1] - approximate[1]); }).map(function (i) {
     var y = Math.floor(rows[i].point[1] * height / 1000);
     var previousGap = i > 0 ? y - Math.floor(rows[i - 1].point[1] * height / 1000) : i + 1 < rows.length ? Math.floor(rows[i + 1].point[1] * height / 1000) - y : Math.floor(width * .18);
     var nextGap = i + 1 < rows.length ? Math.floor(rows[i + 1].point[1] * height / 1000) - y : previousGap;
