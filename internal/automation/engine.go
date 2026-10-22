@@ -23,7 +23,7 @@ import (
 )
 
 const OfficialURL = "https://github.com/guygubaby/por-auto"
-const Version = "0.4.1"
+const Version = "0.4.2"
 
 type Engine struct {
 	Root        string
@@ -114,7 +114,7 @@ func (e *Engine) adbPath() (string, error) {
 func (e *Engine) Environment(ctx context.Context) (Object, error) {
 	p, err := e.adbPath()
 	if err != nil {
-		return Object{"ready": false, "version": "37.0.1", "platform": runtime.GOOS, "devices": []Device{}, "automation_version": "0.4.1"}, nil
+		return Object{"ready": false, "version": "37.0.1", "platform": runtime.GOOS, "devices": []Device{}, "automation_version": Version}, nil
 	}
 	a := ADB{Path: p}
 	v, err := a.Text(ctx, "version")
@@ -125,7 +125,7 @@ func (e *Engine) Environment(ctx context.Context) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Object{"ready": true, "version": "37.0.1", "platform": runtime.GOOS, "devices": ParseDevices(devices), "automation_version": "0.4.1"}, nil
+	return Object{"ready": true, "version": "37.0.1", "platform": runtime.GOOS, "devices": ParseDevices(devices), "automation_version": Version}, nil
 }
 func (e *Engine) Initialize(ctx context.Context) (Object, error) {
 	e.mu.Lock()

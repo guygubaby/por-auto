@@ -1,7 +1,7 @@
 {
   "name": "Por Auto",
   "identifier": "com.por.wechatreader",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "main": ".",
   "devUrl": "http://127.0.0.1:1420",
   "devCommand": "pnpm dev:web",
