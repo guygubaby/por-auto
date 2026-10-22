@@ -149,7 +149,7 @@ export function Layout() {
                 </p>
               </div>
               <p className="text-muted-foreground text-xs">
-                Por Auto <span className="float-right">v0.4.0</span>
+                Por Auto <span className="float-right">v0.4.1</span>
               </p>
             </div>
           </aside>

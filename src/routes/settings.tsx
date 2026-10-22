@@ -119,7 +119,7 @@ function Updater() {
   return (
     <Panel
       title="关于 Por Auto"
-      description={`当前版本 ${s?.currentVersion ?? '0.4.0'}`}
+      description={`当前版本 ${s?.currentVersion ?? '0.4.1'}`}
     >
       <div className="mb-5 flex items-center justify-between">
         <label htmlFor="auto-update" className="text-sm">

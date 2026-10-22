@@ -56,7 +56,7 @@ export async function invoke<T>(
     ui_settings: { theme: 'system' },
     update_status: {
       phase: 'idle',
-      currentVersion: '0.4.0',
+      currentVersion: '0.4.1',
       autoCheck: true,
       downloaded: 0,
     },
