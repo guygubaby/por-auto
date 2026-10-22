@@ -2,8 +2,15 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestWecomVersionProfilePreservesNativeHomeAndRawActionIDs(t *testing.T) {
@@ -129,10 +136,46 @@ func TestOrdinaryWeChatHasNoNativeExecutionPath(t *testing.T) {
 	if _, err := d.nativeScreen(nil); err == nil {
 		t.Fatal("ordinary WeChat screen was accepted")
 	}
-	if err := d.scrollNative(false); err == nil {
+	if _, err := d.scrollNative(false); err == nil {
 		t.Fatal("ordinary WeChat scroll was accepted")
 	}
 	if _, err := StartInput(context.Background(), ADB{}, "com.tencent.mm", t.TempDir()); err == nil {
 		t.Fatal("ordinary WeChat input was accepted")
+	}
+}
+
+func TestNativeHomeWaitsForSplashAndLeavesSearchAfterKeyboardCloses(t *testing.T) {
+	a, folder := launchTestADB(t)
+	if err := os.WriteFile(filepath.Join(folder, "ready"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		backs, _ := os.ReadFile(filepath.Join(folder, "backs"))
+		nodes := `<node resource-id="splash" bounds="[0,0][1080,1920]"/>`
+		if len(backs) > 0 && reads <= 4 {
+			t.Error("Back was pressed before the splash finished")
+		}
+		if reads > 4 {
+			nodes = fmt.Sprintf(`<node resource-id="lba" bounds="[100,100][900,%d]"/>`, 200+len(backs)*100)
+		}
+		if len(backs) >= 2 {
+			nodes = `<node resource-id="ncq" text="消息" bounds="[100,100][900,200]"/><node resource-id="fg8" text="全部" bounds="[100,200][200,300]"/><node resource-id="czp" bounds="[0,300][1080,1800]"/>`
+		}
+		nodes = strings.ReplaceAll(nodes, "<node ", `<node package="com.tencent.wework" `)
+		_ = json.NewEncoder(w).Encode(Object{"jsonrpc": "2.0", "id": 1, "result": `<hierarchy><node package="com.tencent.wework" bounds="[0,0][1080,1920]">` + nodes + `</node></hierarchy>`})
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	d := &DeviceIO{Ctx: ctx, ADB: a, Package: "com.tencent.wework", Folder: folder, wecomIDs: Object{}, U2: &U2{Port: strings.TrimPrefix(server.URL, "http://127.0.0.1:"), Client: server.Client()}}
+	screen, err := d.nativeHome()
+	if err != nil || screen.Page != "home" {
+		t.Fatalf("home recovery stalled after closing the keyboard: %s %v", screen.Page, err)
+	}
+	backs, err := os.ReadFile(filepath.Join(folder, "backs"))
+	if err != nil || len(backs) != 2 {
+		t.Fatalf("Back was replayed or search was not closed: %q %v", backs, err)
 	}
 }

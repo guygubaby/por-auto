@@ -25,14 +25,15 @@ func (a ADB) runFrom(ctx context.Context, dir string, args ...string) ([]byte, e
 		}
 		args = append([]string{"-s", a.Serial}, args...)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, a.Path, args...)
 	cmd.Dir = dir
 	hideConsole(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		m := strings.TrimSpace(stderr.String())
 		if len(m) > 400 {
@@ -147,7 +148,7 @@ func (a ADB) Foreground(ctx context.Context, pkg string) error {
 }
 
 func awaitForeground(ctx context.Context, pkg string, read func() (string, bool, error)) error {
-	for attempt := 0; attempt < 4; attempt++ {
+	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -162,16 +163,21 @@ func awaitForeground(ctx context.Context, pkg string, read func() (string, bool,
 			return nil
 		}
 		// Android may briefly have no focused window while a chat opens.
-		if owner != "" || attempt == 3 {
+		if owner != "" {
 			return fmt.Errorf("目标应用未处于前台（当前窗口：%q），未操作其他应用", owner)
 		}
 		if err := sleep(ctx, 250*time.Millisecond); err != nil {
 			return err
 		}
 	}
-	return nil
 }
 func (a ADB) Launch(ctx context.Context, pkg, activity string) (string, error) {
+	if _, err := a.Shell(ctx, "cmd", "statusbar", "collapse"); err != nil {
+		return "", err
+	}
+	if _, err := a.Shell(ctx, "input", "keyevent", "KEYCODE_HOME"); err != nil {
+		return "", err
+	}
 	out, err := a.Shell(ctx, "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "--activity-reset-task-if-needed", "-n", pkg+"/"+activity)
 	if err != nil {
 		return out, err
@@ -179,14 +185,12 @@ func (a ADB) Launch(ctx context.Context, pkg, activity string) (string, error) {
 	if strings.Contains(out, "Error") || strings.Contains(out, "Exception") {
 		return out, errf("无法打开目标应用，请先解锁手机并手动打开")
 	}
-	observeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-	defer cancel()
 	for {
-		if err = a.Foreground(observeCtx, pkg); err == nil {
+		if err = a.Foreground(ctx, pkg); err == nil {
 			return out, nil
 		}
-		if sleep(observeCtx, 300*time.Millisecond) != nil {
-			return out, errf("启动后未确认目标应用处于前台，请检查手机解锁和应用状态")
+		if err = sleep(ctx, 300*time.Millisecond); err != nil {
+			return out, err
 		}
 	}
 }
@@ -217,7 +221,9 @@ func (a ADB) WakeSession(ctx context.Context) (func() error, error) {
 		return nil, e
 	}
 	return func() error {
-		_, e := a.Shell(context.Background(), "settings", "put", "global", "stay_on_while_plugged_in", v)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, e := a.Shell(ctx, "settings", "put", "global", "stay_on_while_plugged_in", v)
 		return e
 	}, nil
 }

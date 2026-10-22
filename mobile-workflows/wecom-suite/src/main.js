@@ -57,9 +57,9 @@ module.exports = function (por) {
       var body = ask('请求内容（JSON，可以留空）\n逐会话请求可使用 {{recipient.title}} 等变量', value.body === null ? '' : JSON.stringify(value.body, null, 2));
       try { value.body = body.trim() ? JSON.parse(body) : null; } catch (_) { throw new Error('请求内容不是有效 JSON'); }
     } else value.body = null;
-    var parser = pick('如何读取返回内容', ignore ? ['忽略正文，只检查请求成功', '全文作为文字', '提取 JSON 字段'] : ['全文作为消息', '提取 JSON 字段']);
+    var parser = pick('如何读取返回内容', ignore ? ['忽略正文，只检查请求成功', '全文作为文字', 'JavaScript 处理'] : ['全文作为消息', 'JavaScript 处理']);
     if (ignore && parser === 0) value.response = { type: 'ignore' };
-    else if (parser === (ignore ? 2 : 1)) value.response = { type: 'json', pointer: ask('消息字段路径，例如 /data/message', previous && previous.response.pointer || '/data/message') };
+    else if (parser === (ignore ? 2 : 1)) value.response = { type: 'javascript', code: ask('JavaScript 代码\nres 是返回数据（JSON 自动解析），使用 return 返回最终字符串', requests.responseCode(value.response)) };
     else value.response = { type: 'text' };
     value.timeoutSeconds = Number(ask('等待接口返回的秒数（5～120）', value.timeoutSeconds));
     requests.validate(value, io); return value;
@@ -97,14 +97,15 @@ module.exports = function (por) {
     config.input.message = next; por.saveConfig(config);
   }
   function exportLast() {
-    var path = por.dataDir + '/last-result.json';
-    if (!files.exists(path)) throw new Error('尚无工作流结果');
+    if (!por.readLastResult) throw new Error('请重新导入最新版手机商店启动脚本后导出结果');
+    var result = por.readLastResult();
+    if (!result) throw new Error('尚无保留的工作流结果');
     var parent = context.getExternalFilesDir(null);
     if (!parent) throw new Error('手机文件导出目录不可用');
     var output = String(parent.getPath()) + '/por-auto-exports/wecom-mobile-' + Date.now() + '.json';
     files.createWithDirs(output);
-    if (!files.copy(path, output)) throw new Error('导出失败');
-    dialogs.alert('已导出结果', output + '\n包含每个接收会话的状态，不包含 API Key。'); app.viewFile(output);
+    files.write(output, JSON.stringify(result, null, 2));
+    dialogs.alert('已导出结果', output + '\n包含处理数量和出错对象，不包含 API Key。'); app.viewFile(output);
   }
   function schedule() {
     if (!por.schedules) throw new Error('请重新导入最新版手机商店启动脚本，再设置定时任务；原配置保留');

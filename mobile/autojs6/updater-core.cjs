@@ -1,6 +1,6 @@
 'use strict';
 
-var LAUNCHER_VERSION = 1;
+var LAUNCHER_VERSION = 2;
 var MAX_FILE = 2 * 1024 * 1024;
 var MAX_PACKAGE = 10 * 1024 * 1024;
 var MAX_CATALOG = 256 * 1024;
@@ -90,6 +90,11 @@ function create(io, root, inputSource) {
     try { return JSON.parse(io.readText(file)); } catch (_) { fail('本地配置无法读取，已保留原文件：' + file); }
   }
   function writeJson(file, value) { io.writeAtomic(file, JSON.stringify(value, null, 2) + '\n'); }
+  function trimHistory(limit) {
+    var folders = io.list(root + '/runs').filter(function (name) { return /^\d+-[a-f0-9-]+$/.test(name); }).sort(function (a, b) { return Number(b.split('-')[0]) - Number(a.split('-')[0]) || (a < b ? 1 : a > b ? -1 : 0); });
+    folders.slice(limit).forEach(function (name) { io.removeTree(root + '/runs/' + name); });
+    return folders.slice(0, limit);
+  }
   function state() {
     var value = readJson(stateFile, { schemaVersion: 1, installed: [] });
     if (!object(value) || value.schemaVersion !== 1 || !Array.isArray(value.installed) || value.installed.length > 32) fail('本地脚本状态损坏，已保留原文件');
@@ -240,21 +245,21 @@ function create(io, root, inputSource) {
         if (p.id !== packageId || pinned.cacheName !== p.id + '-' + p.versionCode + '-' + digest(p)) fail('定时任务代码快照无效');
       }
       compatible(p); verifyInstalled(p);
+      trimHistory(199);
       var runId = String(io.now()) + '-' + io.uuid();
       var folder = root + '/runs/' + runId;
       io.mkdir(folder);
-      var summary = { id: runId, scriptId: p.id, name: p.name, version: p.version, versionCode: p.versionCode, packageSha256: digest(p), source: origin.url, timestamp: io.now(), status: 'running', error: null };
+      var summary = { id: runId, scriptId: p.id, name: p.name, version: p.version, versionCode: p.versionCode, packageSha256: digest(p), source: origin.url, reference: origin.reference, timestamp: io.now(), status: 'running', error: null };
       if (trigger) { summary.scheduleId = trigger.scheduleId; summary.scheduledAt = trigger.scheduledAt; summary.trigger = trigger.trigger; }
       writeJson(folder + '/summary.json', summary);
       var configFile = store + '/config/' + p.id + '.json';
-      var eventCount = 0;
+      var events = [];
       function log(message, details) {
-        if (eventCount++ > 500) return;
-        if (eventCount === 501) { message = '日志超过 500 条，后续事件省略；完整运行状态仍会保存'; details = null; }
         var encoded = details === undefined ? 'null' : JSON.stringify(details);
         if (encoded === undefined) encoded = 'null';
         var detail = encoded.length > 2000 ? { truncated: encoded.slice(0, 2000) } : JSON.parse(encoded);
-        io.append(folder + '/events.jsonl', JSON.stringify({ timestamp: io.now(), message: String(message).slice(0, 1000), details: detail }) + '\n');
+        events.push(JSON.stringify({ timestamp: io.now(), message: String(message).slice(0, 1000), details: detail }));
+        if (events.length > 32) events.shift();
       }
       try {
         log('开始运行脚本');
@@ -279,13 +284,28 @@ function create(io, root, inputSource) {
             if (!object(JSON.parse(text)) || io.encode(text).length > MAX_RESULT) fail('运行结果无效或超过 2 MiB');
             io.writeAtomic(folder + '/result.json', text + '\n');
           },
+          readLastResult: function () {
+            var folders = trimHistory(200);
+            for (var n = 0; n < folders.length; n++) {
+              if (folders[n] === runId) continue;
+              var previous = root + '/runs/' + folders[n], info = readJson(previous + '/summary.json', null);
+              if (info && info.scriptId === p.id && info.source === origin.url && info.reference === origin.reference && io.exists(previous + '/result.json')) return readJson(previous + '/result.json', null);
+            }
+            return null;
+          },
           log: log });
         if (result && typeof result.then === 'function') fail('脚本入口必须同步完成，不能返回 Promise');
         summary.status = 'completed'; log('脚本运行完成');
       } catch (error) {
         summary.status = 'failed'; summary.error = String(error.message || error).slice(0, 2000);
         log('脚本运行失败，未自动重试', { error: summary.error });
-      } finally { summary.finishedAt = io.now(); writeJson(folder + '/summary.json', summary); }
+      } finally {
+        summary.finishedAt = io.now(); writeJson(folder + '/summary.json', summary);
+        if (summary.status === 'failed') {
+          try { io.writeAtomic(folder + '/events.jsonl', events.join('\n') + '\n'); }
+          catch (_) { summary.warning = '诊断日志未能保存'; writeJson(folder + '/summary.json', summary); }
+        }
+      }
       return summary;
     });
   }
@@ -296,7 +316,7 @@ function create(io, root, inputSource) {
   }
   function exportLogs() {
     return locked(function () {
-      var folders = io.list(root + '/runs').filter(function (name) { return /^\d+-[a-f0-9-]+$/.test(name); }).sort().reverse().slice(0, 10);
+      var folders = trimHistory(200).slice(0, 10);
       return { schemaVersion: 1, launcherVersion: LAUNCHER_VERSION, exportedAt: io.now(), records: folders.map(function (name) {
         var folder = root + '/runs/' + name;
         var summary = readJson(folder + '/summary.json', null);

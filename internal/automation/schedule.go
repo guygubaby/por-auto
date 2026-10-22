@@ -387,19 +387,16 @@ func (s *Scheduler) tick(at int64) {
 }
 func (s *Scheduler) recordSkip(t Object) {
 	id, folder, err := s.engine.newRunFolder()
+	defer s.engine.ListRuns()
+	s.engine.historyMu.Lock()
 	w := object(object(t["snapshot"])["workflow"])
 	if err == nil {
 		err = atomicJSON(filepath.Join(folder, "meta.json"), Object{"id": id, "workflow_name": w["name"], "workflow_version": w["version"], "serial": fmt.Sprintf("%d 台设备", len(list(t["serials"]))), "timestamp": now(), "status": "skipped", "error": t["lastMessage"], "schedule_id": t["id"], "schedule_name": t["name"], "trigger": "cron", "dry_run": object(t["snapshot"])["dryRun"] == true})
 	}
 	if err == nil {
-		err = atomicJSON(filepath.Join(folder, "batch.json"), Object{"schedule": t, "trigger": "cron", "scheduledAt": t["scheduledAt"], "status": "skipped", "message": t["lastMessage"], "devices": []any{}})
+		err = atomicJSON(filepath.Join(folder, "batch.json"), Object{"trigger": "cron", "scheduledAt": t["scheduledAt"], "status": "skipped", "message": t["lastMessage"], "devices": []any{}})
 	}
-	if err == nil {
-		err = atomicJSON(filepath.Join(folder, "workflow.json"), w)
-	}
-	if err == nil {
-		err = atomicJSON(filepath.Join(folder, "input.json"), t["snapshot"])
-	}
+	s.engine.historyMu.Unlock()
 	if err != nil {
 		s.mu.Lock()
 		s.lastError = err.Error()
@@ -413,6 +410,7 @@ func (s *Scheduler) recordSkip(t Object) {
 func (s *Scheduler) execute(t Object, trigger string) {
 	serials := list(t["serials"])
 	_, folder, setupErr := s.engine.newRunFolder()
+	defer s.engine.ListRuns()
 	feedbackID := str(t["id"]) + "-" + filepath.Base(folder)
 	if s.engine.Emit != nil {
 		s.engine.Emit("schedules-changed", Object{"id": feedbackID, "name": t["name"], "status": "running", "message": fmt.Sprintf("正在处理 %d 台设备，完成后会自动提示。", len(serials))})
@@ -421,12 +419,6 @@ func (s *Scheduler) execute(t Object, trigger string) {
 	meta := Object{"id": filepath.Base(folder), "workflow_name": w["name"], "workflow_version": w["version"], "serial": fmt.Sprintf("%d 台设备", len(serials)), "timestamp": now(), "status": "running", "schedule_id": t["id"], "schedule_name": t["name"], "trigger": trigger, "dry_run": object(t["snapshot"])["dryRun"] == true}
 	if setupErr == nil {
 		setupErr = atomicJSON(filepath.Join(folder, "meta.json"), meta)
-	}
-	if setupErr == nil {
-		setupErr = atomicJSON(filepath.Join(folder, "workflow.json"), w)
-	}
-	if setupErr == nil {
-		setupErr = atomicJSON(filepath.Join(folder, "input.json"), t["snapshot"])
 	}
 	results := make([]any, len(serials))
 	for first := 0; first < len(serials) && setupErr == nil; first += 4 {
@@ -443,6 +435,7 @@ func (s *Scheduler) execute(t Object, trigger string) {
 				} else {
 					failure = r["error"]
 					runID = r["id"]
+					s.engine.historyMu.Lock()
 					if saved, er := loadFile(filepath.Join(str(r["folder"]), "meta.json"), nil); er == nil && saved != nil {
 						m := object(saved)
 						m["schedule_id"], m["schedule_name"], m["trigger"] = t["id"], t["name"], trigger
@@ -450,6 +443,7 @@ func (s *Scheduler) execute(t Object, trigger string) {
 							failure = er.Error()
 						}
 					}
+					s.engine.historyMu.Unlock()
 				}
 				results[i] = Object{"serial": serials[i], "runId": runID, "error": failure}
 			}(i)
@@ -476,8 +470,9 @@ func (s *Scheduler) execute(t Object, trigger string) {
 	if status != "completed" {
 		meta["error"] = message
 	}
-	batch := Object{"schedule": t, "trigger": trigger, "scheduledAt": t["scheduledAt"], "status": status, "message": message, "devices": results}
+	batch := Object{"trigger": trigger, "scheduledAt": t["scheduledAt"], "status": status, "message": message, "devices": results}
 	if setupErr == nil {
+		s.engine.historyMu.Lock()
 		if err := atomicJSON(filepath.Join(folder, "batch.json"), batch); err != nil {
 			status, message = "failed", err.Error()
 		}
@@ -485,6 +480,7 @@ func (s *Scheduler) execute(t Object, trigger string) {
 		if err := atomicJSON(filepath.Join(folder, "meta.json"), meta); err != nil {
 			status, message = "failed", err.Error()
 		}
+		s.engine.historyMu.Unlock()
 	}
 	s.mu.Lock()
 	for _, v := range s.tasks {

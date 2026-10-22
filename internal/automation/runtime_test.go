@@ -268,6 +268,77 @@ func TestHTTPContractAndNoRedirectReplay(t *testing.T) {
 		t.Fatal("insecure remote HTTP accepted")
 	}
 }
+func TestHTTPJavaScriptResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, code, want, errorText string
+	}{
+		{"json", `{"data":{"message":"你好"}}`, `return res.data.message;`, "你好", ""},
+		{"transform", `{"items":[{"text":"甲"},{"text":"乙"}]}`, "return res.items.map(item => item.text).join('\\n');", "甲\n乙", ""},
+		{"plain text", " hello ", `return res.trim();`, "hello", ""},
+		{"json string", `"hello"`, `return res;`, "hello", ""},
+		{"number converted", `42`, `return String(res);`, "42", ""},
+		{"unsafe raw", "'); throw Error('injected'); //\u2028\u2029", `return res.slice(0, 2);`, "')", ""},
+		{"missing return", `{}`, `res;`, "", "非空文字"},
+		{"object", `{}`, `return res;`, "", "非空文字"},
+		{"number", `42`, `return res;`, "", "非空文字"},
+		{"null", `null`, `return res;`, "", "非空文字"},
+		{"blank result", `{}`, `return ' ';`, "", "非空文字"},
+		{"utf8 size", `{}`, `return '你'.repeat(1334);`, "", "4000 字节"},
+		{"control character", `{}`, `return '\x00';`, "", "非空文字"},
+		{"syntax", `{}`, `return res.;`, "", "语法错误"},
+		{"blank code", `{}`, " \n ", "", "不能为空"},
+		{"long code", `{}`, strings.Repeat(" ", 10001) + "return res;", "", "10000"},
+		{"throw", `{}`, `throw new Error('自定义错误');`, "", "自定义错误"},
+		{"host isolation", `{}`, `return require('request');`, "", "require is not defined"},
+		{"prototype isolation", `{}`, `Object.prototype.changed = true; return 'ok';`, "ok", ""},
+		{"timeout", `{}`, `while (true) {}`, "", "执行超时"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRuntime(context.Background(), NewCredentials())
+			value, err := r.Call("request", "parse", tc.raw, Object{"type": "javascript", "code": tc.code}, r.IO())
+			if tc.errorText != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errorText) {
+					t.Fatalf("expected %q, got value=%v error=%v", tc.errorText, value, err)
+				}
+			} else if err != nil || value != tc.want {
+				t.Fatalf("expected %q, got value=%v error=%v", tc.want, value, err)
+			}
+			v, err := r.VM.RunString(`Object.prototype.changed`)
+			if err != nil || v.Export() != nil {
+				t.Fatal("response script mutated the workflow prototypes")
+			}
+		})
+	}
+}
+
+func TestHTTPJavaScriptPreviewAndSampleUseSameParser(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"data":{"message":"你好"}}`))
+	}))
+	defer server.Close()
+	e := NewEngine(t.TempDir(), nil)
+	response := Object{"type": "javascript", "code": `return res.data.message + '！';`}
+	spec := Object{"url": server.URL, "method": "GET", "query": []any{}, "headers": []any{}, "auth": Object{"type": "none"}, "body": nil, "response": response, "timeoutSeconds": 5}
+	v, err := e.Call(context.Background(), "test_http_request", Object{"request": spec})
+	if err != nil || object(v)["message"] != "你好！" {
+		t.Fatalf("preview: %v %v", v, err)
+	}
+	v, err = e.Call(context.Background(), "parse_http_response", Object{"raw": `{"data":{"message":"你好"}}`, "response": response})
+	if err != nil || v != "你好！" {
+		t.Fatalf("sample: %v %v", v, err)
+	}
+	response["code"] = `return res.missing.text;`
+	v, err = e.Call(context.Background(), "test_http_request", Object{"request": spec})
+	if err != nil || object(v)["message"] != nil || !strings.Contains(str(object(v)["parseError"]), "JavaScript 处理失败") || str(object(v)["raw"]) == "" {
+		t.Fatalf("failed preview lost raw response or parse error: %v %v", v, err)
+	}
+	response["code"] = `return res.;`
+	if _, err = e.Call(context.Background(), "test_http_request", Object{"request": spec}); err == nil || requests != 2 {
+		t.Fatalf("invalid code made a request: %d %v", requests, err)
+	}
+}
 func TestStoreCompatibilityAndPersistentUninstall(t *testing.T) {
 	root := t.TempDir()
 	engine := NewEngine(root, nil)

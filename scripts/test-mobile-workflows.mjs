@@ -83,6 +83,7 @@ function fixture({
     requests: [],
     records: [],
     typed: [],
+    opened: [],
     clears: 0,
     logs: [],
   };
@@ -144,6 +145,7 @@ function fixture({
     scroll(up) {
       if (!['home', 'groups'].includes(state.page)) return;
       const list = state.page === 'groups' ? groups : conversations;
+      const previous = state.pageIndex;
       state.pageIndex = Math.max(
         0,
         Math.min(
@@ -151,6 +153,7 @@ function fixture({
           state.pageIndex + (up ? -1 : 1),
         ),
       );
+      return state.pageIndex !== previous;
     },
     observe,
     back() {
@@ -160,6 +163,7 @@ function fixture({
     beforeCommit() {},
     openRow(title, page) {
       assert.equal(state.page, page);
+      state.opened.push(title);
       const matches = observe().items.filter(
         item => ['chat', 'group'].includes(item.role) && item.text === title,
       );
@@ -224,6 +228,7 @@ function fixture({
       state.requests.push(structuredClone(value));
       return { status: 200, body: 'fresh-' + state.requests.length };
     },
+    evaluateResponse: source => vm.runInNewContext(source, {}, { timeout: 1000 }),
   };
   return { io, state, runner: core.create(io) };
 }
@@ -282,6 +287,70 @@ test('all four WeCom workflows run in rehearsal and never click send', () => {
     assert.equal(state.sendClicks, 0);
     assert.equal(state.records.at(-1).workflowVersion, item.version);
     if (item.id === 'wecom-nickname') assert.equal(result.nickname, '测试姓名');
+  }
+});
+
+test('slow observations, chat transitions, input and clearing wait without replaying writes', () => {
+  const { runner, state, io } = fixture({ groups: ['群甲'] });
+  let reads = 0, opening = 0, typing = 0, clearing = 0;
+  const observe = io.observe;
+  io.observe = () => {
+    const screen = observe();
+    if (++reads <= 30) screen.certain = false;
+    else if (state.page === 'chat' && !state.typed.length && ++opening <= 30) screen.page = state.previousPage;
+    else if (state.draft && state.typed.length && ++typing <= 30) screen.editor.text = '';
+    else if (state.clears && ++clearing <= 30) screen.editor.text = 'Ok';
+    return screen;
+  };
+  assert.equal(runner.observe().page, 'home');
+  runner.run(workflow('wecom-broadcast'), { dryRun: true, input: input() });
+  assert.ok(opening > 30 && typing > 30 && clearing > 30);
+  assert.deepEqual(state.typed, ['Ok']);
+  assert.equal(state.clears, 1);
+  assert.equal(state.sendClicks, 0);
+  assert.equal(state.records.at(-1).status, 'completed');
+});
+
+test('waiting for a stalled page still honors a manual stop', () => {
+  const { runner, io } = fixture();
+  const observe = io.observe;
+  let waits = 0;
+  io.observe = () => ({ ...observe(), certain: false });
+  io.sleep = () => { if (++waits === 30) throw Error('用户停止'); };
+  assert.throws(() => runner.observe(), /用户停止/);
+  assert.equal(waits, 30);
+});
+
+test('native launch leaves the shade or recents through Home and waits for the app', () => {
+  for (const sdk of [28, 35]) {
+    const commands = [];
+    let reads = 0, waits = 0, cancel = false;
+    const io = { requireAccessibility() {}, focusedPackage: () => ++reads > 40 ? 'com.tencent.wework' : 'com.android.systemui' };
+    const module = { exports: {} };
+    const execute = vm.runInNewContext('(function(require,module){' + readFileSync(wecomPath + 'wecom.js', 'utf8') + '\n})', {
+      context: {
+        getPackageManager: () => ({ getPackageInfo: () => ({ versionName: '5.0.12' }) }),
+        getSystemService: () => ({ isKeyguardLocked: () => false }),
+      },
+      android: {
+        os: { Build: { VERSION: { SDK_INT: sdk } } },
+        content: { Context: { KEYGUARD_SERVICE: 'keyguard' } },
+        accessibilityservice: { AccessibilityService: { GLOBAL_ACTION_HOME: 2, GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE: 15 } },
+        view: { accessibility: { AccessibilityNodeInfo: {} } },
+      },
+      auto: { service: { performGlobalAction(action) { commands.push(action); return true; } } },
+      back() { commands.push('back'); return true; },
+      sleep() { if (cancel) throw Error('用户停止'); waits++; },
+      app: { launchPackage(name) { commands.push(name); return true; } },
+    });
+    execute(name => name === './io.js' ? () => io : { profile: () => ({}) }, module);
+    const native = module.exports.create({}, {});
+    native.launch();
+    assert.deepEqual(commands, [sdk >= 31 ? 15 : 'back', 2, 'com.tencent.wework']);
+    assert.equal(reads, 41);
+    assert.equal(waits, 41);
+    cancel = true;
+    assert.throws(() => native.launch(), /用户停止/);
   }
 });
 
@@ -364,11 +433,26 @@ test('real published entry loads its IO factory and decrypts legacy WeCom creden
   cipher.setAAD(Buffer.from(endpoint + '\n' + id));
   const encrypted = Buffer.concat([cipher.update('legacy-secret', 'utf8'), cipher.final(), cipher.getAuthTag()]);
   const saved = { [id]: { endpoint, iv: iv.toString('base64'), data: encrypted.toString('base64') } };
-  let reads = 0;
+  let reads = 0, interrupts = 0, contextExits = 0, pending = false;
   function JavaString(value) { this.value = Buffer.isBuffer(value) ? value.toString('utf8') : String(value); }
   JavaString.prototype.getBytes = function () { return Buffer.from(this.value, 'utf8'); };
   JavaString.prototype.toString = function () { return this.value; };
   const globals = {
+    Packages: { org: { mozilla: { javascript: { Context: {
+      enter: () => ({
+        setOptimizationLevel: value => assert.equal(value, -1),
+        initSafeStandardObjects: () => vm.createContext({}),
+        evaluateString(scope, source) {
+          const value = vm.runInContext(source, scope, { timeout: 1000 });
+          return typeof value === 'string' ? new JavaString(value) : value;
+        },
+      }),
+      exit: () => contextExits++,
+    } } } } },
+    threads: { start(action) {
+      if (!pending) action();
+      return { join: ms => assert.equal(ms, 1000), isAlive: () => pending, interrupt: () => interrupts++ };
+    } },
     java: {
       lang: { String: JavaString },
       util: { concurrent: { TimeUnit: {} } },
@@ -416,6 +500,15 @@ test('real published entry loads its IO factory and decrypts legacy WeCom creden
   assert.equal(io.secret(id, endpoint), 'legacy-secret');
   assert.equal(reads, 1);
   assert.throws(() => io.secret(id, 'https://other.invalid'), /接口地址改变/);
+  const publishedHttp = load(wecomPath + 'request.js');
+  assert.equal(publishedHttp.parse('{"data":{"message":"你好"}}', { type: 'javascript', code: 'return res.data.message;' }, io), '你好');
+  assert.equal(publishedHttp.parse('{}', { type: 'javascript', code: 'return [typeof java, typeof Packages, typeof files, typeof require].join(",");' }, io), 'undefined,undefined,undefined,undefined');
+  assert.throws(() => publishedHttp.parse('{}', { type: 'javascript', code: 'return res;' }, io), /非空文字/);
+  assert.equal(contextExits, 3);
+  pending = true;
+  assert.throws(() => io.evaluateResponse(''), /执行超时/);
+  assert.equal(interrupts, 4);
+  pending = false;
   load(wecomPath + 'main.js')(por);
   assert.throws(() => load(wecomPath + 'main.js')({ ...por, execution: { workflowId: 'invalid', dryRun: true } }), /无效/);
 });
@@ -444,7 +537,7 @@ test('categorical recipients use their native lists in stable order and deduplic
       input: input(undefined, recipients),
     });
     assert.deepEqual(
-      state.records.at(-1).targets.map(item => item.title),
+      state.opened,
       expected,
     );
     assert.equal(state.typed.length, expected.length);
@@ -467,7 +560,28 @@ test('large group inventory is frozen once and never searched recipient by recip
   assert.equal(state.typed.length, 1000);
   assert.equal(state.clears, 1000);
   assert.equal(state.sendClicks, 0);
-  assert.equal(state.records.at(-1).targets.length, 1000);
+  assert.equal(state.records.at(-1).targets.length, 0);
+  assert.equal(state.records.at(-1).outputs.completed_count, '1000');
+  assert.ok(state.records.length <= 3, 'rehearsal rewrote history for each recipient');
+});
+
+test('a frozen scroll waits for changed rows before confirming the full inventory', () => {
+  const groups = Array.from({ length: 45 }, (_, index) => `群${index + 1}`);
+  const { runner, state, io } = fixture({ groups });
+  const scroll = io.scroll, observe = io.observe;
+  let pending = null, reads = 0;
+  io.scroll = up => {
+    assert.equal(pending, null, 'a scroll was replayed while its page was still frozen');
+    const previous = state.pageIndex, moved = scroll(up);
+    if (moved) { pending = state.pageIndex; state.pageIndex = previous; reads = 0; }
+    return moved;
+  };
+  io.observe = () => {
+    if (pending !== null && ++reads >= 30) { state.pageIndex = pending; pending = null; }
+    return observe();
+  };
+  assert.deepEqual(runner.discover('groups'), groups);
+  assert.equal(state.sendClicks, 0);
 });
 
 test('sent readback survives an identical older message leaving the viewport', () => {
@@ -485,13 +599,15 @@ test('sent readback survives an identical older message leaving the viewport', (
     input: input({ type: 'manual', text }),
   });
   assert.equal(state.sendClicks, 1);
-  assert.equal(state.records.at(-1).targets[0].status, 'sent');
+  assert.equal(state.records.at(-1).outputs.completed_count, '1');
 });
 
 test('clearing the draft cannot acknowledge an unchanged old matching message', () => {
   for (const [position, revealOlder] of [[undefined, false], [7, false], [7, true]]) {
     const { io, state, runner } = fixture({ groups: ['群甲'] });
     const previous = { text: 'Ok', failed: false, pending: false, position };
+    let waits = 0;
+    io.sleep = () => { if (state.sendClicks && ++waits >= 20) throw Error('人工停止：发送结果不明'); };
     state.outgoing.push(previous);
     const observe = io.observe;
     io.observe = () => {
@@ -511,13 +627,13 @@ test('a delayed outgoing bubble is re-read without clicking send again', () => {
   const observe = io.observe;
   io.observe = () => {
     const screen = observe();
-    if (state.sendClicks && ++readbacks < 3) screen.outgoing = [];
+    if (state.sendClicks && ++readbacks < 40) screen.outgoing = [];
     return screen;
   };
   runner.run(workflow('wecom-broadcast'), { dryRun: false, input: input() });
-  assert.equal(readbacks, 3);
+  assert.equal(readbacks, 40);
   assert.equal(state.sendClicks, 1);
-  assert.equal(state.records.at(-1).targets[0].status, 'sent');
+  assert.equal(state.records.at(-1).outputs.completed_count, '1');
 });
 
 test('sent readback still requires an empty editor and the latest confirmed outgoing body', () => {
@@ -531,6 +647,8 @@ test('sent readback still requires an empty editor and the latest confirmed outg
     { outgoing: [matching], title: '其他群' },
   ]) {
     const { io, state, runner } = fixture({ groups: ['群甲', '群乙'] });
+    let waits = 0;
+    io.sleep = () => { if (state.sendClicks && ++waits >= 20) throw Error('人工停止：发送结果不明'); };
     const observe = io.observe;
     io.observe = () => {
       const screen = observe();
@@ -544,9 +662,9 @@ test('sent readback still requires an empty editor and the latest confirmed outg
     assert.throws(() => runner.run(workflow('wecom-broadcast'), {
       dryRun: false,
       input: input(),
-    }), /发送结果不明|目标会话/);
+    }), /发送结果不明|目标会话|发送失败/);
     assert.equal(state.sendClicks, 1);
-    assert.deepEqual(state.records.at(-1).targets.map(target => target.status), ['uncertain', 'skipped']);
+    assert.deepEqual(state.records.at(-1).targets.map(target => target.status), ['uncertain']);
   }
 });
 
@@ -575,7 +693,7 @@ test('existing drafts are preserved and uncertain sends are never retried', () =
   assert.equal(uncertain.state.sendClicks, 1);
   assert.deepEqual(
     uncertain.state.records.at(-1).targets.map(item => item.status),
-    ['uncertain', 'skipped'],
+    ['uncertain'],
   );
 });
 
@@ -652,6 +770,35 @@ test('HTTP parsing and authentication enforce boundaries without retry', () => {
     () => http.validate({ ...request(), url: 'http://example.com' }, io),
     /HTTPS/,
   );
+});
+
+test('JavaScript response processing shares fetch, preview and offline validation', () => {
+  const { io, state } = fixture();
+  const raw = '{"data":[{"message":"甲"},{"message":"乙"}]}';
+  io.request = value => { state.requests.push(value); return { status: 200, body: raw }; };
+  const response = { type: 'javascript', code: 'return res.data.map(function (item) { return item.message; }).join("\\n");' };
+  assert.equal(http.parse(raw, response, io), '甲\n乙');
+  assert.equal(http.fetch(request(response), {}, io).message, '甲\n乙');
+  assert.equal(http.preview(request(response), {}, io).message, '甲\n乙');
+  assert.equal(http.parse('plain text', { type: 'javascript', code: 'return res.toUpperCase();' }, io), 'PLAIN TEXT');
+  assert.equal(http.parse('"JSON string"', { type: 'javascript', code: 'return res;' }, io), 'JSON string');
+  for (const code of ['return res;', 'return 42;', 'return null;', 'return " ";', 'return "你".repeat(1334);', 'throw new Error("失败");']) {
+    const parser = { type: 'javascript', code };
+    assert.throws(() => http.parse(raw, parser, io), /JavaScript 处理失败/);
+    assert.throws(() => http.fetch(request(parser), {}, io), /JavaScript 处理失败/);
+    const preview = http.preview(request(parser), {}, io);
+    assert.equal(preview.raw, raw);
+    assert.equal(preview.message, null);
+    assert.match(preview.parseError, /JavaScript 处理失败/);
+  }
+  const count = state.requests.length;
+  for (const code of ['', '  ', 'return res.;', 'return res;' + ' '.repeat(10000)]) {
+    assert.throws(() => http.fetch(request({ type: 'javascript', code }), {}, io), /JavaScript 代码/);
+  }
+  assert.equal(state.requests.length, count);
+  for (const [pointer, expected] of [['', 'return res;'], ['/data/a~1b/~0key/0', 'return res["data"]["a/b"]["~key"]["0"];']]) {
+    assert.equal(http.responseCode({ type: 'json', pointer }), expected);
+  }
 });
 
 test('malformed pages and invalid recipient combinations stop before action', () => {

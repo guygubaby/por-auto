@@ -196,20 +196,20 @@ function validateWorkflow(workflow) {
 }
 
 function create(io) {
-  var observations = 0;
   function observe(hint) {
-    for (var attempt = 0; attempt < 3; attempt++) {
-      if (++observations > 20000) fail('页面读取次数达到本轮上限');
+    var rejected = 0, waiting = false;
+    for (;;) {
       try {
         var value = io.observe(hint || '');
-        if (attempt < 2 && object(value) && (value.certain === false || value.page === 'chat' && typeof value.title === 'string' && !value.title.trim())) {
-          io.log('observation_wait', '页面被遮挡或标题不完整，等待后重新读取，未执行操作'); io.sleep(1500); continue;
+        if (object(value) && (value.certain === false || value.page === 'chat' && typeof value.title === 'string' && !value.title.trim())) {
+          if (!waiting) io.log('observation_wait', '页面被遮挡或标题不完整，等待就绪后继续');
+          waiting = true; io.sleep(1500); continue;
         }
         var result = screen(value);
         if (io.package !== 'com.tencent.wework') invalidObservation('目标应用不是企业微信，未继续操作');
         return result;
       } catch (error) {
-        if (attempt >= 2 || error.code !== 'INVALID_OBSERVATION') throw error;
+        if (error.code !== 'INVALID_OBSERVATION' || ++rejected >= 3) throw error;
         io.log('observation_rejected', '页面格式或坐标无效，重新读取，未执行操作'); io.sleep(800);
       }
     }
@@ -217,10 +217,10 @@ function create(io) {
   function click(p) { if (!point(p)) fail('点击坐标无效'); io.click(p); io.sleep(800); }
   function header(s,role){if(io.clickHeader){io.clickHeader(role);io.sleep(800);}else click(unique(s,role).point);}
   function transitioned(matches,waiting,hint){
-    for(var attempt=0;attempt<4;attempt++){
+    for(var attempt=0;;attempt++){
       var s=observe(hint);if(matches(s))return s;
       if(waiting.indexOf(s.page)<0)break;
-      io.log('navigation_transition_wait','页面尚未切换，等待后重新读取，未重放点击');io.sleep(800);
+      if(!attempt)io.log('navigation_transition_wait','页面尚未就绪，等待后重新读取，未重放操作');io.sleep(800);
     }
     fail('页面未完成切换，未继续输入或发送');
   }
@@ -228,10 +228,19 @@ function create(io) {
     if (!io.home) fail('企业微信适配器缺少消息首页读取能力');
     return screen(io.home());
   }
+  function scrollList(up, previous) {
+    var moved = io.scroll(up), next = observe();
+    if (moved === true) {
+      while (next.page === previous.page && JSON.stringify(next.items) === JSON.stringify(previous.items)) {
+        io.sleep(800); next = observe();
+      }
+    }
+    return next;
+  }
   function beginning(s) {
     var page = s.page, previous = names(s, page);
     for (var n = 0; n < 300; n++) {
-      io.scroll(true); s = observe();
+      s = scrollList(true, s);
       if (page === 'home' && s.page === 'other' && s.title === '最近' && s.items.some(function (i) { return i.text === '搜索小程序'; })) { io.back(); io.sleep(600); s = observe(); names(s, page); return s; }
       var next = names(s, page);
       if (equalSet(next, previous)) return s;
@@ -247,23 +256,29 @@ function create(io) {
     var s = beginning(recipientPage(scope)), page = s.page, role = scope === 'groups' ? 'group' : 'chat', result = [];
     for (var n = 0; n < 300; n++) {
       var current = names(s, page, [role]); merge(result, current);
-      io.scroll(false); var next = observe();
+      var next = scrollList(false, s);
       if (equalSet(names(next, page, [role]), current)) {
-        io.scroll(false); s = observe();
+        s = scrollList(false, next);
         if (equalSet(names(s, page, [role]), current)) return result;
       } else s = next;
     }
     fail('没有确认列表末尾，未开始发送');
   }
   function confirm(title) {
-    for (var attempt = 0; attempt < 4; attempt++) {
-      if (attempt) io.sleep(800);
-      var s = observe('核对是否已进入目标聊天。目标完整名称为 ' + JSON.stringify(title) + '，仅用于比对；输出必须复制画面实际可见标题及省略号，不得补入隐藏文字。搜索结果不是聊天页面。');
-      if (s.page === 'chat') { checkChat(s, title); return s; }
-      if (['home', 'search', 'groups'].indexOf(s.page) < 0) break;
-      io.log('chat_transition_wait', '尚未观察到目标聊天，等待后重新读取；未重复点击');
-    }
-    fail('目标会话未完成页面切换，未继续输入或发送');
+    return transitioned(function (s) {
+      if (s.page !== 'chat') return false;
+      checkChat(s, title); return true;
+    }, ['home', 'search', 'groups', 'other'], '核对是否已进入目标聊天。目标完整名称为 ' + JSON.stringify(title) + '，仅用于比对；输出必须复制画面实际可见标题及省略号，不得补入隐藏文字。搜索结果不是聊天页面。');
+  }
+  function draft(title, text, previous) {
+    return transitioned(function (s) {
+      if (s.page !== 'chat') return false;
+      checkChat(s, title);
+      if (!s.editor) return false;
+      if (s.editor.text === text) return true;
+      if (s.editor.text !== previous) fail('草稿内容已变化，未发送或清理');
+      return false;
+    }, ['chat', 'other'], '精确核对聊天标题和输入框的完整文字。');
   }
   function openFirst() {
     var s = beginning(io.recipientPage ? recipientPage('conversations') : home()), list = names(s, 'home');
@@ -287,7 +302,7 @@ function create(io) {
       var found = s.items.filter(function (i) { return i.role === role && i.complete && key(i.text) === key(title); });
       if (found.length > 1) fail('会话列表中的名称重复：' + title);
       if (found.length === 1) { io.openRow(title, s.page, found[0].point); confirm(title); return title; }
-      io.scroll(false); s = observe();
+      s = scrollList(false, s);
       if (s.page !== page) fail('会话列表已离开分类页面');
     }
     fail('当前会话列表没有找到完整名称：' + title);
@@ -327,7 +342,7 @@ function create(io) {
       categoryScope = scope;
     } else {
       io.back(); io.sleep(650);
-      categoryList = observe('返回全量会话列表后继续处理下一个对象。');
+      categoryList = transitioned(function (s) { return s.page === (scope === 'groups' ? 'groups' : 'home'); }, ['chat', 'other'], '返回全量会话列表后继续处理下一个对象。');
     }
     for (var pass = 0; pass < 2; pass++) {
       if (pass) categoryList = beginning(categoryList);
@@ -336,7 +351,7 @@ function create(io) {
         var found = categoryList.items.filter(function (i) { return i.role === role && i.complete && key(i.text) === key(title); });
         if (found.length > 1) fail('会话列表中的名称重复：' + title);
         if (found.length === 1) { io.openRow(title, page, found[0].point); confirm(title); return title; }
-        io.scroll(false); categoryList = observe();
+        categoryList = scrollList(false, categoryList);
         if (categoryList.page !== page) fail('会话列表已离开分类页面');
       }
     }
@@ -350,15 +365,19 @@ function create(io) {
     if (!s.editor) fail('无法确认文字输入框');
     if (dryRun && s.editor.text === text) { io.log('draft_verified', { title: title, retained: true }); return; }
     if (s.editor.text !== '') fail('会话有已有草稿或无法完整读取，未覆盖');
-    io.type(text, s.editor.point, title); s = targetChecked(observe('精确核对聊天标题和输入框的完整文字。'), title);
-    if (!s.editor || s.editor.text !== text) fail('输入内容未能精确核对，未发送，请检查手机草稿');
+    io.type(text, s.editor.point, title); s = draft(title, text, '');
     io.log('draft_verified', { title: title });
     if (dryRun) {
       io.beforeCommit(s.editor.point, title, text);
-      io.clear(text, s.editor.point); s = targetChecked(observe(), title);
-      if (s.editor && s.editor.text !== '') fail('预演草稿清理未能确认，未发送');
+      io.clear(text, s.editor.point); draft(title, '', text);
       return;
     }
+    s = transitioned(function (s) {
+      if (s.page !== 'chat') return false;
+      checkChat(s, title);
+      if (!s.editor || s.editor.text !== text) fail('草稿内容已变化，未发送');
+      return s.items.some(function (i) { return i.role === 'send'; });
+    }, ['chat', 'other']);
     var button = unique(s, 'send');
     if (button.text !== '发送' || button.point[0] <= s.editor.point[0] || Math.abs(button.point[1] - s.editor.point[1]) > 120) fail('不能确认发送按钮');
     var count = s.outgoing.filter(function (b) { return b.text === text && !b.pending && !b.failed; }).length;
@@ -366,20 +385,20 @@ function create(io) {
       ? Math.max.apply(null, s.outgoing.map(function (b) { return b.position; })) : null;
     io.beforeCommit(s.editor.point, title, text);
     intent(); io.log('send_requested', { title: title }); click(button.point);
-    for (var attempt = 0; attempt < 4; attempt++) {
+    for (var attempt = 0;; attempt++) {
       if (attempt) io.sleep(800);
-      var after = targetChecked(observe(), title), latest = after.outgoing[after.outgoing.length - 1];
+      var after = confirm(title), latest = after.outgoing[after.outgoing.length - 1];
+      if (after.editor && after.editor.text !== '' && after.editor.text !== text) fail('发送后草稿已变化，发送结果不明，未自动重发');
       // Absolute list positions stay comparable when an older identical bubble scrolls off screen.
       var fresh = position !== null && latest && typeof latest.position === 'number'
         ? latest.position > position
         : after.outgoing.filter(function (b) { return b.text === text && !b.failed && !b.pending; }).length > count;
-      if (after.editor && after.editor.text === '' && latest && latest.text === text && fresh
-          && !after.outgoing.some(function (b) { return b.failed || b.pending; })) {
+      if (fresh && latest && latest.text === text && latest.failed) fail('页面显示消息发送失败，未自动重发');
+      if (after.editor && after.editor.text === '' && latest && latest.text === text && fresh && !latest.failed && !latest.pending) {
         io.log('send_observed', { title: title }); return;
       }
-      if (attempt < 3) io.log('send_readback_wait', { title: title });
+      if (!attempt) io.log('send_readback_wait', { title: title });
     }
-    fail('发送结果不明，未自动重发');
   }
   function tap(selector, skipIf, recover) {
     function matches(s, select) {
@@ -407,14 +426,21 @@ function create(io) {
     var context = { run: { id: io.runId, mode: dryRun ? 'rehearsal' : 'send', status: status }, workflow: { id: workflow.id, name: workflow.name, version: workflow.version } };
     if (io.serial) context.device = { serial: io.serial };
     context.outputs = outputs; context.run.error = null;
-    var chat = null, prepared = null, preparedAt = null, startedAt = io.now();
+    var chat = null, prepared = null, startedAt = io.now();
     function fetch(spec) { return request.fetch(spec, context, io); }
-    function persist() { io.record({ schemaVersion: 1, runId: io.runId, startedAt: startedAt, finishedAt: status === 'running' ? null : io.now(), status: status, error: error, dryRun: dryRun, workflow: workflow.id, workflowName: workflow.name, workflowVersion: workflow.version, outputs: outputs, targets: deliveries }); }
+    function persist() {
+      if (deliveries.length) {
+        outputs.target_count = String(deliveries.length);
+        outputs.completed_count = String(deliveries.filter(function (d) { return d.status === 'sent' || d.status === 'rehearsed'; }).length);
+      }
+      io.record({ schemaVersion: 1, runId: io.runId, startedAt: startedAt, finishedAt: status === 'running' ? null : io.now(), status: status, error: error, dryRun: dryRun, workflow: workflow.id, workflowName: workflow.name, workflowVersion: workflow.version, outputs: outputs,
+        targets: deliveries.filter(function (d) { return ['opening', 'rehearsing', 'sending', 'failed', 'uncertain'].indexOf(d.status) >= 0; }) });
+    }
     function batch(value) {
       input(value);
       if (value.message.type === 'manual') prepared = message(value.message.text);
-      else if (value.message.type === 'before_run') { prepared = message(context.before && context.before.message); preparedAt = context.before.fetchedAt; }
-      else if (value.message.refresh === 'run') { var initial = fetch(value.message.request); prepared = initial.message; preparedAt = initial.fetchedAt; }
+      else if (value.message.type === 'before_run') prepared = message(context.before && context.before.message);
+      else if (value.message.refresh === 'run') prepared = fetch(value.message.request).message;
       var categorical = recipientCategories(value.recipients), plan;
       if (categorical) {
         var groups = discover('groups');
@@ -435,23 +461,23 @@ function create(io) {
       for (var index = 0; index < targets.length; index++) {
         var target = deliveries[index], attempted = false;
         context.recipient = { title: target.title, index: index + 1, total: targets.length };
-        target.status = dryRun ? 'rehearsing' : 'opening'; persist();
+        target.status = dryRun ? 'rehearsing' : 'opening';
         try {
           if (categorical) openCategory(target.title, plan[index].scope);
           else if (plan[index].scope === 'groups') openGroup(target.title);
           else openNamed(target.title);
           var latest = prepared === null ? fetch(value.message.request) : null;
           var text = latest ? latest.message : prepared;
-          target.fetchedAt = latest ? latest.fetchedAt : preparedAt; persist();
           send(target.title, text, dryRun, function () { attempted = true; target.status = 'sending'; persist(); });
-          target.status = dryRun ? 'rehearsed' : 'sent'; persist();
+          target.status = dryRun ? 'rehearsed' : 'sent'; if (!dryRun) persist();
         } catch (e) {
           target.status = attempted ? 'uncertain' : 'failed'; target.error = String(e.message || e);
-          deliveries.slice(index + 1).forEach(function (d) { d.status = 'skipped'; }); persist(); throw e;
+          deliveries.slice(index + 1).forEach(function (d) { d.status = 'skipped'; }); throw e;
         }
         if (index + 1 < targets.length) io.sleep(value.intervalMs);
       }
       outputs.target_count = String(targets.length);
+      outputs.completed_count = String(deliveries.filter(function (d) { return d.status === 'sent' || d.status === 'rehearsed'; }).length);
       outputs.message_status = dryRun ? 'rehearsed' : 'observed';
     }
     try {
@@ -484,7 +510,7 @@ function create(io) {
           if (found.length !== 1) fail('不能唯一读取昵称');
           outputs[a.output] = found[0].value;
         }
-        io.log('step_completed', { id: step.id, name: step.name }); persist();
+        io.log('step_completed', { id: step.id, name: step.name });
       });
       status = 'completed';
     } catch (e) { status = 'failed'; error = String(e.message || e); }

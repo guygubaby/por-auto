@@ -3,9 +3,95 @@ package automation
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+func launchTestADB(t *testing.T) (ADB, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake ADB requires a POSIX shell")
+	}
+	folder := t.TempDir()
+	t.Setenv("POR_TEST_ADB_DIR", folder)
+	path := filepath.Join(folder, "adb")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$POR_TEST_ADB_DIR/commands"
+case "$*" in
+  "shell cmd statusbar collapse") rm -f "$POR_TEST_ADB_DIR/shade" ;;
+  "shell input keyevent KEYCODE_HOME") : ;;
+  "shell input keyevent KEYCODE_BACK") printf x >> "$POR_TEST_ADB_DIR/backs" ;;
+  "shell am start "*) echo 'Starting: Intent' ;;
+  "shell dumpsys window policy") echo 'showing=false' ;;
+  "shell dumpsys window windows")
+    if [ -f "$POR_TEST_ADB_DIR/shade" ]; then
+      echo 'Window #0 Window{shade u0 StatusBar}:'
+      echo '  package=com.android.systemui'
+      echo 'mCurrentFocus=Window{shade u0 StatusBar}'
+    elif [ -f "$POR_TEST_ADB_DIR/ready" ]; then
+      echo 'mCurrentFocus=Window{main u0 com.tencent.wework/.launch.WwMainActivity}'
+    else
+      echo 'mCurrentFocus=Window{launcher u0 com.bbk.launcher2/.Launcher}'
+    fi ;;
+  *) echo "unexpected ADB command: $*" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return ADB{Path: path}, folder
+}
+
+func TestLaunchClosesNotificationShade(t *testing.T) {
+	a, folder := launchTestADB(t)
+	for _, name := range []string{"shade", "ready"} {
+		if err := os.WriteFile(filepath.Join(folder, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := a.Launch(ctx, "com.tencent.wework", ".launch.LaunchSplashActivity"); err != nil {
+		t.Fatal(err)
+	}
+	commands, err := os.ReadFile(filepath.Join(folder, "commands"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(commands), "shell cmd statusbar collapse\nshell input keyevent KEYCODE_HOME\nshell am start ") {
+		t.Fatalf("notification shade and home were not reset before launch: %s", commands)
+	}
+}
+
+func TestLaunchWaitsPastTwelveSeconds(t *testing.T) {
+	a, folder := launchTestADB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ready := time.AfterFunc(13*time.Second, func() {
+		if err := os.WriteFile(filepath.Join(folder, "ready"), nil, 0600); err != nil {
+			t.Error(err)
+		}
+	})
+	defer ready.Stop()
+	if _, err := a.Launch(ctx, "com.tencent.wework", ".launch.LaunchSplashActivity"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLaunchWaitingCanBeCanceled(t *testing.T) {
+	a, _ := launchTestADB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := time.AfterFunc(time.Second, cancel)
+	defer stop.Stop()
+	if _, err := a.Launch(ctx, "com.tencent.wework", ".launch.LaunchSplashActivity"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("launch did not preserve cancellation: %v", err)
+	}
+}
 
 func TestForegroundWaitsOnlyForMissingFocus(t *testing.T) {
 	for _, tc := range []struct {
@@ -35,13 +121,24 @@ func TestForegroundWaitsOnlyForMissingFocus(t *testing.T) {
 		})
 	}
 	calls := 0
-	if err := awaitForeground(context.Background(), "com.tencent.mm", func() (string, bool, error) { calls++; return "", false, nil }); err == nil || calls != 4 {
-		t.Fatalf("missing focus did not stop after four reads: calls=%d error=%v", calls, err)
+	if err := awaitForeground(context.Background(), "com.tencent.mm", func() (string, bool, error) {
+		calls++
+		if calls > 6 {
+			return "com.tencent.mm", false, nil
+		}
+		return "", false, nil
+	}); err != nil || calls != 7 {
+		t.Fatalf("missing focus did not wait for recovery: calls=%d error=%v", calls, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := awaitForeground(ctx, "com.tencent.mm", func() (string, bool, error) { t.Fatal("canceled read was executed"); return "", false, nil }); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation was lost")
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	if err := awaitForeground(ctx, "com.tencent.mm", func() (string, bool, error) { cancel(); return "", false, nil }); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancellation during a transition was lost")
 	}
 }
 

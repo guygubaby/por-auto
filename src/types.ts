@@ -49,6 +49,10 @@ export const httpRequestSchema = z.object({
   response: z.union([
     z.object({ type: z.enum(['text', 'ignore']) }),
     z.object({ type: z.literal('json'), pointer: z.string() }),
+    z.object({
+      type: z.literal('javascript'),
+      code: z.string().min(1, '请输入 JavaScript 代码').max(10000),
+    }),
   ]),
   timeoutSeconds: z.number().int().min(5).max(120),
 });
@@ -223,9 +227,18 @@ export function defaultRequest(): HttpRequest {
     headers: [],
     auth: { type: 'none' },
     body: null,
-    response: { type: 'json', pointer: '/data/message' },
+    response: { type: 'javascript', code: 'return res.data.message;' },
     timeoutSeconds: 20,
   };
+}
+export function httpResponseCode(response: HttpRequest['response']): string {
+  if (response.type === 'javascript') return response.code;
+  if (response.type === 'json') {
+    const fields =
+      response.pointer === '' ? [] : response.pointer.slice(1).split('/');
+    return `return res${fields.map((field) => `[${JSON.stringify(field.replace(/~1/g, '/').replace(/~0/g, '~'))}]`).join('')};`;
+  }
+  return 'return res.data.message;';
 }
 export function defaultInput(): SendInput {
   return {

@@ -1,8 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
-@import '@fontsource-variable/roboto-slab';
-@import '@fontsource-variable/public-sans';
+@import '@fontsource-variable/noto-sans';
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -28,19 +27,14 @@
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
-  --radius-sm: 0.5rem;
-  --radius-md: 0.65rem;
-  --radius-lg: 0.9rem;
-  --radius-xl: 1.2rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
   --font-sans:
-    'Inter', 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
+    'Noto Sans Variable', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
     sans-serif;
-  --font-serif:
-    'Roboto Slab Variable', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
-    serif;
-  --font-heading:
-    'Public Sans Variable', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
-    sans-serif;
+  --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -58,83 +52,83 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 :root {
-  --background: #ffffff;
-  --card: #ffffff;
-  --sidebar: #fafafa;
-  --foreground: #262626;
-  --muted-foreground: #737373;
-  --primary: #7c56ae;
-  --primary-foreground: #ffffff;
-  --secondary: #f5f5f5;
-  --muted: #f7f7f7;
-  --accent: #262626;
-  --border: #e5e5e5;
-  --input: #949494;
+  --background: oklch(1 0 0);
+  --card: oklch(1 0 0);
+  --sidebar: oklch(0.988 0.003 106.5);
+  --foreground: oklch(0.153 0.006 107.1);
+  --muted-foreground: oklch(0.58 0.031 107.3);
+  --primary: oklch(0.228 0.013 107.4);
+  --primary-foreground: oklch(0.988 0.003 106.5);
+  --secondary: oklch(0.966 0.005 106.5);
+  --muted: oklch(0.966 0.005 106.5);
+  --accent: oklch(0.966 0.005 106.5);
+  --border: oklch(0.93 0.007 106.5);
+  --input: oklch(0.93 0.007 106.5);
   --destructive: oklch(0.577 0.245 27.325);
   --success: #187b61;
   --success-soft: #e7f4ed;
   --warning: #a56b19;
   color-scheme: light;
-  --card-foreground: #262626;
-  --popover: #ffffff;
-  --popover-foreground: #262626;
-  --secondary-foreground: #262626;
-  --accent-foreground: #ffffff;
-  --ring: #7c56ae;
-  --chart-1: oklch(0.872 0.007 219.6);
-  --chart-2: oklch(0.56 0.021 213.5);
-  --chart-3: oklch(0.45 0.017 213.2);
-  --chart-4: oklch(0.378 0.015 216);
-  --chart-5: oklch(0.275 0.011 216.9);
-  --radius: 0.875rem;
-  --sidebar-foreground: #262626;
-  --sidebar-primary: #7c56ae;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f5f5f5;
-  --sidebar-accent-foreground: #262626;
-  --sidebar-border: #e5e5e5;
-  --sidebar-ring: #7c56ae;
+  --card-foreground: oklch(0.153 0.006 107.1);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.153 0.006 107.1);
+  --secondary-foreground: oklch(0.228 0.013 107.4);
+  --accent-foreground: oklch(0.228 0.013 107.4);
+  --ring: oklch(0.737 0.021 106.9);
+  --chart-1: oklch(0.88 0.011 106.6);
+  --chart-2: oklch(0.58 0.031 107.3);
+  --chart-3: oklch(0.466 0.025 107.3);
+  --chart-4: oklch(0.394 0.023 107.4);
+  --chart-5: oklch(0.286 0.016 107.4);
+  --radius: 0.625rem;
+  --sidebar-foreground: oklch(0.153 0.006 107.1);
+  --sidebar-primary: oklch(0.228 0.013 107.4);
+  --sidebar-primary-foreground: oklch(0.988 0.003 106.5);
+  --sidebar-accent: oklch(0.966 0.005 106.5);
+  --sidebar-accent-foreground: oklch(0.228 0.013 107.4);
+  --sidebar-border: oklch(0.93 0.007 106.5);
+  --sidebar-ring: oklch(0.737 0.021 106.9);
 }
 .dark {
-  --background: #0a0a0a;
-  --card: #141414;
-  --sidebar: #101010;
-  --foreground: #f5f5f5;
-  --muted-foreground: #a3a3a3;
-  --primary: #cbb3ee;
-  --primary-foreground: #171717;
-  --secondary: #242424;
-  --muted: #1f1f1f;
-  --accent: #e5e5e5;
-  --border: #2e2e2e;
-  --input: #767676;
+  --background: oklch(0.153 0.006 107.1);
+  --card: oklch(0.228 0.013 107.4);
+  --sidebar: oklch(0.228 0.013 107.4);
+  --foreground: oklch(0.988 0.003 106.5);
+  --muted-foreground: oklch(0.737 0.021 106.9);
+  --primary: oklch(0.93 0.007 106.5);
+  --primary-foreground: oklch(0.228 0.013 107.4);
+  --secondary: oklch(0.286 0.016 107.4);
+  --muted: oklch(0.286 0.016 107.4);
+  --accent: oklch(0.286 0.016 107.4);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
   --destructive: oklch(0.704 0.191 22.216);
   --success: #69d3ac;
   --success-soft: #203b2d;
   --warning: #e4b671;
   color-scheme: dark;
-  --card-foreground: #f5f5f5;
-  --popover: #141414;
-  --popover-foreground: #f5f5f5;
-  --secondary-foreground: #f5f5f5;
-  --accent-foreground: #171717;
-  --ring: #cbb3ee;
-  --chart-1: oklch(0.872 0.007 219.6);
-  --chart-2: oklch(0.56 0.021 213.5);
-  --chart-3: oklch(0.45 0.017 213.2);
-  --chart-4: oklch(0.378 0.015 216);
-  --chart-5: oklch(0.275 0.011 216.9);
-  --sidebar-foreground: #f5f5f5;
-  --sidebar-primary: #cbb3ee;
-  --sidebar-primary-foreground: #171717;
-  --sidebar-accent: #242424;
-  --sidebar-accent-foreground: #f5f5f5;
-  --sidebar-border: #2e2e2e;
-  --sidebar-ring: #cbb3ee;
+  --card-foreground: oklch(0.988 0.003 106.5);
+  --popover: oklch(0.228 0.013 107.4);
+  --popover-foreground: oklch(0.988 0.003 106.5);
+  --secondary-foreground: oklch(0.988 0.003 106.5);
+  --accent-foreground: oklch(0.988 0.003 106.5);
+  --ring: oklch(0.58 0.031 107.3);
+  --chart-1: oklch(0.88 0.011 106.6);
+  --chart-2: oklch(0.58 0.031 107.3);
+  --chart-3: oklch(0.466 0.025 107.3);
+  --chart-4: oklch(0.394 0.023 107.4);
+  --chart-5: oklch(0.286 0.016 107.4);
+  --sidebar-foreground: oklch(0.988 0.003 106.5);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.988 0.003 106.5);
+  --sidebar-accent: oklch(0.286 0.016 107.4);
+  --sidebar-accent-foreground: oklch(0.988 0.003 106.5);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.58 0.031 107.3);
 }
 @layer base {
   * {
-    border-color: var(--border);
+    @apply border-border outline-ring/50;
   }
   html,
   body,
@@ -143,9 +137,7 @@
     margin: 0;
   }
   body {
-    background: var(--background);
-    color: var(--foreground);
-    font-family: var(--font-serif);
+    @apply bg-background text-foreground font-sans;
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;

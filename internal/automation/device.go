@@ -22,6 +22,9 @@ type DeviceIO struct {
 	Width, Height                                  int
 	LastPhoto                                      *Photo
 	Last                                           Screen
+	LastHierarchy, CurrentStep                     string
+	Events                                         []Object
+	Result                                         Object
 	Nodes                                          []*Node
 	wecomIDs                                       Object
 	OwnedTitle, OwnedText, CommitTitle, CommitText string
@@ -114,10 +117,7 @@ func (d *DeviceIO) Bind(r *Runtime) *goja.Object {
 		if len(a) > 0 && !goja.IsUndefined(a[0]) && a[0].String() != "" {
 			activity = a[0].String()
 		}
-		out, e := d.ADB.Launch(d.Ctx, d.Package, activity)
-		if writeErr := os.WriteFile(filepath.Join(d.Folder, "launch.txt"), []byte(out), 0600); writeErr != nil && e == nil {
-			return nil, writeErr
-		}
+		_, e := d.ADB.Launch(d.Ctx, d.Package, activity)
 		if e != nil {
 			return nil, e
 		}
@@ -135,7 +135,7 @@ func (d *DeviceIO) Bind(r *Runtime) *goja.Object {
 	r.Bind(o, "scroll", func(a []goja.Value) (any, error) {
 		up := a[0].ToBoolean()
 		if !d.Visual {
-			return nil, d.scrollNative(up)
+			return d.scrollNative(up)
 		}
 		if e := d.ADB.Foreground(d.Ctx, d.Package); e != nil {
 			return nil, e
@@ -342,20 +342,21 @@ func (d *DeviceIO) Bind(r *Runtime) *goja.Object {
 			d.Step++
 		}
 		if status == "step_started" || status == "step_completed" {
+			d.CurrentStep = str(object(details)["name"])
 			d.report(str(object(details)["name"]))
 		}
-		return nil, appendEvent(d.Folder, status, status, details)
+		d.Events = append(d.Events, Object{"timestamp": now(), "step": d.Step, "status": status, "message": status, "details": details})
+		if len(d.Events) > 32 {
+			d.Events = d.Events[1:]
+		}
+		return nil, nil
 	})
 	r.Bind(o, "record", func(a []goja.Value) (any, error) {
 		v := object(a[0].Export())
-		if e := writeEvidence(d.Folder, "result.json", v); e != nil {
-			return nil, e
+		if err := writeEvidence(d.Folder, "result.json", v); err != nil {
+			return nil, err
 		}
-		if v["targets"] != nil {
-			if e := writeEvidence(d.Folder, "targets.json", v["targets"]); e != nil {
-				return nil, e
-			}
-		}
+		d.Result = v
 		return nil, nil
 	})
 	if !d.Visual && d.Package == "com.tencent.wework" {
@@ -365,6 +366,22 @@ func (d *DeviceIO) Bind(r *Runtime) *goja.Object {
 		r.Bind(o, "nickname", func(a []goja.Value) (any, error) { return d.nicknameNative() })
 	}
 	return o
+}
+func (d *DeviceIO) saveFailure(failure error) error {
+	if err := writeEvidence(d.Folder, "failure.log", Object{"error": failure.Error(), "step": d.Step + 1, "stepName": d.CurrentStep, "target": d.OwnedTitle, "page": d.Last.Page, "title": d.Last.Title}); err != nil {
+		return err
+	}
+	var events []byte
+	for _, event := range d.Events {
+		events = append(events, append(marshal(event), '\n')...)
+	}
+	if err := os.WriteFile(filepath.Join(d.Folder, "events.jsonl"), events, 0600); err != nil {
+		return err
+	}
+	if d.LastHierarchy != "" {
+		return os.WriteFile(filepath.Join(d.Folder, "hierarchy.xml"), []byte(d.LastHierarchy[:min(len(d.LastHierarchy), 32*1024)]), 0600)
+	}
+	return nil
 }
 func (d *DeviceIO) report(message string) {
 	if d.Emit != nil {

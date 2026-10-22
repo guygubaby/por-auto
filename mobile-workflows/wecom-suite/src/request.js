@@ -33,6 +33,32 @@ function pointer(value, path) {
   });
   return value;
 }
+function responseCode(response) {
+  if (response.type === 'javascript') return response.code;
+  if (response.type === 'json') return 'return res' + (response.pointer === '' ? [] : response.pointer.slice(1).split('/')).map(function (part) { return '[' + JSON.stringify(part.replace(/~1/g, '/').replace(/~0/g, '~')) + ']'; }).join('') + ';';
+  return 'return res.data.message;';
+}
+function validateResponse(response) {
+  if (!object(response) || ['text', 'json', 'javascript', 'ignore'].indexOf(response.type) < 0) fail('响应解析方式无效');
+  if (response.type === 'json' && (typeof response.pointer !== 'string' || response.pointer.length > 1000 || response.pointer !== '' && response.pointer.charAt(0) !== '/' || /~(?![01])/.test(response.pointer))) fail('JSON 字段路径无效');
+  if (response.type === 'javascript') {
+    if (typeof response.code !== 'string' || !response.code.trim() || response.code.length > 10000) fail('JavaScript 代码不能为空，最多 10000 字符');
+    try { Function('res', '"use strict";\n' + response.code + '\n'); } catch (_) { fail('JavaScript 代码语法错误'); }
+  }
+}
+function parse(raw, response, io) {
+  validateResponse(response);
+  if (response.type === 'ignore') return null;
+  if (response.type === 'text') return text(raw);
+  if (response.type === 'json') {
+    var parsed; try { parsed = JSON.parse(raw); } catch (_) { fail('接口没有返回有效 JSON'); }
+    return text(pointer(parsed, response.pointer));
+  }
+  var literal = JSON.stringify(raw).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  var source = '(function () { var res = ' + literal + '; try { res = JSON.parse(res); } catch (_) {} return (function (res) { "use strict";\n' + response.code + '\n})(res); })()';
+  try { return text(io.evaluateResponse(source)); }
+  catch (error) { fail('JavaScript 处理失败：' + String(error && error.message || error)); }
+}
 function validate(spec, io) {
   if (!object(spec) || typeof spec.url !== 'string' || spec.url.length > 2000 || !spec.auth || !spec.response) fail('HTTP 配置不完整');
   var url = io.parseUrl(spec.url);
@@ -46,8 +72,7 @@ function validate(spec, io) {
   if (['none', 'bearer', 'basic', 'api_key'].indexOf(spec.auth.type) < 0 || spec.auth.type !== 'none' && !/^[a-f0-9-]{36}$/.test(spec.auth.credential || '')) fail('请先保存 HTTP 鉴权值');
   if (spec.auth.type === 'basic' && (typeof spec.auth.username !== 'string' || /[:\r\n]/.test(spec.auth.username))) fail('用户名无效');
   if (spec.auth.type === 'api_key' && (['header', 'query'].indexOf(spec.auth.location) < 0 || typeof spec.auth.name !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(spec.auth.name))) fail('API Key 名称或位置无效');
-  if (['text', 'json', 'ignore'].indexOf(spec.response.type) < 0) fail('响应解析方式无效');
-  if (spec.response.type === 'json' && (typeof spec.response.pointer !== 'string' || spec.response.pointer.length > 1000 || spec.response.pointer !== '' && spec.response.pointer.charAt(0) !== '/' || /~(?![01])/.test(spec.response.pointer))) fail('JSON 字段路径无效');
+  validateResponse(spec.response);
   if (spec.body !== null && spec.body !== undefined && ['GET', 'DELETE'].indexOf(spec.method) >= 0) fail('GET 和 DELETE 不发送请求正文');
   if (spec.body !== null && spec.body !== undefined && JSON.stringify(spec.body).length > 65536) fail('请求正文过大');
   return spec;
@@ -69,11 +94,7 @@ function execute(spec, context, io, preview) {
   if (response.status < 200 || response.status >= 300) fail('HTTP ' + response.status + '，未自动重试');
   var result = null, parseError = null;
   try {
-    if (spec.response.type === 'text') result = text(response.body);
-    else if (spec.response.type === 'json') {
-      var parsed; try { parsed = JSON.parse(response.body); } catch (_) { fail('接口没有返回有效 JSON'); }
-      result = text(pointer(parsed, spec.response.pointer));
-    }
+    result = parse(response.body, spec.response, io);
   } catch (error) {
     if (!preview) throw error;
     parseError = String(error.message || error);
@@ -85,5 +106,5 @@ function execute(spec, context, io, preview) {
 module.exports = {
   fetch: function (spec, context, io) { return execute(spec, context, io, false); },
   preview: function (spec, context, io) { return execute(spec, context, io, true); },
-  validate: validate, pointer: pointer, expand: expand
+  validate: validate, parse: parse, responseCode: responseCode, pointer: pointer, expand: expand
 };

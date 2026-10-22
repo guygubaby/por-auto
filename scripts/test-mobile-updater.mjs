@@ -14,7 +14,8 @@ test('offline import runs Chinese script, preserves configuration across version
   assert.equal(restarted.run('hello').status, 'completed');
   const logs = restarted.exportLogs();
   assert.equal(logs.records.length, 2);
-  assert.ok(logs.records.some(r => r.summary.versionCode === 2 && r.events.includes('"runs":2')));
+  assert.ok(logs.records.some(r => r.summary.versionCode === 2));
+  assert.ok(logs.records.every(r => r.events === ''));
   assert.equal(restarted.list().installed[0].versionCode, 2);
 }));
 
@@ -161,7 +162,7 @@ test('rejects traversal, duplicate paths, oversized packages and unsupported lau
   assert.throws(() => manager.importBundle(duplicate), /重复/);
   const oversized = structuredClone(p.bundle); oversized.catalog.workflows[0].files[0].size = core.limits.file + 1;
   assert.throws(() => manager.importBundle(oversized), /大小无效/);
-  const unsupported = structuredClone(p.bundle); unsupported.catalog.workflows[0].minLauncher = 2;
+  const unsupported = structuredClone(p.bundle); unsupported.catalog.workflows[0].minLauncher = core.launcherVersion + 1;
   assert.match(manager.importBundle(unsupported).errors[0].message, /新版启动器/);
   manager.importBundle(p.bundle);
   const renamed = structuredClone(p.bundle); renamed.catalog.workflows[0].id = 'HELLO'; renamed.files[0].id = 'HELLO';
@@ -178,6 +179,59 @@ test('an unfinished run is exported as interrupted without changing or replaying
   assert.equal(exported.records[0].summary.status, 'interrupted');
   assert.equal(JSON.parse(fs.readFileSync(summaryFile, 'utf8')).status, 'running');
   assert.equal(exported.records.length, 1);
+}));
+
+test('mobile history keeps only the latest 200 runs and success has no diagnostic log', async () => fixture((env, manager) => {
+  manager.importBundle(script().bundle);
+  for (let index = 1; index <= 205; index++) {
+    const id = `${index}-a`, folder = join(env.root, 'runs', id);
+    fs.mkdirSync(folder);
+    fs.writeFileSync(join(folder, 'summary.json'), JSON.stringify({ id, timestamp: index, status: 'completed' }));
+    fs.writeFileSync(join(folder, 'old.log'), 'old heavy evidence');
+  }
+  manager.exportLogs();
+  assert.equal(fs.readdirSync(join(env.root, 'runs')).length, 200);
+  assert.equal(fs.existsSync(join(env.root, 'runs/1-a')), false);
+  const result = manager.run('hello');
+  assert.equal(result.status, 'completed');
+  assert.equal(fs.readdirSync(join(env.root, 'runs')).length, 200);
+  assert.equal(fs.existsSync(join(env.root, 'runs', result.id, 'events.jsonl')), false);
+  assert.equal(manager.exportLogs().records[0].summary.id, result.id);
+}));
+
+test('mobile failure writes only the last 32 events', async () => fixture((env, manager) => {
+  manager.importBundle(script(1, `module.exports = function(por){ for(var n=0;n<500;n++)por.log('marker'+n); throw Error('task failed'); };`).bundle);
+  const result = manager.run('hello');
+  assert.equal(result.status, 'failed');
+  const events = manager.exportLogs().records[0].events.trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(events.length, 32);
+  assert.equal(events.at(-1).details.error, 'task failed');
+  assert.ok(events.some(event => event.message === 'marker499'));
+  assert.ok(events.every(event => event.message !== 'marker0'));
+}));
+
+test('latest result export reads retained history without a duplicate last-result file', async () => fixture((env, manager) => {
+  manager.importBundle(script(1, `module.exports=function(por){por.recordResult({status:'completed',marker:'previous'});};`).bundle);
+  assert.equal(manager.run('hello').status, 'completed');
+  const dev = core.create(env.io, env.root, { ...origin, reference: 'dev' });
+  dev.importBundle(script(1, `module.exports=function(por){por.recordResult({status:'completed',marker:'wrong-branch'});};`).bundle);
+  assert.equal(dev.run('hello').status, 'completed');
+  manager.importBundle(script(2, `module.exports=function(por){var last=por.readLastResult();por.recordResult({status:'completed',previous:last.marker});};`).bundle);
+  const run = manager.run('hello');
+  assert.equal(run.status, 'completed');
+  const saved = JSON.parse(fs.readFileSync(join(env.root, 'runs', run.id, 'result.json')));
+  assert.equal(saved.previous, 'previous');
+}));
+
+test('diagnostic write failure cannot hide the terminal mobile summary', async () => fixture((env, manager) => {
+  manager.importBundle(script(1, `module.exports=function(){throw Error('original failure');};`).bundle);
+  env.hooks.beforeWrite = path => { if (path.endsWith('/events.jsonl')) throw Error('disk log failed'); };
+  const run = manager.run('hello');
+  assert.equal(run.status, 'failed');
+  const saved = JSON.parse(fs.readFileSync(join(env.root, 'runs', run.id, 'summary.json')));
+  assert.equal(saved.status, 'failed');
+  assert.equal(saved.error, 'original failure');
+  assert.match(saved.warning, /诊断日志/);
 }));
 
 test('actual source package includes verified helper modules and produces a standalone bootstrap', async () => fixture(async (env, manager) => {

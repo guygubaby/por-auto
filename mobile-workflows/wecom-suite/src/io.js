@@ -80,6 +80,25 @@ module.exports = function (por) {
     }
   }
 
+  function evaluateResponse(source) {
+    var value = null, error = null;
+    var worker = threads.start(function () {
+      var Context = Packages.org.mozilla.javascript.Context, cx = Context.enter();
+      try {
+        cx.setOptimizationLevel(-1);
+        var result = cx.evaluateString(cx.initSafeStandardObjects(), source, 'http-response.js', 1, null);
+        if (typeof result === 'string' || result instanceof java.lang.String) value = String(result);
+      } catch (e) { error = String(e.message || e); }
+      finally { Context.exit(); }
+    });
+    try {
+      worker.join(1000);
+      if (worker.isAlive()) throw new Error('JavaScript 执行超时（最多 1 秒）');
+      if (error !== null) throw new Error(error);
+      return value;
+    } finally { worker.interrupt(); }
+  }
+
   function request(spec) {
     var client = new Packages.okhttp3.OkHttpClient.Builder()
       .connectTimeout(10, TimeUnit.SECONDS)
@@ -162,7 +181,6 @@ module.exports = function (por) {
   function record(result) {
     if (typeof por.recordResult === 'function') por.recordResult(result);
     else write(directory + '/runs/' + por.runId + '/result.json', result);
-    write(directory + '/last-result.json', result);
   }
 
   return {
@@ -172,6 +190,7 @@ module.exports = function (por) {
     secret: secret,
     parseUrl: parseUrl,
     request: request,
+    evaluateResponse: evaluateResponse,
     base64: function (text) { return base64(bytes(text)); },
     now: Date.now,
     runId: por.runId,

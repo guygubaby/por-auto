@@ -228,6 +228,25 @@
             "type",
             "pointer"
           ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "javascript"
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10000,
+              "description": "JavaScript 函数体；res 为自动解析的 JSON 或原始字符串，使用 return 返回最终消息。"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ]
         }
       ]
     },

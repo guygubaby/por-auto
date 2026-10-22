@@ -282,7 +282,7 @@ function HistoryPage() {
     <>
       <PageTitle
         title="运行记录"
-        description="每次执行都有迹可循，结果与证据留在本机。"
+        description="仅保留最近 200 条，失败时保存必要诊断，旧记录自动清理。"
         action={
           <Button
             variant="outline"

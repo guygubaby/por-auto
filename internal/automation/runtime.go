@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"por-auto/assets"
 	"strings"
@@ -95,11 +94,27 @@ func (r *Runtime) IO() *goja.Object {
 	})
 	r.Bind(o, "secret", func(a []goja.Value) (any, error) { return r.Credentials.Read("http", a[0].String(), a[1].String()) })
 	r.Bind(o, "request", func(a []goja.Value) (any, error) { return HTTP(r.Ctx, object(a[0].Export())) })
+	r.Bind(o, "evaluateResponse", func(a []goja.Value) (any, error) {
+		vm := goja.New()
+		vm.SetMaxCallStackSize(1000)
+		timer := time.AfterFunc(time.Second, func() { vm.Interrupt("JavaScript 执行超时（最多 1 秒）") })
+		defer timer.Stop()
+		stop := context.AfterFunc(r.Ctx, func() { vm.Interrupt(r.Ctx.Err()) })
+		defer stop()
+		value, err := vm.RunString(a[0].String())
+		if err != nil {
+			return nil, err
+		}
+		if _, object := value.(*goja.Object); object {
+			return nil, nil
+		}
+		return value.Export(), nil
+	})
 	return o
 }
 func (r *Runtime) Bind(o *goja.Object, name string, fn func([]goja.Value) (any, error)) {
 	_ = o.Set(name, func(c goja.FunctionCall) goja.Value {
-		if e := r.Ctx.Err(); e != nil {
+		if e := r.Ctx.Err(); e != nil && name != "record" && name != "log" && name != "now" {
 			panic(r.VM.NewGoError(e))
 		}
 		v, e := fn(c.Arguments)
@@ -204,7 +219,10 @@ func (r *Runtime) Run(workflow, config Object, device *DeviceIO) (Object, error)
 	run, _ := goja.AssertFunction(runner.ToObject(r.VM).Get("run"))
 	v, e := run(runner, r.VM.ToValue(workflow), r.VM.ToValue(config))
 	if e != nil {
-		return nil, e
+		if err := device.saveFailure(e); err != nil {
+			return object(device.Result["outputs"]), fmt.Errorf("%w；错误记录保存失败：%v", e, err)
+		}
+		return object(device.Result["outputs"]), e
 	}
 	return object(v.Export()), nil
 }
@@ -228,15 +246,4 @@ func (r *Runtime) Discover(scope string, device *DeviceIO) (any, error) {
 }
 func writeEvidence(folder, name string, v any) error {
 	return atomicJSON(filepath.Join(folder, name), v)
-}
-func appendEvent(folder, status, message string, detail any) error {
-	p := filepath.Join(folder, "events.jsonl")
-	f, e := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	b, _ := json.Marshal(Object{"timestamp": now(), "step": 0, "status": status, "message": message, "details": detail})
-	_, e = f.Write(append(b, '\n'))
-	return e
 }

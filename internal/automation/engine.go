@@ -23,7 +23,7 @@ import (
 )
 
 const OfficialURL = "https://github.com/guygubaby/por-auto"
-const Version = "0.4.2"
+const Version = "0.4.3"
 
 type Engine struct {
 	Root        string
@@ -31,6 +31,7 @@ type Engine struct {
 	Credentials *Credentials
 	mu          sync.Mutex
 	assetsMu    sync.Mutex
+	historyMu   sync.Mutex
 	maintenance bool
 	closing     bool
 	active      map[string]context.CancelFunc
@@ -46,6 +47,9 @@ func NewEngine(root string, emit func(string, any)) *Engine {
 }
 func (e *Engine) Start() error {
 	if err := os.MkdirAll(e.Root, 0700); err != nil {
+		return err
+	}
+	if _, err := e.ListRuns(); err != nil {
 		return err
 	}
 	s, err := NewScheduler(e)
@@ -542,14 +546,9 @@ func (e *Engine) Run(ctx context.Context, serial string, snapshot Object, schedu
 	if err != nil {
 		return nil, err
 	}
-	meta := Object{"id": id, "workflow_name": w["name"], "workflow_version": w["version"], "serial": serial, "timestamp": now(), "status": "running", "dry_run": snapshot["dryRun"] == true}
+	defer e.ListRuns()
+	meta := Object{"id": id, "workflow_id": w["id"], "workflow_name": w["name"], "workflow_version": w["version"], "commit": snapshot["commit"], "serial": serial, "timestamp": now(), "status": "running", "dry_run": snapshot["dryRun"] == true}
 	if err := atomicJSON(filepath.Join(folder, "meta.json"), meta); err != nil {
-		return nil, err
-	}
-	if err := atomicJSON(filepath.Join(folder, "workflow.json"), w); err != nil {
-		return nil, err
-	}
-	if err := atomicJSON(filepath.Join(folder, "input.json"), snapshot); err != nil {
 		return nil, err
 	}
 	result := Object{"id": id, "nickname": nil, "outputs": Object{}, "workflow_name": w["name"], "workflow_version": w["version"], "workflow_key": snapshot["key"], "commit": snapshot["commit"], "serial": serial, "timestamp": now(), "screenshot": nil, "error": nil, "warning": nil, "folder": folder}
@@ -598,7 +597,12 @@ func (e *Engine) Run(ctx context.Context, serial string, snapshot Object, schedu
 		if err != nil {
 			return err
 		}
-		defer d.U2.Close()
+		defer func() {
+			d.U2.Close()
+			if err == nil {
+				_ = os.Remove(filepath.Join(folder, "u2-server.log"))
+			}
+		}()
 		r := NewRuntime(runCtx, e.Credentials)
 		outputs, err := r.Run(w, config, d)
 		if outputs != nil {
@@ -614,10 +618,13 @@ func (e *Engine) Run(ctx context.Context, serial string, snapshot Object, schedu
 	} else {
 		meta["status"] = "completed"
 	}
-	if err := atomicJSON(filepath.Join(folder, "meta.json"), meta); err != nil {
-		return nil, err
+	e.historyMu.Lock()
+	err = atomicJSON(filepath.Join(folder, "desktop-result.json"), result)
+	if err == nil {
+		err = atomicJSON(filepath.Join(folder, "meta.json"), meta)
 	}
-	if err := atomicJSON(filepath.Join(folder, "desktop-result.json"), result); err != nil {
+	e.historyMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	if e.Emit != nil {
@@ -626,6 +633,8 @@ func (e *Engine) Run(ctx context.Context, serial string, snapshot Object, schedu
 	return result, nil
 }
 func (e *Engine) ListRuns() ([]any, error) {
+	e.historyMu.Lock()
+	defer e.historyMu.Unlock()
 	entries, err := os.ReadDir(e.path("runs"))
 	if os.IsNotExist(err) {
 		return []any{}, nil
@@ -639,11 +648,30 @@ func (e *Engine) ListRuns() ([]any, error) {
 			continue
 		}
 		v, err := loadFile(e.path("runs/"+f.Name()+"/meta.json"), nil)
+		if v == nil && err == nil {
+			if _, statErr := os.Stat(e.path("runs/" + f.Name() + "/meta.json")); statErr == nil {
+				v = []any{}
+			} else if !os.IsNotExist(statErr) {
+				return nil, statErr
+			}
+		}
 		if err != nil {
-			return nil, err
+			info, statErr := f.Info()
+			if statErr != nil {
+				return nil, statErr
+			}
+			v = Object{"timestamp": info.ModTime().UnixMilli(), "workflow_name": "记录损坏", "serial": "", "status": "failed", "error": err.Error()}
 		}
 		if v != nil {
 			m := object(v)
+			if m == nil {
+				info, err := f.Info()
+				if err != nil {
+					return nil, err
+				}
+				m = Object{"timestamp": info.ModTime().UnixMilli(), "workflow_name": "记录损坏", "serial": "", "status": "failed", "error": "运行记录格式无效，原文件保留"}
+			}
+			m["id"] = f.Name()
 			if m["status"] == "running" {
 				serial := str(m["serial"])
 				e.mu.Lock()
@@ -657,13 +685,34 @@ func (e *Engine) ListRuns() ([]any, error) {
 				if !active {
 					m["status"] = "interrupted"
 					m["error"] = "执行已中断，未自动重试"
+					if err := atomicJSON(e.path("runs/"+f.Name()+"/meta.json"), m); err != nil {
+						return nil, err
+					}
 				}
 			}
 			out = append(out, m)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return num(object(out[i])["timestamp"]) > num(object(out[j])["timestamp"]) })
-	return out, nil
+	remaining := 200
+	for _, value := range out {
+		if object(value)["status"] == "running" {
+			remaining--
+		}
+	}
+	kept := []any{}
+	for _, value := range out {
+		m := object(value)
+		if m["status"] == "running" || remaining > 0 {
+			kept = append(kept, value)
+			if m["status"] != "running" {
+				remaining--
+			}
+		} else if err := os.RemoveAll(e.path("runs/" + str(m["id"]))); err != nil {
+			return nil, err
+		}
+	}
+	return kept, nil
 }
 func (e *Engine) RunDetails(id string) (Object, error) {
 	if !regexp.MustCompile(`^\d{1,20}$`).MatchString(id) {
@@ -682,15 +731,19 @@ func (e *Engine) RunDetails(id string) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	if result == nil {
-		result, err = loadFile(filepath.Join(folder, "result.json"), nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-	targets, err := loadFile(filepath.Join(folder, "targets.json"), []any{})
+	checkpoint, err := loadFile(filepath.Join(folder, "result.json"), nil)
 	if err != nil {
 		return nil, err
+	}
+	if result == nil {
+		result = checkpoint
+	}
+	targets, err := loadFile(filepath.Join(folder, "targets.json"), object(checkpoint)["targets"])
+	if err != nil {
+		return nil, err
+	}
+	if targets == nil {
+		targets = []any{}
 	}
 	for _, t := range list(targets) {
 		m := object(t)

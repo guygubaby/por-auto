@@ -49,8 +49,8 @@ export function SelectControl({
         size={size}
         onBlur={onBlur}
         className={cn(
-          'bg-card relative w-full text-left',
-          size === 'sm' && 'rounded-lg text-xs',
+          'relative w-full text-left',
+          size === 'sm' && 'text-xs',
           icon && 'pl-9',
         )}
       >

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"image"
@@ -157,18 +156,8 @@ func (e *Engine) Call(ctx context.Context, command string, arg Object) (any, err
 		if len(raw) > 1<<20 {
 			return nil, errf("解析样本最多 1 MiB")
 		}
-		resp := object(arg["response"])
-		if resp["type"] == "ignore" {
-			return nil, nil
-		}
-		if resp["type"] == "text" {
-			return raw, nil
-		}
-		var value any
-		if err := json.Unmarshal([]byte(raw), &value); err != nil {
-			return nil, errf("样本不是有效 JSON")
-		}
-		return NewRuntime(ctx, e.Credentials).Call("request", "pointer", value, str(resp["pointer"]))
+		r := NewRuntime(ctx, e.Credentials)
+		return r.Call("request", "parse", raw, object(arg["response"]), r.IO())
 	case "list_schedules":
 		if e.scheduler == nil {
 			return nil, errf("定时服务未就绪")

@@ -4,8 +4,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -97,9 +95,20 @@ func parseXML(text string) ([]*Node, error) {
 	return nodes, nil
 }
 func (d *DeviceIO) tree() ([]*Node, error) {
-	return d.treeAttempt(0)
+	for {
+		nodes, err := d.readTree()
+		if err != nil {
+			return nil, err
+		}
+		if usableNativeTree(nodes) {
+			return nodes, nil
+		}
+		if err := sleep(d.Ctx, 500*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
 }
-func (d *DeviceIO) treeAttempt(attempt int) ([]*Node, error) {
+func (d *DeviceIO) readTree() ([]*Node, error) {
 	if d.Package != "com.tencent.wework" {
 		return nil, errf("不支持目标应用，仅支持企业微信")
 	}
@@ -114,7 +123,7 @@ func (d *DeviceIO) treeAttempt(attempt int) ([]*Node, error) {
 		return nil, e
 	}
 	text := str(v)
-	_ = os.WriteFile(filepath.Join(d.Folder, "hierarchy.xml"), []byte(text), 0600)
+	d.LastHierarchy = text
 	nodes, e := parseXML(text)
 	if e != nil {
 		return nil, e
@@ -140,19 +149,13 @@ func (d *DeviceIO) treeAttempt(attempt int) ([]*Node, error) {
 	valid := []*Node{}
 	for _, n := range nodes {
 		if n.Valid(d.Package) {
+			if n.ID() == "ncq" && n.Text() == "安全保护中" {
+				return nil, errf("企业微信要求账号本人完成验证")
+			}
 			valid = append(valid, n)
 			d.Width = max(d.Width, n.Bounds[2])
 			d.Height = max(d.Height, n.Bounds[3])
 		}
-	}
-	if !usableNativeTree(valid) {
-		if attempt < 3 {
-			if err := sleep(d.Ctx, 500*time.Millisecond); err != nil {
-				return nil, err
-			}
-			return d.treeAttempt(attempt + 1)
-		}
-		return nil, errf("企业微信暂未提供原生页面控件，请保持手机解锁后重试")
 	}
 	d.Nodes = valid
 	return valid, nil
@@ -200,6 +203,28 @@ func (d *DeviceIO) node(id string) (*Node, error) {
 func (d *DeviceIO) tapNode(n *Node) error {
 	return d.ADB.Tap(d.Ctx, d.Package, n.Point(d.Width, d.Height), d.Width, d.Height)
 }
+func (d *DeviceIO) waitNativeNode(id string) (*Node, error) {
+	for {
+		if _, err := d.tree(); err != nil {
+			return nil, err
+		}
+		var matches []*Node
+		for _, node := range d.Nodes {
+			if node.ID() == id {
+				matches = append(matches, node)
+			}
+		}
+		if len(matches) > 1 {
+			return nil, fmt.Errorf("原生控件 %s 不唯一", id)
+		}
+		if len(matches) == 1 {
+			return matches[0], nil
+		}
+		if err := sleep(d.Ctx, 500*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+}
 func (d *DeviceIO) observeNative() (Screen, error) {
 	nodes, e := d.tree()
 	if e != nil {
@@ -218,6 +243,9 @@ func (d *DeviceIO) nativeScreen(nodes []*Node) (Screen, error) {
 		}
 		if len(titles) == 1 {
 			s.Title = titles[0].Text()
+		}
+		if s.Title == "安全保护中" {
+			return s, errf("企业微信要求账号本人完成验证")
 		}
 		editor, e := d.node("i_6")
 		if e == nil {
@@ -341,7 +369,7 @@ func (d *DeviceIO) nativeRows(container *Node) ([]Item, error) {
 }
 func (d *DeviceIO) nativeHome() (Screen, error) {
 	d.Scope = "conversations"
-	for n := 0; n < 8; n++ {
+	for depth := 0; depth < 8; {
 		s, e := d.observeNative()
 		if e != nil {
 			return s, e
@@ -349,7 +377,23 @@ func (d *DeviceIO) nativeHome() (Screen, error) {
 		if s.Page == "home" {
 			return s, nil
 		}
-		if tab := wecomMessageTab(d.Nodes, d.Width, d.Height); tab != nil {
+		tab := wecomMessageTab(d.Nodes, d.Width, d.Height)
+		ready := s.Title != "" || s.Page != "other" || tab != nil
+		for _, node := range d.Nodes {
+			switch node.ID() {
+			case "og3", "mi0", "lba", "km_":
+				ready = true
+			}
+		}
+		if !ready {
+			if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
+				return s, e
+			}
+			continue
+		}
+		before := nativeTreeState(d.Nodes)
+		depth++
+		if tab != nil {
 			e = d.tapNode(tab)
 		} else {
 			e = d.back()
@@ -357,11 +401,30 @@ func (d *DeviceIO) nativeHome() (Screen, error) {
 		if e != nil {
 			return s, e
 		}
-		if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
-			return s, e
+		for {
+			if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
+				return s, e
+			}
+			next, err := d.observeNative()
+			if err != nil {
+				return next, err
+			}
+			if next.Page == "home" {
+				return next, nil
+			}
+			if nativeTreeState(d.Nodes) != before {
+				break
+			}
 		}
 	}
 	return Screen{}, errf("未能返回企业微信消息首页")
+}
+func nativeTreeState(nodes []*Node) string {
+	var state strings.Builder
+	for _, node := range nodes {
+		fmt.Fprintf(&state, "%s %q %v\n", node.ID(), node.Text(), node.Bounds)
+	}
+	return state.String()
 }
 func wecomMessageTab(nodes []*Node, width, height int) *Node {
 	tabs := map[string][]*Node{}
@@ -400,13 +463,22 @@ func (d *DeviceIO) recipientNative(scope string) (Screen, error) {
 		if e = d.tapNode(button); e != nil {
 			return Screen{}, e
 		}
-		if _, e = d.tree(); e != nil {
-			return Screen{}, e
-		}
 		var options []*Node
-		for _, n := range d.Nodes {
-			if n.Text() == desired {
-				options = append(options, n)
+		for {
+			if _, e = d.tree(); e != nil {
+				return Screen{}, e
+			}
+			options = nil
+			for _, n := range d.Nodes {
+				if n.Text() == desired {
+					options = append(options, n)
+				}
+			}
+			if len(options) != 0 {
+				break
+			}
+			if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
+				return Screen{}, e
 			}
 		}
 		if len(options) != 1 {
@@ -415,34 +487,43 @@ func (d *DeviceIO) recipientNative(scope string) (Screen, error) {
 		if e = d.tapNode(options[0]); e != nil {
 			return Screen{}, e
 		}
-		if _, e = d.tree(); e != nil {
-			return Screen{}, e
-		}
-		filter, e = d.node("fg8")
-		if e != nil || filter.Text() != desired {
-			return Screen{}, errf("会话分类未完成切换")
+		for {
+			filter, e = d.waitNativeNode("fg8")
+			if e != nil {
+				return Screen{}, e
+			}
+			if filter.Text() == desired {
+				break
+			}
+			if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
+				return Screen{}, e
+			}
 		}
 	}
 	d.Scope = scope
 	return d.observeNative()
 }
-func (d *DeviceIO) scrollNative(up bool) error {
+func (d *DeviceIO) scrollNative(up bool) (bool, error) {
 	if d.Package != "com.tencent.wework" {
-		return errf("不支持目标应用，仅支持企业微信")
+		return false, errf("不支持目标应用，仅支持企业微信")
 	}
 	if e := d.ADB.Foreground(d.Ctx, d.Package); e != nil {
-		return e
+		return false, e
 	}
 	method := "scrollForward"
 	if up {
 		method = "scrollBackward"
 	}
 	id := "czp"
-	_, e := d.U2.RPC(d.Ctx, method, []any{Object{"mask": 0x280000, "packageName": d.Package, "resourceId": d.Package + ":id/" + d.nativeResource(id)}, true, 20})
+	value, e := d.U2.RPC(d.Ctx, method, []any{Object{"mask": 0x280000, "packageName": d.Package, "resourceId": d.Package + ":id/" + d.nativeResource(id)}, true, 20})
 	if e != nil {
-		return e
+		return false, e
 	}
-	return sleep(d.Ctx, 400*time.Millisecond)
+	moved, ok := value.(bool)
+	if !ok {
+		return false, errf("原生列表未返回滚动结果")
+	}
+	return moved, sleep(d.Ctx, 400*time.Millisecond)
 }
 func (d *DeviceIO) openNativeRow(title, page string) error {
 	s, e := d.observeNative()
@@ -462,21 +543,18 @@ func (d *DeviceIO) openNativeRow(title, page string) error {
 		return errf("完整会话名称不唯一")
 	}
 	d.OwnedTitle = title
-	if err := appendEvent(d.Folder, "native_target", "已核对原生会话行", Object{"title": title, "point": rows[0].Point, "width": d.Width, "height": d.Height, "scope": d.Scope}); err != nil {
-		return err
-	}
 	if err := d.click(rows[0].Point); err != nil {
 		return err
 	}
 	return d.waitNativeChat(title)
 }
 func (d *DeviceIO) waitNativeChat(title string) error {
-	for n := 0; n < 8; n++ {
+	for {
 		s, err := d.observeNative()
 		if err != nil {
 			return err
 		}
-		if s.Page == "chat" {
+		if s.Page == "chat" && s.Title != "" {
 			if !sameTitle(s.Title, title) {
 				return errf("打开的会话与完整目标名称不一致")
 			}
@@ -486,7 +564,6 @@ func (d *DeviceIO) waitNativeChat(title string) error {
 			return err
 		}
 	}
-	return errf("原生聊天页面未就绪，未继续输入或发送")
 }
 func (d *DeviceIO) openNativeNamed(title, scope string) error {
 	if _, e := d.nativeHome(); e != nil {
@@ -499,10 +576,7 @@ func (d *DeviceIO) openNativeNamed(title, scope string) error {
 	if e = d.tapNode(button); e != nil {
 		return e
 	}
-	if _, e = d.tree(); e != nil {
-		return e
-	}
-	input, e := d.node("lba")
+	input, e := d.waitNativeNode("lba")
 	if e != nil {
 		return e
 	}
@@ -515,16 +589,23 @@ func (d *DeviceIO) openNativeNamed(title, scope string) error {
 	if e != nil || v != true {
 		return errf("原生搜索输入未完成")
 	}
-	_ = sleep(d.Ctx, 650*time.Millisecond)
-	if _, e = d.tree(); e != nil {
-		return e
-	}
-	input, e = d.node("lba")
-	if e != nil || input.Text() != title {
-		return errf("搜索内容核对失败")
+	for {
+		input, e = d.waitNativeNode("lba")
+		if e != nil {
+			return e
+		}
+		if input.Text() == title {
+			break
+		}
+		if value, err := nodeDraft(input); err != nil || value != "" {
+			return errf("搜索内容已变化，未覆盖")
+		}
+		if e = sleep(d.Ctx, 500*time.Millisecond); e != nil {
+			return e
+		}
 	}
 	if scope == "groups" {
-		tabs, e := d.node("n5o")
+		tabs, e := d.waitNativeNode("n5o")
 		if e != nil {
 			return e
 		}
@@ -544,7 +625,7 @@ func (d *DeviceIO) openNativeNamed(title, scope string) error {
 			return e
 		}
 	}
-	container, e := d.node("km_")
+	container, e := d.waitNativeNode("km_")
 	if e != nil {
 		return e
 	}
@@ -584,7 +665,7 @@ func (d *DeviceIO) openNativeNamed(title, scope string) error {
 				return d.openNativeRow(title, s.Page)
 			}
 		}
-		if e = d.scrollNative(false); e != nil {
+		if _, e = d.scrollNative(false); e != nil {
 			return e
 		}
 	}
@@ -601,14 +682,11 @@ func (d *DeviceIO) nicknameNative() (string, error) {
 	if e = d.tapNode(button); e != nil {
 		return "", e
 	}
-	if _, e = d.tree(); e != nil {
-		return "", e
-	}
-	header, e := d.node("og3")
+	name, e := d.waitNativeNode("mi0")
 	if e != nil {
 		return "", e
 	}
-	name, e := d.node("mi0")
+	header, e := d.node("og3")
 	if e != nil || !name.Under(header) || name.Text() == "" {
 		return "", errf("个人信息姓名无法确认")
 	}
@@ -634,13 +712,27 @@ func (d *DeviceIO) editNative(expected, text, title string) error {
 		return errf("原生输入未完成")
 	}
 	d.OwnedTitle, d.OwnedText = title, text
-	_ = sleep(d.Ctx, 300*time.Millisecond)
-	after, e := d.observeNative()
-	if e != nil {
-		return e
+	for {
+		if e = sleep(d.Ctx, 300*time.Millisecond); e != nil {
+			return e
+		}
+		after, err := d.observeNative()
+		if err != nil {
+			return err
+		}
+		if after.Page == "other" || after.Title == "" {
+			continue
+		}
+		if !sameTitle(after.Title, title) {
+			return errf("原生输入后会话已变化，未继续操作")
+		}
+		if after.Editor != nil {
+			if after.Editor.Text == text {
+				return nil
+			}
+			if after.Editor.Text != expected {
+				return errf("原生草稿已变化，未继续操作")
+			}
+		}
 	}
-	if !sameTitle(after.Title, title) || after.Editor == nil || after.Editor.Text != text {
-		return errf("原生输入回读不一致，未重试")
-	}
-	return nil
 }

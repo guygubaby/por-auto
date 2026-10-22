@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import type { HttpRequest, Pair } from '@/types';
+import { httpResponseCode } from '@/types';
 import { invoke } from '@/lib/bridge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -292,34 +293,29 @@ export function HttpEditor({
         <FormField label="读取返回内容">
           <SelectControl
             label="读取返回内容"
-            value={value.response.type}
+            value={
+              value.response.type === 'json'
+                ? 'javascript'
+                : value.response.type
+            }
             options={[
               { value: 'text', label: '全文文字' },
-              { value: 'json', label: '提取 JSON 字段' },
+              { value: 'javascript', label: 'JavaScript 处理' },
               ...(ignore ? [{ value: 'ignore', label: '忽略正文' }] : []),
             ]}
             onValueChange={(type) =>
               set({
                 response:
-                  type === 'json'
-                    ? { type: 'json', pointer: '/data/message' }
+                  type === 'javascript'
+                    ? {
+                        type: 'javascript',
+                        code: httpResponseCode(value.response),
+                      }
                     : { type: type as 'text' | 'ignore' },
               })
             }
           />
         </FormField>
-        {value.response.type === 'json' && (
-          <FormField label="字段路径">
-            <Input
-              value={value.response.pointer}
-              placeholder="/data/message"
-              spellCheck={false}
-              onChange={(e) =>
-                set({ response: { type: 'json', pointer: e.target.value } })
-              }
-            />
-          </FormField>
-        )}
         <FormField label="请求超时（秒）">
           <Input
             type="number"
@@ -329,6 +325,34 @@ export function HttpEditor({
             onChange={(e) => set({ timeoutSeconds: Number(e.target.value) })}
           />
         </FormField>
+        {(value.response.type === 'javascript' ||
+          value.response.type === 'json') && (
+          <div className="sm:col-span-2">
+            <FormField
+              label="JavaScript 代码"
+              hint="res 是接口返回的数据：JSON 自动解析，其他内容为字符串。使用 return 返回最终字符串，最多 4000 字节。"
+            >
+              <Textarea
+                name="response-code"
+                rows={5}
+                className="min-h-32 resize-y font-mono"
+                value={httpResponseCode(value.response)}
+                placeholder="return res.data.message;"
+                required
+                maxLength={10000}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                onChange={(e) =>
+                  set({
+                    response: { type: 'javascript', code: e.target.value },
+                  })
+                }
+              />
+            </FormField>
+          </div>
+        )}
       </div>
       <ErrorMessage error={test.error} />
       <div className="flex items-center justify-between">
@@ -358,10 +382,10 @@ export function HttpEditor({
         </div>
       )}
       <details className="text-muted-foreground text-xs">
-        <summary>用样本检查解析路径</summary>
+        <summary>用样本测试返回内容处理</summary>
         <Textarea
           className="mt-2"
-          aria-label="JSON 解析样本"
+          aria-label="返回内容样本"
           placeholder={'{"data":{"message":"Ok"}}'}
           onBlur={(e) => {
             if (!e.target.value) return;

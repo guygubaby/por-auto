@@ -28,16 +28,16 @@
       "id": "wecom-suite",
       "name": "企业微信手机工作流",
       "description": "在手机独立运行打开企业微信、读取姓名、首个会话和批量消息。消息支持手动或 HTTP，群聊和单聊按类型自动处理全部，包含前后置请求和定时任务。通过原生控件执行，无需图像模型；默认预演，不点击发送。",
-      "version": "1.0.13",
-      "versionCode": 59,
-      "minLauncher": 1,
+      "version": "1.0.16",
+      "versionCode": 62,
+      "minLauncher": 2,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
           "path": "core.js",
-          "size": 32461,
-          "sha256": "a1a3a56c244d9b5ac42f89ed746678b30dd265314f9d18867c38ac544cae1107"
+          "size": 33366,
+          "sha256": "03b9d20e5f4b4f8dce4975253122768c07489bd0191085da2d9d58849471d7a0"
         },
         {
           "path": "definitions.js",
@@ -46,18 +46,18 @@
         },
         {
           "path": "io.js",
-          "size": 8060,
-          "sha256": "14aef5e5d58929ccbd4682598e4d0272b6ff804785bb7c6e189a86fb0f4e35cc"
+          "size": 8842,
+          "sha256": "567f674ee4cc7dcce35c32b9c5d9d445d8037d8b2b45432f80303407d2bb2552"
         },
         {
           "path": "main.js",
-          "size": 13850,
-          "sha256": "0c4a5db382bc30ac32133e5e5c9ddfaab27c3df0059383f6f3dd0e376ed5eb29"
+          "size": 13979,
+          "sha256": "7c71914aee84733ebdf36eb62cedb1d1916b1dd1c0af29ae33f6a83d33711c18"
         },
         {
           "path": "request.js",
-          "size": 6912,
-          "sha256": "6d0bafe79d287c6929e8f8fd194b785bc2de0cffaff9914bdbc8de2127cc5249"
+          "size": 8280,
+          "sha256": "2a163a1255c880fa7aeb76297a0cb9bd2783a2e238cbc0e3d9d031e581cff3a4"
         },
         {
           "path": "wecom-ids.js",
@@ -66,8 +66,8 @@
         },
         {
           "path": "wecom.js",
-          "size": 16778,
-          "sha256": "0cdd9c5287c1cd1f239931b7ce523ade424c25e96c0df9ea232db15308bd993a"
+          "size": 18969,
+          "sha256": "6eb8c2f9be92c69cbd2e566e9c97e90a711289c09bcda4180d38d92cb55e3d80"
         }
       ]
     }

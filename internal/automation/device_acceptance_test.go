@@ -115,26 +115,13 @@ func TestLiveWeComFormalGroupSend(t *testing.T) {
 		t.Fatalf("send observation was not confirmed: %v", outputs)
 	}
 	folder := str(result["folder"])
-	targetValue, err := loadFile(filepath.Join(folder, "targets.json"), []any{})
+	details, err := e.RunDetails(str(result["id"]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets := list(targetValue)
-	if len(targets) == 0 {
-		t.Fatal("group send produced no targets")
-	}
-	for _, value := range targets {
-		target := object(value)
-		if target["status"] != "sent" {
-			t.Fatalf("group %q was not confirmed sent: %v", target["title"], target)
-		}
-	}
-	events, err := os.ReadFile(filepath.Join(folder, "events.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(events), `"status":"send_requested"`) || !strings.Contains(string(events), `"status":"send_observed"`) {
-		t.Fatal("formal send evidence is incomplete")
+	targets := list(details["targets"])
+	if len(targets) != 0 || outputs["completed_count"] != outputs["target_count"] || outputs["target_count"] == "0" {
+		t.Fatal("group send did not complete every target")
 	}
 	report := Object{"ok": true, "message": message, "targets": targets, "folder": folder, "messageStatus": outputs["message_status"]}
 	if err = atomicJSON(e.path("wecom-formal-send.json"), report); err != nil {

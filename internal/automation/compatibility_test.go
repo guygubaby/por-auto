@@ -123,7 +123,7 @@ sample.state.outgoing.push({text:'Ok',pending:false,failed:false,position:7});
 var observe=sample.io.observe;
 sample.io.observe=function(){var screen=observe();if(sample.state.sendClicks){screen.outgoing=screen.outgoing.slice(-1);screen.outgoing[0].position=8}return screen};
 sample.runner.run(workflow,{dryRun:false,input:{message:{type:'manual',text:'Ok'},recipients:{groups:true,direct:false},intervalMs:1000}});
-if(sample.state.sendClicks!==1||sample.state.records[sample.state.records.length-1].targets[0].status!=='sent')throw Error('identical visible message misclassified');`)
+if(sample.state.sendClicks!==1||sample.state.records[sample.state.records.length-1].outputs.completed_count!=='1')throw Error('identical visible message misclassified');`)
 				if err != nil {
 					t.Fatal(err)
 				}

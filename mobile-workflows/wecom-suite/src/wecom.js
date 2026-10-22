@@ -42,11 +42,24 @@ function create(por, config) {
   var ids = require('./wecom-ids.js').profile(String(context.getPackageManager().getPackageInfo(PACKAGE, 0).versionName)), canonical = {};
   Object.keys(ids).forEach(function (id) { canonical[ids[id]] = id; });
   function foreground() {
-    io.requireAccessibility();
-    if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
-    if (io.focusedPackage() !== PACKAGE) fail('企业微信不在前台，已停止');
+    for (;;) {
+      io.requireAccessibility();
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
+      var focused = io.focusedPackage();
+      if (focused === PACKAGE) return;
+      if (focused) fail('企业微信不在前台，已停止');
+      sleep(500);
+    }
   }
+  function stale() { var error = new Error('页面控件尚未就绪'); error.code = 'STALE_TREE'; throw error; }
   function tree() {
+    for (;;) {
+      try { return readTree(); }
+      catch (error) { if (error.code !== 'STALE_TREE') throw error; }
+      sleep(500);
+    }
+  }
+  function readTree() {
     foreground(); var kept = [], nodes = [], windows = auto.service.getWindows();
     try {
       for (var w = 0; w < windows.size(); w++) {
@@ -57,7 +70,7 @@ function create(por, config) {
         for (var n = 0; n < queue.length; n++) {
           if (n >= 4000) fail('企业微信控件数量超过读取限制');
           var raw = queue[n].native, b = new android.graphics.Rect();
-          if (!raw.refresh()) fail('页面控件已经失效，请重新运行');
+          if (!raw.refresh()) stale();
           raw.getBoundsInScreen(b);
           var item = raw.getCollectionItemInfo();
           nodes.push({ index: n, parent: queue[n].parent, id: (function () { var id = String(raw.getViewIdResourceName() || '').replace(PACKAGE + ':id/', ''); return canonical[id] || id; })(),
@@ -69,12 +82,20 @@ function create(por, config) {
         }
         break;
       }
-      if (!nodes.length) fail('企业微信未返回原生页面控件');
+      if (nodes.some(function (n) { return n.id === 'ncq' && n.text === '安全保护中'; })) fail('企业微信要求账号本人完成验证');
+      if (!nodes.length || !nodes.some(function (n) { return n.id || n.text || n.editable; })) stale();
       return nodes;
     } finally { kept.forEach(function (n) { try { n.recycle(); } catch (_) {} }); }
   }
   function valid(n) { return n.visible && n.enabled && n.bounds[2] > n.bounds[0] && n.bounds[3] > n.bounds[1]; }
   function one(nodes, id) { var found = nodes.filter(function (n) { return n.id === id && valid(n); }); if (found.length !== 1) fail('无法唯一确认企业微信控件：' + id); return found[0]; }
+  function waitTree(ready) {
+    for (;;) { var nodes = tree(); if (ready(nodes)) return nodes; sleep(500); }
+  }
+  function waitNode(id) {
+    var nodes = waitTree(function (nodes) { return nodes.some(function (n) { return n.id === id && valid(n); }); });
+    return one(nodes, id);
+  }
   function under(nodes, node, parent) { for (var n = node; n && n.parent >= 0; n = nodes[n.parent]) if (n.parent === parent.index) return true; return false; }
   function point(n) { return [Math.max(1, Math.min(999, Math.floor((n.bounds[0] + n.bounds[2]) * 500 / device.width))), Math.max(1, Math.min(999, Math.floor((n.bounds[1] + n.bounds[3]) * 500 / device.height)))]; }
   function rawAction(id, action, value) {
@@ -121,6 +142,7 @@ function create(por, config) {
   function observe() {
     var nodes = tree(), titles = nodes.filter(function (n) { return n.id === 'ncq' && valid(n); });
     var s = { certain: true, page: 'other', title: titles.length === 1 ? titles[0].text : '', items: [], editor: null, outgoing: [], listEmpty: false };
+    if (s.title === '安全保护中') fail('企业微信要求账号本人完成验证');
     var editors = nodes.filter(function (n) { return n.id === 'i_6' && valid(n); });
     if (editors.length === 1) {
       var editor = editors[0]; if (editor.hint === null || !editor.editable || editor.password) fail('无法核对真实草稿与提示语');
@@ -133,16 +155,21 @@ function create(por, config) {
     last = { screen: s, nodes: nodes }; return s;
   }
   function home() {
-    for (var n = 0; n < 8; n++) {
+    for (var depth = 0; depth < 8;) {
       scope = 'conversations'; var s = observe();
       if (s.page === 'home') return s;
       var tabs = last.nodes.filter(function (n) { return n.id === 'hrr' && n.bounds[1] > device.height * .75 && valid(n); });
       var first = tabs.filter(function (n) { return n.text === '消息'; });
+      var ready = s.page !== 'other' || !!s.title || first.length === 1 || last.nodes.some(function (n) { return ['og3', 'mi0', 'lba', 'km_'].indexOf(n.id) >= 0; });
+      if (!ready) { sleep(500); continue; }
+      var before = JSON.stringify(last.nodes);
+      depth++;
       if (first.length === 1 && ['消息','邮件','文档','工作台','通讯录'].every(function (name) { return tabs.some(function (n) { return n.text === name; }); })) {
         if (!click(Math.floor((first[0].bounds[0] + first[0].bounds[2]) / 2), Math.floor((first[0].bounds[1] + first[0].bounds[3]) / 2))) fail('无法切回消息导航');
       } else if (!back()) fail('返回消息首页失败');
-      for (var wait = 0; wait < 4; wait++) {
-        sleep(350); var next = observe(); if (next.page === 'home') return next;
+      for (;;) {
+        sleep(500); var next = observe(); if (next.page === 'home') return next;
+        if (JSON.stringify(last.nodes) !== before) break;
       }
     }
     fail('未能返回企业微信消息首页');
@@ -150,11 +177,11 @@ function create(por, config) {
   function recipientPage(value) {
     home(); var desired = value === 'groups' ? '群聊' : '全部';
     if (one(tree(), 'fg8').text !== desired) {
-      clickId('fg9'); var options = tree().filter(function (n) { return valid(n) && n.text === desired; });
+      clickId('fg9'); var options = waitTree(function (nodes) { return nodes.some(function (n) { return valid(n) && n.text === desired; }); }).filter(function (n) { return valid(n) && n.text === desired; });
       if (options.length !== 1) fail('会话分类不唯一');
       var p = options[0].bounds; if (!click(Math.floor((p[0]+p[2])/2), Math.floor((p[1]+p[3])/2))) fail('会话分类点击失败'); sleep(650);
     }
-    if (one(tree(), 'fg8').text !== desired) fail('会话分类未完成切换');
+    waitTree(function (nodes) { var filters = nodes.filter(function (n) { return valid(n) && n.id === 'fg8'; }); if (filters.length > 1) fail('会话分类不唯一'); return filters.length === 1 && filters[0].text === desired; });
     scope = value; return observe();
   }
   function scroll(up) {
@@ -163,8 +190,7 @@ function create(por, config) {
     var moved = rawAction('czp', up ? ACTION.ACTION_SCROLL_BACKWARD : ACTION.ACTION_SCROLL_FORWARD); sleep(400); return moved;
   }
   function waitChat(title) {
-    for (var n=0;n<8;n++) { var s=observe(); if(s.page==='chat') { if(!require('./core.js').sameTitle(s.title,title))fail('打开的会话与完整名称不一致'); return; } sleep(750); }
-    fail('原生聊天页面未就绪，未继续输入或发送');
+    for (;;) { var s=observe(); if(s.page==='chat' && s.title) { if(!require('./core.js').sameTitle(s.title,title))fail('打开的会话与完整名称不一致'); return; } sleep(750); }
   }
   function openRow(title, page, p) {
     var s = observe(); if (s.page !== page) fail('会话列表已变化');
@@ -176,17 +202,16 @@ function create(por, config) {
   }
   function openNamed(title, value) {
     home(); clickId('ndh');
-    var input = one(tree(),'lba');
+    var input = waitNode('lba');
     if (input.hint !== true && input.text) fail('搜索框已有内容，未覆盖');
     if (!rawAction('lba',ACTION.ACTION_SET_TEXT,{ expected: '', text: title })) fail('原生搜索输入未完成');
-    sleep(650); var nodes = tree();
-    if (one(nodes,'lba').text !== title) fail('搜索内容未能核对');
+    var nodes = waitTree(function (nodes) { var input = one(nodes, 'lba'); if (input.text === title) return true; if (input.hint !== true && input.text) fail('搜索内容已变化，未覆盖'); return false; });
     if (value === 'groups') {
-      var tabs = one(nodes,'n5o'), groups = nodes.filter(function(n){return n.parent===tabs.index&&valid(n)&&n.text==='群聊';});
+      waitNode('n5o'); nodes = tree(); var tabs = one(nodes,'n5o'), groups = nodes.filter(function(n){return n.parent===tabs.index&&valid(n)&&n.text==='群聊';});
       if(groups.length!==1)fail('无法唯一确认搜索的群聊分类');
       var b=groups[0].bounds;if(!click(Math.floor((b[0]+b[2])/2),Math.floor((b[1]+b[3])/2)))fail('搜索分类未完成');sleep(650);nodes=tree();
     }
-    var resultList=one(nodes,'km_'),found=nodes.filter(function(n){return n.id==='mid1Txt'&&n.text===title&&valid(n)&&under(nodes,n,resultList);});
+    waitNode('km_'); nodes = tree(); var resultList=one(nodes,'km_'),found=nodes.filter(function(n){return n.id==='mid1Txt'&&n.text===title&&valid(n)&&under(nodes,n,resultList);});
     if(found.length>1)fail('搜索到同名会话，未点击');
     if(found.length===1){
       var row=found[0];while(!row.clickable&&row.parent>=0&&row.parent!==resultList.index)row=nodes[row.parent];
@@ -215,7 +240,21 @@ function create(por, config) {
     else if (!ownedAwake) { device.keepScreenDim(); ownedAwake = true; }
   };
   io.finish = function () { if (ownedAwake) { ownedAwake = false; device.cancelKeepingAwake(); } };
-  io.launch = function () { if (!app.launchPackage(PACKAGE)) fail('请先安装并登录企业微信'); sleep(1000); };
+  io.launch = function () {
+    io.requireAccessibility();
+    var actions = android.accessibilityservice.AccessibilityService;
+    if (android.os.Build.VERSION.SDK_INT >= 31) auto.service.performGlobalAction(actions.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE);
+    else back();
+    if (!auto.service.performGlobalAction(actions.GLOBAL_ACTION_HOME)) fail('无法返回手机桌面');
+    sleep(500);
+    if (!app.launchPackage(PACKAGE)) fail('请先安装并登录企业微信');
+    for (;;) {
+      io.requireAccessibility();
+      if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
+      if (io.focusedPackage() === PACKAGE) return;
+      sleep(500);
+    }
+  };
   io.observe = observe; io.home = home; io.recipientPage = recipientPage; io.openNamed = openNamed; io.openRow = openRow; io.scroll = scroll;
   io.ensureEditor = function(title) { var s=observe();if(s.page!=='chat'||!sameChat(title,s.title)||!s.editor)fail('没有确认目标会话的原生文字输入框');return s; };
   io.back = function () { foreground(); if (!back()) fail('返回操作未完成'); };
@@ -233,7 +272,7 @@ function create(por, config) {
     commit=null;
     if(!click(Math.floor((b[0]+b[2])/2),Math.floor((b[1]+b[3])/2)))fail('发送结果不明，未重试');
   };
-  io.nickname = function () { home(); clickId('ndw'); var nodes=tree(), header=one(nodes,'og3'), name=one(nodes,'mi0'); if(!under(nodes,name,header)||!name.text.trim())fail('未确认个人信息中的姓名');return name.text; };
+  io.nickname = function () { home(); clickId('ndw'); waitNode('mi0'); var nodes=tree(), header=one(nodes,'og3'), name=one(nodes,'mi0'); if(!under(nodes,name,header)||!name.text.trim())fail('未确认个人信息中的姓名');return name.text; };
   return io;
 }
 module.exports = { create: create, homeReady: homeReady, exactDraft: exactDraft, outgoing: outgoing };

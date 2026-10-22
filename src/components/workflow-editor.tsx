@@ -150,7 +150,7 @@ export function WorkflowEditor({
             <div>
               <p className="text-sm font-medium">原生无障碍执行</p>
               <p className="text-muted-foreground mt-1 text-xs leading-5">
-                直接读取企业微信的系统控件，不截图、不上传画面；控件不完整时安全停止。
+                直接读取企业微信的系统控件；手机卡顿时等待页面就绪，可手动停止。
               </p>
             </div>
           </div>
