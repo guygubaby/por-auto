@@ -29,7 +29,8 @@ function screen(value) {
         || !(i.value === null || typeof i.value === 'string' && i.value.length <= 4000)) invalidObservation('页面控件格式无效，未点击');
   });
   if (value.editor !== null && (!object(value.editor) || !point(value.editor.point) || !(value.editor.text === null || typeof value.editor.text === 'string' && value.editor.text.length <= 4000))) invalidObservation('输入框无法完整读取，未输入');
-  value.outgoing.forEach(function (b) { if (!object(b) || typeof b.text !== 'string' || b.text.length > 4000 || typeof b.pending !== 'boolean' || typeof b.failed !== 'boolean') invalidObservation('消息状态格式无效'); });
+  value.outgoing.forEach(function (b) { if (!object(b) || typeof b.text !== 'string' || b.text.length > 4000 || typeof b.pending !== 'boolean' || typeof b.failed !== 'boolean'
+      || b.position != null && !integer(b.position, 0, 2147483647)) invalidObservation('消息状态格式无效'); });
   if (value.page === 'other' && value.title === '安全保护中') fail('企业微信要求账号本人完成验证，当前流程已停止，未重试发送');
   return value;
 }
@@ -360,12 +361,24 @@ function create(io) {
     var button = unique(s, 'send');
     if (button.text !== '发送' || button.point[0] <= s.editor.point[0] || Math.abs(button.point[1] - s.editor.point[1]) > 120) fail('不能确认发送按钮');
     var count = s.outgoing.filter(function (b) { return b.text === text && !b.pending && !b.failed; }).length;
+    var position = s.outgoing.length && s.outgoing.every(function (b) { return typeof b.position === 'number'; })
+      ? Math.max.apply(null, s.outgoing.map(function (b) { return b.position; })) : null;
     io.beforeCommit(s.editor.point, title, text);
     intent(); io.log('send_requested', { title: title }); click(button.point);
-    var after = targetChecked(observe(), title);
-    if (!after.editor || after.editor.text !== '' || after.outgoing.some(function (b) { return b.failed || b.pending; })
-        || after.outgoing.filter(function (b) { return b.text === text && !b.failed && !b.pending; }).length <= count) fail('发送结果不明，未自动重发');
-    io.log('send_observed', { title: title });
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (attempt) io.sleep(800);
+      var after = targetChecked(observe(), title), latest = after.outgoing[after.outgoing.length - 1];
+      // Absolute list positions stay comparable when an older identical bubble scrolls off screen.
+      var fresh = position !== null && latest && typeof latest.position === 'number'
+        ? latest.position > position
+        : after.outgoing.filter(function (b) { return b.text === text && !b.failed && !b.pending; }).length > count;
+      if (after.editor && after.editor.text === '' && latest && latest.text === text && fresh
+          && !after.outgoing.some(function (b) { return b.failed || b.pending; })) {
+        io.log('send_observed', { title: title }); return;
+      }
+      if (attempt < 3) io.log('send_readback_wait', { title: title });
+    }
+    fail('发送结果不明，未自动重发');
   }
   function tap(selector, skipIf, recover) {
     function matches(s, select) {

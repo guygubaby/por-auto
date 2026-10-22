@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Info,
   ArrowUpRight,
+  Loader2,
 } from 'lucide-react';
 import {
   AnimatePresence,
@@ -26,7 +27,13 @@ import {
 } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { useTheme } from '@/hooks/use-theme';
-import { activeQuery, environmentQuery, queryClient } from '@/lib/query';
+import {
+  activeQuery,
+  environmentQuery,
+  queryClient,
+  schedulesQuery,
+} from '@/lib/query';
+import { notifyRun } from '@/lib/run-feedback';
 import { desktop, subscribe } from '@/lib/bridge';
 import { useUI, type Theme } from '@/lib/ui-store';
 import type { Progress } from '@/types';
@@ -51,7 +58,11 @@ export function Layout() {
     environment.data?.devices.filter((d) => d.state === 'device') ?? [];
   const manualRunning = useUI((s) => s.running);
   const active = useQuery(activeQuery);
-  const running = manualRunning || Object.keys(active.data ?? {}).length > 0;
+  const schedules = useQuery(schedulesQuery);
+  const running =
+    manualRunning ||
+    Object.keys(active.data ?? {}).length > 0 ||
+    !!schedules.data?.runningIds.length;
   useEffect(() => {
     const stop = [
       subscribe('app-update-status', (value) =>
@@ -64,8 +75,10 @@ export function Layout() {
         void queryClient.invalidateQueries({ queryKey: ['runs'] });
         void queryClient.invalidateQueries({ queryKey: ['active-runs'] });
       }),
-      subscribe('schedules-changed', () => {
+      subscribe('schedules-changed', (value) => {
         void queryClient.invalidateQueries({ queryKey: ['schedules'] });
+        void queryClient.invalidateQueries({ queryKey: ['active-runs'] });
+        notifyRun(value);
       }),
     ];
     return () => stop.forEach((f) => f());
@@ -164,7 +177,12 @@ export function Layout() {
               </div>
               <div className="flex items-center gap-4">
                 <span className="text-muted-foreground hidden items-center gap-1.5 text-xs sm:flex">
-                  {devices.length ? (
+                  {running ? (
+                    <Loader2
+                      aria-hidden
+                      className="text-primary size-3.5 motion-safe:animate-spin"
+                    />
+                  ) : devices.length ? (
                     <CheckCircle2 className="text-primary size-3.5" />
                   ) : (
                     <Cable className="size-3.5" />

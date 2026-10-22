@@ -47,9 +47,12 @@ import {
   PageTitle,
   Panel,
   Status,
+  RunProgress,
   WorkflowGlyph,
 } from '@/components/common';
 import { WorkflowEditor } from '@/components/workflow-editor';
+import { ActiveDeviceProgress } from '@/components/active-device-progress';
+import { Details } from './history';
 export const Route = createFileRoute('/')({
   loader: () =>
     Promise.all([
@@ -67,6 +70,7 @@ function Workspace() {
   const ui = useUI();
   const busy = ui.running || Object.keys(active.data ?? {}).length > 0;
   const [editing, setEditing] = useState<Installed | null>(null);
+  const [detailsID, setDetailsID] = useState('');
   const installed = store.data?.installed ?? [];
   const selected = installed.find((i) => i.key === ui.workflow) ?? installed[0];
   const needsRecipientSetup =
@@ -235,8 +239,10 @@ function Workspace() {
             {history.data?.length ? (
               <div className="divide-y">
                 {history.data.slice(0, 4).map((item) => (
-                  <div
-                    className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                  <button
+                    type="button"
+                    onClick={() => setDetailsID(item.id)}
+                    className="hover:bg-muted/50 focus-visible:ring-ring flex w-full items-center gap-3 rounded-lg py-3 text-left outline-none first:pt-0 last:pb-0 focus-visible:ring-2"
                     key={item.id}
                   >
                     <div className="bg-secondary grid size-8 shrink-0 place-items-center rounded-lg">
@@ -251,7 +257,11 @@ function Workspace() {
                       </p>
                     </div>
                     <Status value={item.status} />
-                  </div>
+                    <ChevronRight
+                      aria-hidden
+                      className="text-muted-foreground size-4 shrink-0"
+                    />
+                  </button>
                 ))}
               </div>
             ) : (
@@ -440,23 +450,9 @@ function Workspace() {
           </Link>
         </div>
       </div>
-      {!ui.running && Object.keys(active.data ?? {}).length > 0 && (
+      {Object.keys(active.data ?? {}).length > 0 && (
         <div className="mt-6">
-          <Panel title="正在执行的设备任务">
-            {Object.entries(active.data ?? {}).map(([serial, progress]) => (
-              <p
-                className="flex justify-between gap-4 py-2 text-sm"
-                key={serial}
-              >
-                <span>
-                  {devices.find((d) => d.serial === serial)?.model ?? serial}
-                </span>
-                <span className="text-muted-foreground">
-                  {progress.message}
-                </span>
-              </p>
-            ))}
-          </Panel>
+          <ActiveDeviceProgress scheduledOnly={ui.running} />
         </div>
       )}
       {ui.runs.length > 0 && (
@@ -482,16 +478,7 @@ function Workspace() {
                     <p className="text-muted-foreground truncate text-xs">
                       {run.error ?? run.progress?.message ?? '等待执行'}
                     </p>
-                    {run.progress && run.status === 'running' && (
-                      <div className="bg-secondary mt-2 h-1 overflow-hidden rounded-full">
-                        <div
-                          className="bg-primary h-full transition-[width]"
-                          style={{
-                            width: `${Math.min(100, (run.progress.step / Math.max(1, run.progress.total)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    )}
+                    <RunProgress run={run} />
                   </div>
                   <Status value={run.status} />
                 </div>
@@ -507,6 +494,7 @@ function Workspace() {
           onClose={() => setEditing(null)}
         />
       )}
+      {detailsID && <Details id={detailsID} onClose={() => setDetailsID('')} />}
     </>
   );
 }

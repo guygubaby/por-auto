@@ -230,13 +230,27 @@ func (d *DeviceIO) nativeScreen(nodes []*Node) (Screen, error) {
 			}
 			s.Page = "chat"
 			s.Editor = &Editor{Point: editor.Point(d.Width, d.Height), Text: text}
+			var bubbles []*Node
 			for _, n := range nodes {
 				if n.Text() == "发送" && n.Bounds[0] >= editor.Bounds[2] && n.Bounds[1] < editor.Bounds[3] && n.Bounds[3] > editor.Bounds[1] {
 					s.Items = append(s.Items, Item{Role: "send", Text: "发送", Point: n.Point(d.Width, d.Height), Complete: true})
 				}
 				if n.ID() == "i_d" && d.nativeOutgoing(n) {
-					s.Outgoing = append(s.Outgoing, Object{"text": n.Text(), "pending": false, "failed": false})
+					bubbles = append(bubbles, n)
 				}
+			}
+			sort.SliceStable(bubbles, func(i, j int) bool { return bubbles[i].Bounds[1] < bubbles[j].Bounds[1] })
+			for _, body := range bubbles {
+				bubble := Object{"text": body.Text(), "pending": false, "failed": false}
+				for parent := body; parent != nil; parent = parent.Parent {
+					if raw, ok := parent.Attr["collection-row"]; ok {
+						if position, err := strconv.Atoi(raw); err == nil && position >= 0 {
+							bubble["position"] = position
+						}
+						break
+					}
+				}
+				s.Outgoing = append(s.Outgoing, bubble)
 			}
 			return s, nil
 		}

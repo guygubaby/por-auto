@@ -1,5 +1,6 @@
 import { invoke } from './bridge';
 import { useUI } from './ui-store';
+import { notifyRun } from './run-feedback';
 import type { Device, RunResult } from '@/types';
 export async function runBatch(
   devices: Device[],
@@ -18,6 +19,12 @@ export async function runBatch(
       result: null,
       error: null,
     })),
+  });
+  notifyRun({
+    id: 'manual-batch',
+    name: '本轮任务',
+    status: 'running',
+    message: `正在处理 ${devices.length} 台设备，完成后会自动提示。`,
   });
   let cursor = 0;
   try {
@@ -60,6 +67,7 @@ export async function runBatch(
       }),
     );
   } finally {
+    const stopped = useUI.getState().stopping;
     useUI.setState((s) => ({
       running: false,
       stopping: false,
@@ -69,6 +77,18 @@ export async function runBatch(
           : r,
       ),
     }));
+    const runs = useUI.getState().runs;
+    const completed = runs.filter((run) => run.status === 'completed').length;
+    const failed = runs.length - completed;
+    let status = 'completed';
+    if (stopped) status = 'stopped';
+    else if (failed > 0) status = completed > 0 ? 'partial' : 'failed';
+    notifyRun({
+      id: 'manual-batch',
+      name: '本轮任务',
+      status,
+      message: `共 ${runs.length} 台，成功 ${completed} 台，${stopped ? '失败或未执行' : '失败'} ${failed} 台。`,
+    });
   }
 }
 export async function stopBatch() {

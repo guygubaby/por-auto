@@ -18,12 +18,15 @@ import {
   EmptyState,
   ErrorMessage,
   Status,
+  RunProgress,
 } from '@/components/common';
 import { Button } from '@/components/ui/button';
+import { ActiveDeviceProgress } from '@/components/active-device-progress';
 import { Details } from './history';
 export const Route = createFileRoute('/results')({ component: Results });
 function Results() {
   const batch = useUI((s) => s.runs);
+  const running = useUI((s) => s.running);
   const saved = useQuery(runsQuery);
   const [id, setId] = useState('');
   return (
@@ -45,6 +48,9 @@ function Results() {
         }
       />
       <ErrorMessage error={saved.error} />
+      <div className="mb-6">
+        <ActiveDeviceProgress scheduledOnly={running} />
+      </div>
       {batch.length > 0 && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2">
           {batch.map((run) => (
@@ -61,6 +67,7 @@ function Results() {
               <p className="text-muted-foreground text-sm">
                 {run.progress?.message}
               </p>
+              <RunProgress run={run} />
               {run.result && (
                 <>
                   <dl className="mt-4 space-y-2">

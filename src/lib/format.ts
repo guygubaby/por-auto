@@ -16,6 +16,8 @@ export function formatTime(
 }
 export const statusLabels: Record<string, string> = {
   completed: '已完成',
+  partial: '部分完成',
+  stopped: '已停止',
   failed: '失败',
   running: '运行中',
   pending: '待处理',

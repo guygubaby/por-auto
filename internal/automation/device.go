@@ -338,8 +338,10 @@ func (d *DeviceIO) Bind(r *Runtime) *goja.Object {
 		if len(a) > 1 {
 			details = a[1].Export()
 		}
-		if status == "step_started" {
+		if status == "step_completed" {
 			d.Step++
+		}
+		if status == "step_started" || status == "step_completed" {
 			d.report(str(object(details)["name"]))
 		}
 		return nil, appendEvent(d.Folder, status, status, details)

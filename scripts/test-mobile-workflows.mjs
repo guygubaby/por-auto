@@ -331,14 +331,28 @@ test('native outgoing messages require the unique right avatar in their own row'
     [[177, 704, 921, 921], [936, 1000, 1050, 1114], 0],
   ]) {
     const nodes = [
-      { id: 'message_row', parent: -1, bounds: [0, 704, 1080, 921] },
+      { id: 'message_row', parent: -1, position: 17, bounds: [0, 704, 1080, 921] },
       { id: 'i_d', parent: 0, bounds: body, text: 'Hello' },
       { id: 'message_avatar', parent: 0, bounds: avatar },
     ].map(node => ({ ...node, visible: true, enabled: true }));
     assert.equal(wecom.outgoing(nodes, 1080).length, expected);
+    if (expected) assert.equal(wecom.outgoing(nodes, 1080)[0].position, 17);
     assert.equal(wecom.outgoing(nodes.slice(0, 2), 1080).length, 0);
     assert.equal(wecom.outgoing([...nodes, nodes[2]], 1080).length, 0);
   }
+});
+
+test('outgoing bubbles follow visible row order rather than tree traversal depth', () => {
+  const wecom = loadMobile(wecomPath + 'wecom.js');
+  const nodes = [
+    { id: 'message_row', parent: -1, position: 18, bounds: [0, 1000, 1080, 1200] },
+    { id: 'i_d', parent: 0, bounds: [177, 1000, 921, 1200], text: 'New' },
+    { id: 'message_avatar', parent: 0, bounds: [936, 1000, 1050, 1114] },
+    { id: 'message_row', parent: -1, position: 17, bounds: [0, 704, 1080, 921] },
+    { id: 'i_d', parent: 3, bounds: [177, 704, 921, 921], text: 'Old' },
+    { id: 'message_avatar', parent: 3, bounds: [936, 704, 1050, 818] },
+  ].map(node => ({ ...node, visible: true, enabled: true }));
+  assert.deepEqual(wecom.outgoing(nodes, 1080).map(b => [b.text, b.position]), [['Old', 17], ['New', 18]]);
 });
 
 test('real published entry loads its IO factory and decrypts legacy WeCom credentials', () => {
@@ -454,6 +468,86 @@ test('large group inventory is frozen once and never searched recipient by recip
   assert.equal(state.clears, 1000);
   assert.equal(state.sendClicks, 0);
   assert.equal(state.records.at(-1).targets.length, 1000);
+});
+
+test('sent readback survives an identical older message leaving the viewport', () => {
+  const { io, state, runner } = fixture({ groups: ['群甲'] });
+  const text = 'Ok';
+  state.outgoing.push({ text, failed: false, pending: false, position: 7 });
+  const observe = io.observe;
+  io.observe = () => {
+    const screen = observe();
+    if (state.sendClicks) screen.outgoing = [{ ...screen.outgoing.at(-1), position: 8 }];
+    return screen;
+  };
+  runner.run(workflow('wecom-broadcast'), {
+    dryRun: false,
+    input: input({ type: 'manual', text }),
+  });
+  assert.equal(state.sendClicks, 1);
+  assert.equal(state.records.at(-1).targets[0].status, 'sent');
+});
+
+test('clearing the draft cannot acknowledge an unchanged old matching message', () => {
+  for (const [position, revealOlder] of [[undefined, false], [7, false], [7, true]]) {
+    const { io, state, runner } = fixture({ groups: ['群甲'] });
+    const previous = { text: 'Ok', failed: false, pending: false, position };
+    state.outgoing.push(previous);
+    const observe = io.observe;
+    io.observe = () => {
+      const screen = observe();
+      if (state.sendClicks) screen.outgoing = revealOlder ? [{ ...previous, position: 6 }, previous] : [previous];
+      return screen;
+    };
+    assert.throws(() => runner.run(workflow('wecom-broadcast'), { dryRun: false, input: input() }), /发送结果不明/);
+    assert.equal(state.sendClicks, 1);
+    assert.equal(state.records.at(-1).targets[0].status, 'uncertain');
+  }
+});
+
+test('a delayed outgoing bubble is re-read without clicking send again', () => {
+  const { io, state, runner } = fixture({ groups: ['群甲'] });
+  let readbacks = 0;
+  const observe = io.observe;
+  io.observe = () => {
+    const screen = observe();
+    if (state.sendClicks && ++readbacks < 3) screen.outgoing = [];
+    return screen;
+  };
+  runner.run(workflow('wecom-broadcast'), { dryRun: false, input: input() });
+  assert.equal(readbacks, 3);
+  assert.equal(state.sendClicks, 1);
+  assert.equal(state.records.at(-1).targets[0].status, 'sent');
+});
+
+test('sent readback still requires an empty editor and the latest confirmed outgoing body', () => {
+  const matching = { text: 'Ok', failed: false, pending: false };
+  for (const after of [
+    { outgoing: [] },
+    { outgoing: [matching], draft: 'Ok' },
+    { outgoing: [matching, { ...matching, text: 'Other' }] },
+    { outgoing: [{ ...matching, pending: true }] },
+    { outgoing: [{ ...matching, failed: true }] },
+    { outgoing: [matching], title: '其他群' },
+  ]) {
+    const { io, state, runner } = fixture({ groups: ['群甲', '群乙'] });
+    const observe = io.observe;
+    io.observe = () => {
+      const screen = observe();
+      if (state.sendClicks) {
+        screen.outgoing = after.outgoing;
+        if (after.draft) screen.editor.text = after.draft;
+        if (after.title) screen.title = after.title;
+      }
+      return screen;
+    };
+    assert.throws(() => runner.run(workflow('wecom-broadcast'), {
+      dryRun: false,
+      input: input(),
+    }), /发送结果不明|目标会话/);
+    assert.equal(state.sendClicks, 1);
+    assert.deepEqual(state.records.at(-1).targets.map(target => target.status), ['uncertain', 'skipped']);
+  }
 });
 
 test('existing drafts are preserved and uncertain sends are never retried', () => {

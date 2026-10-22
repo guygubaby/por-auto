@@ -60,6 +60,26 @@ func TestWecomSentBubbleUsesMessageTextNotTimestamp(t *testing.T) {
 	}
 }
 
+func TestNativeOutgoingKeepsAbsoluteListPositionAndScreenOrder(t *testing.T) {
+	nodes, err := parseXML(`<hierarchy><node package="com.tencent.wework" bounds="[0,0][1080,2280]">
+<node package="com.tencent.wework" resource-id="ncq" text="Peer" bounds="[400,100][650,160]"/>
+<node package="com.tencent.wework" resource-id="i_6" class="android.widget.EditText" showing-hint-text="true" bounds="[150,1800][800,1900]"/>
+<node package="com.tencent.wework" collection-row="43" bounds="[0,1000][1080,1200]"><node package="com.tencent.wework" resource-id="message_row" bounds="[0,1000][1080,1200]"><node package="com.tencent.wework" resource-id="i_d" text="New" bounds="[177,1000][921,1200]"/><node package="com.tencent.wework" resource-id="message_avatar" bounds="[936,1000][1050,1114]"/></node></node>
+<node package="com.tencent.wework" collection-row="42" bounds="[0,704][1080,921]"><node package="com.tencent.wework" resource-id="message_row" bounds="[0,704][1080,921]"><node package="com.tencent.wework" resource-id="i_d" text="Old" bounds="[177,704][921,921]"/><node package="com.tencent.wework" resource-id="message_avatar" bounds="[936,704][1050,818]"/></node></node>
+</node></hierarchy>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &DeviceIO{Package: "com.tencent.wework", Width: 1080, Height: 2280, Nodes: nodes}
+	screen, err := d.nativeScreen(nodes)
+	if err != nil || len(screen.Outgoing) != 2 {
+		t.Fatalf("outgoing readback failed: %v %v", screen.Outgoing, err)
+	}
+	if object(screen.Outgoing[0])["text"] != "Old" || num(object(screen.Outgoing[0])["position"]) != 42 || object(screen.Outgoing[1])["text"] != "New" || num(object(screen.Outgoing[1])["position"]) != 43 {
+		t.Fatalf("message order or absolute list position was lost: %v", screen.Outgoing)
+	}
+}
+
 func TestNativeOutgoingRequiresUniqueRightAvatarInSameMessageRow(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, avatar string

@@ -10,8 +10,13 @@ import {
 import { desktop } from './bridge';
 export const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: false, staleTime: 15_000, refetchOnWindowFocus: false },
-    mutations: { retry: false },
+    queries: {
+      networkMode: 'always',
+      retry: false,
+      staleTime: 15_000,
+      refetchOnWindowFocus: false,
+    },
+    mutations: { networkMode: 'always', retry: false },
   },
 });
 export const storeQuery = queryOptions({
@@ -22,6 +27,9 @@ export const environmentQuery = queryOptions({
   queryKey: ['environment'],
   queryFn: async () =>
     environmentSchema.parse(await invoke('check_environment')),
+  networkMode: 'always',
+  refetchInterval: desktop ? 2000 : false,
+  refetchIntervalInBackground: true,
 });
 export const runsQuery = queryOptions({
   queryKey: ['runs'],
@@ -30,6 +38,7 @@ export const runsQuery = queryOptions({
 export const schedulesQuery = queryOptions({
   queryKey: ['schedules'],
   queryFn: () => invoke<ScheduleView>('list_schedules'),
+  networkMode: 'always',
 });
 export const activeQuery = queryOptions({
   queryKey: ['active-runs'],
@@ -38,5 +47,7 @@ export const activeQuery = queryOptions({
       'active_runs',
     ),
   enabled: desktop,
+  networkMode: 'always',
   refetchInterval: 1500,
+  refetchIntervalInBackground: true,
 });

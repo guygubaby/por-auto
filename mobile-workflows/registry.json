@@ -28,16 +28,16 @@
       "id": "wecom-suite",
       "name": "企业微信手机工作流",
       "description": "在手机独立运行打开企业微信、读取姓名、首个会话和批量消息。消息支持手动或 HTTP，群聊和单聊按类型自动处理全部，包含前后置请求和定时任务。通过原生控件执行，无需图像模型；默认预演，不点击发送。",
-      "version": "1.0.12",
-      "versionCode": 58,
+      "version": "1.0.13",
+      "versionCode": 59,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
           "path": "core.js",
-          "size": 31671,
-          "sha256": "0862e67c50589bb9594fee78f5de6f893b7a7e29324a29784f3e787b2ad3beae"
+          "size": 32461,
+          "sha256": "a1a3a56c244d9b5ac42f89ed746678b30dd265314f9d18867c38ac544cae1107"
         },
         {
           "path": "definitions.js",
@@ -66,8 +66,8 @@
         },
         {
           "path": "wecom.js",
-          "size": 16390,
-          "sha256": "2300a383bf632cecb3eb365808d34fc22ee43ecedbab67b6946c5c5686825ba9"
+          "size": 16778,
+          "sha256": "0cdd9c5287c1cd1f239931b7ce523ade424c25e96c0df9ea232db15308bd993a"
         }
       ]
     }

@@ -254,6 +254,7 @@ func (d *Desktop) checkUpdates(ctx context.Context) (any, error) {
 	return d.statusCopy(), nil
 }
 func Run() {
+	configureUpdateProxy()
 	d := New()
 	mygo.BindAs("Desktop", d)
 	if !mygo.App.RequestSingleInstanceLock() {

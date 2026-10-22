@@ -289,8 +289,8 @@ func TestLiveMinuteCronAndHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	finished := make(chan struct{}, 4)
-	e := NewEngine(filepath.Join(os.Getenv("POR_DEVICE_ROOT"), "cron-"+uuid.NewString()), func(name string, _ any) {
-		if name == "schedules-changed" {
+	e := NewEngine(filepath.Join(os.Getenv("POR_DEVICE_ROOT"), "cron-"+uuid.NewString()), func(name string, value any) {
+		if name == "schedules-changed" && object(value)["status"] != "running" {
 			select {
 			case finished <- struct{}{}:
 			default:

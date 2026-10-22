@@ -28,7 +28,13 @@ function outgoing(nodes, width) {
     return b[2] > b[0] && b[3] > b[1] && b[0] >= r[0] && b[2] <= r[2] && b[1] >= r[1] && b[3] <= r[3]
       && a[0] > width / 2 && a[0] >= b[2] && a[2] > a[0] && a[3] > a[1] && a[2] <= width
       && a[0] >= r[0] && a[2] <= r[2] && a[1] >= r[1] && a[3] <= r[3] && a[1] < b[3] && a[3] > b[1];
-  }).map(function (body) { return { text: body.text, pending: false, failed: false }; });
+  }).sort(function (a, b) { return a.bounds[1] - b.bounds[1]; }).map(function (body) {
+    var position = null;
+    for (var node = body; node; node = nodes[node.parent]) {
+      if (typeof node.position === 'number' && node.position >= 0) { position = node.position; break; }
+    }
+    return { text: body.text, pending: false, failed: false, position: position };
+  });
 }
 function create(por, config) {
   var io = require('./io.js')(por), ownedAwake = false;
@@ -53,7 +59,9 @@ function create(por, config) {
           var raw = queue[n].native, b = new android.graphics.Rect();
           if (!raw.refresh()) fail('页面控件已经失效，请重新运行');
           raw.getBoundsInScreen(b);
+          var item = raw.getCollectionItemInfo();
           nodes.push({ index: n, parent: queue[n].parent, id: (function () { var id = String(raw.getViewIdResourceName() || '').replace(PACKAGE + ':id/', ''); return canonical[id] || id; })(),
+            position: item ? item.getRowIndex() : null,
             text: String(raw.getText() || ''), hint: android.os.Build.VERSION.SDK_INT >= 26 ? !!raw.isShowingHintText() : null,
             bounds: [b.left, b.top, b.right, b.bottom], visible: !!raw.isVisibleToUser(), enabled: !!raw.isEnabled(),
             editable: !!raw.isEditable(), password: !!raw.isPassword(), clickable: !!raw.isClickable(), scrollable: !!raw.isScrollable() });

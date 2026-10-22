@@ -118,11 +118,11 @@ func TestUninstalledWorkflowCannotRunThroughFrozenSchedule(t *testing.T) {
 }
 
 func TestScheduledOfflineDevicesKeepBatchAndIndividualHistory(t *testing.T) {
-	finished := make(chan struct{}, 1)
-	e := NewEngine(t.TempDir(), func(name string, _ any) {
+	feedback := make(chan Object, 2)
+	e := NewEngine(t.TempDir(), func(name string, value any) {
 		if name == "schedules-changed" {
 			select {
-			case finished <- struct{}{}:
+			case feedback <- object(value):
 			default:
 			}
 		}
@@ -148,10 +148,21 @@ func TestScheduledOfflineDevicesKeepBatchAndIndividualHistory(t *testing.T) {
 	if err = e.scheduler.RunNow(str(task["id"])); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-finished:
-	case <-time.After(3 * time.Second):
-		t.Fatal("offline task did not release scheduler")
+	var batchID any
+	for _, status := range []string{"running", "failed"} {
+		select {
+		case event := <-feedback:
+			if event["status"] != status || event["name"] != "离线回归" || str(event["message"]) == "" {
+				t.Fatalf("incorrect run feedback: %v", event)
+			}
+			if status == "running" {
+				batchID = event["id"]
+			} else if batchID == nil || event["id"] != batchID {
+				t.Fatal("completion did not update the running batch notification")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("offline task did not report %s", status)
+		}
 	}
 	history, err := e.ListRuns()
 	if err != nil || len(history) != 5 {

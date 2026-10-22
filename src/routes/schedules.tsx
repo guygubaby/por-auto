@@ -23,7 +23,13 @@ import {
 } from '@/lib/query';
 import { invoke, desktop } from '@/lib/bridge';
 import { formatTime } from '@/lib/format';
-import { snapshotChanged } from '@/lib/schedule';
+import {
+  describeSchedule,
+  readScheduleTiming,
+  scheduleCron,
+  scheduleTimingSchema,
+  snapshotChanged,
+} from '@/lib/schedule';
 import type { Schedule, ScheduleView } from '@/types';
 import { hasRecipientCategories, isBatch, recipientSummary } from '@/types';
 import {
@@ -39,6 +45,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScheduleTimingFields } from '@/components/schedule-timing';
+import { ActiveDeviceProgress } from '@/components/active-device-progress';
 import {
   Dialog,
   DialogContent,
@@ -57,10 +65,7 @@ export const Route = createFileRoute('/schedules')({
 });
 const scheduleSchema = z.object({
   name: z.string().trim().min(1, '请输入任务名称').max(100),
-  cron: z
-    .string()
-    .trim()
-    .regex(/^\S+(?:\s+\S+){4}$/, 'Cron 须为标准五段表达式'),
+  timing: scheduleTimingSchema,
   timezone: z.string().trim().min(1, '请输入时区'),
   enabled: z.boolean(),
   workflowKey: z.string().min(1, '请选择工作流'),
@@ -125,15 +130,22 @@ function Schedules() {
                     {t.enabled
                       ? `下次 ${formatTime(t.nextRunAt, t.timezone)}`
                       : '已暂停'}
-                    <span className="ml-2">
-                      {t.cron} · {t.timezone}
-                    </span>
+                    <span className="ml-2">{describeSchedule(t.cron)}</span>
                   </p>
-                  {t.lastStatus && (
+                  {(t.lastStatus ||
+                    schedules.data?.runningIds.includes(t.id)) && (
                     <div className="mt-2 flex items-center gap-2">
-                      <Status value={t.lastStatus} />
+                      <Status
+                        value={
+                          schedules.data?.runningIds.includes(t.id)
+                            ? 'running'
+                            : t.lastStatus!
+                        }
+                      />
                       <span className="text-muted-foreground text-xs">
-                        {t.lastMessage}
+                        {schedules.data?.runningIds.includes(t.id)
+                          ? '正在执行，完成后会自动提示。'
+                          : t.lastMessage}
                       </span>
                     </div>
                   )}
@@ -215,6 +227,9 @@ function Schedules() {
           />
         )}
       </Panel>
+      <div className="mt-6">
+        <ActiveDeviceProgress />
+      </div>
       {editing !== undefined && (
         <ScheduleEditor item={editing} onClose={() => setEditing(undefined)} />
       )}
@@ -253,7 +268,7 @@ function Schedules() {
     </>
   );
 }
-function ScheduleEditor({
+export function ScheduleEditor({
   item,
   onClose,
 }: {
@@ -266,7 +281,7 @@ function ScheduleEditor({
     resolver: zodResolver(scheduleSchema),
     defaultValues: {
       name: item?.name ?? '',
-      cron: item?.cron ?? '0 9 * * *',
+      timing: readScheduleTiming(item?.cron ?? '0 9 * * *'),
       timezone: item?.timezone ?? 'Asia/Shanghai',
       enabled: item?.enabled ?? true,
       workflowKey: item?.snapshot.key ?? store.data?.installed[0]?.key ?? '',
@@ -275,11 +290,12 @@ function ScheduleEditor({
     },
   });
   const v = form.watch();
-  const [times, setTimes] = useState<number[]>([]);
+  const timing = scheduleTimingSchema.safeParse(v.timing);
+  const cron = timing.success ? scheduleCron(timing.data) : '';
   const save = useMutation({
-    mutationFn: (value: ScheduleForm) =>
+    mutationFn: ({ timing, ...value }: ScheduleForm) =>
       invoke<ScheduleView>('save_schedule', {
-        input: { ...value, id: item?.id ?? null },
+        input: { ...value, cron: scheduleCron(timing), id: item?.id ?? null },
       }),
     onSuccess: (r) => {
       queryClient.setQueryData(['schedules'], r);
@@ -287,10 +303,13 @@ function ScheduleEditor({
       onClose();
     },
   });
-  const preview = useMutation({
-    mutationFn: () =>
-      invoke<number[]>('preview_cron', { cron: v.cron, timezone: v.timezone }),
-    onSuccess: setTimes,
+  const preview = useQuery({
+    queryKey: ['schedule-preview', cron, v.timezone],
+    queryFn: () =>
+      invoke<number[]>('preview_cron', { cron, timezone: v.timezone }),
+    enabled: desktop && !!cron,
+    networkMode: 'always',
+    staleTime: 0,
   });
   const installed = store.data?.installed ?? [];
   const chosen = installed.find((i) => i.key === v.workflowKey);
@@ -319,7 +338,7 @@ function ScheduleEditor({
         if (!v && !save.isPending) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{item ? '编辑定时任务' : '新建定时任务'}</DialogTitle>
           <DialogDescription>
@@ -334,6 +353,9 @@ function ScheduleEditor({
             error={
               save.error ??
               preview.error ??
+              (!timing.success && form.formState.errors.timing
+                ? timing.error.issues[0]?.message
+                : undefined) ??
               Object.values(form.formState.errors)[0]?.message
             }
           />
@@ -416,37 +438,28 @@ function ScheduleEditor({
               </p>
             )}
           </fieldset>
-          <FormField
-            label="Cron 表达式"
-            hint="五段：分 时 日 月 周。每天 9 点：0 9 * * *"
-          >
-            <Input
-              {...form.register('cron', { required: true })}
-              spellCheck={false}
-            />
-          </FormField>
-          <FormField label="时区">
-            <Input
-              {...form.register('timezone', { required: true })}
-              spellCheck={false}
-            />
-          </FormField>
-          <BusyButton
-            type="button"
-            variant="outline"
-            size="sm"
-            busy={preview.isPending}
-            disabled={!desktop}
-            onClick={() => preview.mutate()}
-          >
-            预览下三次执行时间
-          </BusyButton>
-          {times.length > 0 && (
-            <ul className="bg-secondary space-y-1 rounded-lg p-3 text-xs">
-              {times.map((t) => (
-                <li key={t}>{formatTime(t, v.timezone)}</li>
-              ))}
-            </ul>
+          <Controller
+            control={form.control}
+            name="timing"
+            render={({ field }) => <ScheduleTimingFields {...field} />}
+          />
+          {desktop && (
+            <section
+              aria-label="接下来三次执行时间"
+              aria-live="polite"
+              className="bg-secondary space-y-2 rounded-lg p-3 text-xs"
+            >
+              <p className="font-medium">接下来三次执行时间</p>
+              {preview.isFetching ? (
+                <p className="text-muted-foreground">正在计算…</p>
+              ) : (
+                <ul className="space-y-1 tabular-nums">
+                  {preview.data?.map((t) => (
+                    <li key={t}>{formatTime(t, v.timezone)}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
           )}
           <label className="flex items-center justify-between text-sm">
             <span>启用任务</span>

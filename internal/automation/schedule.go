@@ -413,6 +413,10 @@ func (s *Scheduler) recordSkip(t Object) {
 func (s *Scheduler) execute(t Object, trigger string) {
 	serials := list(t["serials"])
 	_, folder, setupErr := s.engine.newRunFolder()
+	feedbackID := str(t["id"]) + "-" + filepath.Base(folder)
+	if s.engine.Emit != nil {
+		s.engine.Emit("schedules-changed", Object{"id": feedbackID, "name": t["name"], "status": "running", "message": fmt.Sprintf("正在处理 %d 台设备，完成后会自动提示。", len(serials))})
+	}
 	w := object(object(t["snapshot"])["workflow"])
 	meta := Object{"id": filepath.Base(folder), "workflow_name": w["name"], "workflow_version": w["version"], "serial": fmt.Sprintf("%d 台设备", len(serials)), "timestamp": now(), "status": "running", "schedule_id": t["id"], "schedule_name": t["name"], "trigger": trigger, "dry_run": object(t["snapshot"])["dryRun"] == true}
 	if setupErr == nil {
@@ -493,7 +497,7 @@ func (s *Scheduler) execute(t Object, trigger string) {
 	_ = s.persist()
 	s.mu.Unlock()
 	if s.engine.Emit != nil {
-		s.engine.Emit("schedules-changed", nil)
+		s.engine.Emit("schedules-changed", Object{"id": feedbackID, "name": t["name"], "status": status, "message": message})
 		s.engine.Emit("history-changed", nil)
 	}
 }
