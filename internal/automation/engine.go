@@ -23,7 +23,7 @@ import (
 )
 
 const OfficialURL = "https://github.com/guygubaby/por-auto"
-const Version = "0.4.3"
+const Version = "0.4.4"
 
 type Engine struct {
 	Root        string

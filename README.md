@@ -1,6 +1,6 @@
 # por-auto
 
-MyGo + 系统 WebView + Go 的 Android 自动化桌面工具。前端使用 React 19、TypeScript、Vite 8、Tailwind CSS v4、shadcn/ui、TanStack Router / Query、Zustand、React Hook Form + Zod 与 Motion。界面使用 shadcn preset `b6sUj32EV`（Radix Maia / Olive、本地 Noto Sans 字体、Lucide 图标和反色半透明菜单）；支持浅色、深色、实时跟随系统，主题选择会保存在本机。历史记录、对象结果和日志分页显示，日志按需展开。当前提供手机环境初始化、ADB 设备发现、多手机工作流执行、原生无障碍页面读取、GitHub 工作流商店和本地 Cron 定时任务。
+MyGo + 系统 WebView + Go 的 Android 自动化桌面工具。前端使用 React 19、TypeScript、Vite 8、Tailwind CSS v4、shadcn/ui、TanStack Router / Query、Zustand、React Hook Form + Zod 与 Motion。界面使用 shadcn preset `bd1gALyt`（Radix Vega / Zinc、本地 Geist 字体、Lucide 图标和反色半透明菜单），按钮启用指针光标；支持浅色、深色、实时跟随系统，主题选择会保存在本机。历史记录、对象结果和日志分页显示，日志按需展开。当前提供手机环境初始化、ADB 设备发现、多手机工作流执行、原生无障碍页面读取、GitHub 工作流商店和本地 Cron 定时任务。
 
 **不需要后端服务。** 桌面 Go 代码直接连接手机及 GitHub；所有配置、已安装工作流和执行结果保存在用户本地。客户无须安装 Python、Node.js、Go、Git 或 Android Studio。
 

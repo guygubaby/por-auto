@@ -8,14 +8,10 @@ test('all pages, configuration and three theme modes work in the browser', async
   await expect(
     page.getByRole('heading', { name: '工作台', exact: true }),
   ).toBeVisible();
-  await expect(page.locator('body')).toHaveCSS(
-    'background-color',
-    'rgb(255, 255, 255)',
-  );
-  await expect(page.locator('aside')).toHaveCSS(
-    'background-color',
-    'rgb(250, 250, 250)',
-  );
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'light');
+  const lightBackground = await page
+    .locator('body')
+    .evaluate((element) => getComputedStyle(element).backgroundColor);
   await page.getByRole('link', { name: '跳到主要内容' }).press('Enter');
   await expect(page.getByRole('main')).toBeFocused();
   await expect(
@@ -31,17 +27,10 @@ test('all pages, configuration and three theme modes work in the browser', async
   await page.getByRole('combobox', { name: '主题', exact: true }).click();
   await page.getByRole('option', { name: '深色', exact: true }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
-  await expect(page.locator('div.group.relative').nth(1)).toHaveCSS(
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
+  await expect(page.locator('body')).not.toHaveCSS(
     'background-color',
-    'rgb(20, 20, 20)',
-  );
-  await expect(page.locator('body')).toHaveCSS(
-    'background-color',
-    'rgb(10, 10, 10)',
-  );
-  await expect(page.locator('aside')).toHaveCSS(
-    'background-color',
-    'rgb(16, 16, 16)',
+    lightBackground,
   );
   await page.screenshot({
     path: 'work/ui-verification-cache/workspace-dark.png',

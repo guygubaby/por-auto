@@ -129,7 +129,7 @@ export function Layout() {
                   className={cn(
                     'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
                     path === to
-                      ? 'text-primary font-medium'
+                      ? 'text-primary-foreground font-medium'
                       : 'text-muted-foreground hover:bg-card/65 hover:text-foreground',
                   )}
                 >
@@ -137,7 +137,7 @@ export function Layout() {
                     <motion.span
                       aria-hidden
                       layoutId={`${animationScope}-navigation`}
-                      className="bg-card absolute inset-0 rounded-lg shadow-xs"
+                      className="bg-primary absolute inset-0 rounded-lg shadow-xs"
                       transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
                     />
                   )}
@@ -162,7 +162,7 @@ export function Layout() {
                 </p>
               </div>
               <p className="text-muted-foreground text-xs">
-                Por Auto <span className="float-right">v0.4.3</span>
+                Por Auto <span className="float-right">v0.4.4</span>
               </p>
             </div>
           </aside>
