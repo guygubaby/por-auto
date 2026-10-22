@@ -25,7 +25,7 @@ const preview: Store = {
     reference: 'main',
     commit: 'bundled',
     workflow,
-    dryRun: true,
+    dryRun: false,
     executionMode: 'native',
     input: isBatch(workflow)
       ? {

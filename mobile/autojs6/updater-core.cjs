@@ -1,6 +1,6 @@
 'use strict';
 
-var LAUNCHER_VERSION = 2;
+var LAUNCHER_VERSION = 3;
 var MAX_FILE = 2 * 1024 * 1024;
 var MAX_PACKAGE = 10 * 1024 * 1024;
 var MAX_CATALOG = 256 * 1024;

@@ -31,7 +31,12 @@ import {
   snapshotChanged,
 } from '@/lib/schedule';
 import type { Schedule, ScheduleView } from '@/types';
-import { hasRecipientCategories, isBatch, recipientSummary } from '@/types';
+import {
+  hasRecipientCategories,
+  isBatch,
+  isSender,
+  recipientSummary,
+} from '@/types';
 import {
   PageTitle,
   Panel,
@@ -121,7 +126,10 @@ function Schedules() {
                   <h2 className="text-sm font-semibold">{t.name}</h2>
                   <p className="text-muted-foreground mt-1 text-xs">
                     {t.snapshot.workflow.name} · {t.serials.length} 台设备 ·{' '}
-                    {t.snapshot.dryRun ? '预演' : '正式执行'}
+                    {t.snapshot.dryRun !== false &&
+                    isSender(t.snapshot.workflow)
+                      ? '需重新保存配置'
+                      : '正式执行'}
                     {isBatch(t.snapshot.workflow) &&
                       ` · ${recipientSummary(t.snapshot.input)}`}
                   </p>
@@ -383,7 +391,7 @@ export function ScheduleEditor({
                     : installed
                   ).map((i) => ({
                     value: i.key,
-                    label: `${i.workflow.name} · ${i.dryRun ? '预演' : '正式执行'}`,
+                    label: i.workflow.name,
                   }))}
                 />
               )}

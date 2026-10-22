@@ -79,8 +79,7 @@ function Workspace() {
     !hasRecipientCategories(selected.input);
   let runLabel = '开始运行';
   if (needsRecipientSetup) runLabel = '设置消息与接收类型';
-  else if (selected && isSender(selected.workflow) && !selected.dryRun)
-    runLabel = '开始正式运行';
+  else if (selected && isSender(selected.workflow)) runLabel = '开始正式运行';
   const devices = environment.data?.devices ?? [];
   const ready = devices.filter((d) => d.state === 'device');
   const selectedDevices = ready.filter((d) => ui.serials.includes(d.serial));
@@ -181,11 +180,7 @@ function Workspace() {
                         <span>{item.workflow.steps.length} 个步骤</span>
                         <span className="bg-border size-0.5 rounded-full" />
                         <span>
-                          {isSender(item.workflow)
-                            ? item.dryRun
-                              ? '预演模式'
-                              : '正式发送'
-                            : '只读操作'}
+                          {isSender(item.workflow) ? '正式发送' : '只读操作'}
                         </span>
                       </div>
                     </button>
@@ -432,9 +427,7 @@ function Workspace() {
             )}
             <p className="text-muted-foreground mt-3 flex items-center justify-center gap-1.5 text-xs">
               <ShieldCheck className="size-3.5" />
-              {selected?.dryRun
-                ? '预演会核对并清理本轮草稿'
-                : '已有草稿始终受到保护'}
+              已有草稿始终受到保护
             </p>
           </div>
           <Link

@@ -36,7 +36,7 @@ function pointer(value, path) {
 function responseCode(response) {
   if (response.type === 'javascript') return response.code;
   if (response.type === 'json') return 'return res' + (response.pointer === '' ? [] : response.pointer.slice(1).split('/')).map(function (part) { return '[' + JSON.stringify(part.replace(/~1/g, '/').replace(/~0/g, '~')) + ']'; }).join('') + ';';
-  return 'return res.data.message;';
+  return "return (res || []).map((item) => item.text).join('\\n');";
 }
 function validateResponse(response) {
   if (!object(response) || ['text', 'json', 'javascript', 'ignore'].indexOf(response.type) < 0) fail('响应解析方式无效');
@@ -91,10 +91,12 @@ function execute(spec, context, io, preview) {
   }
   var started = io.now(), response = io.request({ url: spec.url, method: spec.method, query: query, headers: headers, body: body, timeoutSeconds: spec.timeoutSeconds });
   if (!response || typeof response.status !== 'number' || typeof response.body !== 'string' || response.body.length > 524288) fail('HTTP 响应格式无效或超过大小限制');
-  if (response.status < 200 || response.status >= 300) fail('HTTP ' + response.status + '，未自动重试');
+  var httpError = response.status < 200 || response.status >= 300 ? 'HTTP ' + response.status + '，未自动重试' : null;
+  if (httpError && !preview) fail(httpError);
   var result = null, parseError = null;
   try {
-    result = parse(response.body, spec.response, io);
+    if (httpError) parseError = httpError;
+    else result = parse(response.body, spec.response, io);
   } catch (error) {
     if (!preview) throw error;
     parseError = String(error.message || error);

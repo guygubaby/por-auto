@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('recipient categories replace name selection and migrate to rehearsal before scope expands', async ({
+test('recipient categories replace name selection and save formal execution explicitly', async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -82,7 +82,7 @@ test('recipient categories replace name selection and migrate to rehearsal befor
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('switch', { name: '预演模式', exact: true }),
-  ).toBeChecked();
+  ).toHaveCount(0);
   await expect(
     dialog.getByRole('checkbox', { name: /^全部群聊/ }),
   ).toBeChecked();
@@ -112,7 +112,7 @@ test('recipient categories replace name selection and migrate to rehearsal befor
   );
   expect(saved).toHaveLength(1);
   expect(saved[0].input.recipients).toEqual({ groups: true, direct: true });
-  expect(saved[0].dryRun).toBe(true);
+  expect(saved[0].dryRun).toBe(false);
   await page
     .getByRole('button', { name: '配置 企业微信批量发送消息', exact: true })
     .click();

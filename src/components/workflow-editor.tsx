@@ -38,7 +38,6 @@ import { HttpEditor } from './http-editor';
 const configSchema = z.object({
   input: sendInputSchema,
   hooks: hooksSchema,
-  dryRun: z.boolean(),
   executionMode: z.literal('native'),
   secrets: z.object({
     message: z.string(),
@@ -64,7 +63,6 @@ export function WorkflowEditor({
         beforeRun: item.hooks?.beforeRun ?? null,
         afterRun: item.hooks?.afterRun ?? null,
       },
-      dryRun: legacy ? true : (item.dryRun ?? isSender(item.workflow)),
       executionMode: 'native',
       secrets: { message: '', before: '', after: '' },
     },
@@ -78,7 +76,7 @@ export function WorkflowEditor({
         key: item.key,
         input,
         hooks: value.hooks,
-        dryRun: value.dryRun,
+        dryRun: false,
         executionMode: 'native',
         secrets: value.secrets,
       });
@@ -120,24 +118,6 @@ export function WorkflowEditor({
         >
           <ErrorMessage error={save.error} />
           {sender && (
-            <div className="border-primary/20 bg-muted flex items-center gap-3 rounded-lg border p-4">
-              <ShieldCheck className="text-primary size-5 shrink-0" />
-              <div className="flex-1">
-                <label htmlFor="dry-run" className="text-sm font-medium">
-                  预演模式
-                </label>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  输入并回读后清理本轮草稿，保留已有文字。
-                </p>
-              </div>
-              <Switch
-                id="dry-run"
-                checked={v.dryRun}
-                onCheckedChange={(x) => form.setValue('dryRun', x)}
-              />
-            </div>
-          )}
-          {sender && !v.dryRun && (
             <p
               role="alert"
               className="border-warning/30 bg-warning/5 text-warning rounded-lg border p-3 text-sm"
@@ -237,7 +217,7 @@ export function WorkflowEditor({
                 </p>
                 {legacy && (
                   <p role="status" className="text-warning text-xs">
-                    保存后使用新接收类型，默认开启预演；已有定时任务保留原快照。
+                    请确认接收类型，保存后按该范围正式执行。
                   </p>
                 )}
               </fieldset>

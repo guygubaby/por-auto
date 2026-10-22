@@ -18,7 +18,7 @@ test('all pages, configuration and three theme modes work in the browser', async
     page.getByRole('heading', { name: '工作台', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: '开始运行', exact: true }),
+    page.getByRole('button', { name: '开始正式运行', exact: true }),
   ).toBeDisabled();
   await page.screenshot({
     path: 'work/ui-verification-cache/workspace-light.png',
@@ -65,7 +65,7 @@ test('all pages, configuration and three theme modes work in the browser', async
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(
     page.getByRole('switch', { name: '预演模式', exact: true }),
-  ).toBeChecked();
+  ).toHaveCount(0);
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page

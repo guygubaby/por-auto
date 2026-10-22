@@ -35,11 +35,18 @@ it('configures and saves a batch workflow whose ID has no broadcast substring', 
     </QueryClientProvider>,
   );
   expect(screen.getByText('消息与接收对象')).toBeInTheDocument();
+  expect(
+    screen.queryByRole('switch', { name: '预演模式' }),
+  ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
       'configure_workflow',
-      expect.objectContaining({ key: item.key, input: item.input }),
+      expect.objectContaining({
+        key: item.key,
+        input: item.input,
+        dryRun: false,
+      }),
     ),
   );
 });

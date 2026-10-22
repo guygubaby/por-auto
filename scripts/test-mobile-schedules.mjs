@@ -53,6 +53,38 @@ function snapshot(env, payload = script()) {
 }
 const options = { name: '每天预演', cron: '* * * * *', timezone: 'Asia/Shanghai', enabled: true };
 
+test('legacy WeCom test schedules stay paused until explicitly recreated as formal runs', async () => fixture((env, manager) => {
+  let executions = 0;
+  const { scheduler } = setup(env, () => { executions++; return { id: 'fixture', status: 'completed', error: null }; });
+  const payload = script();
+  payload.p.id = 'wecom-suite';
+  payload.bundle.files[0].id = 'wecom-suite';
+  manager.importBundle(payload.bundle);
+  const formal = snapshot(env, payload);
+  formal.execution.dryRun = false;
+  const saved = scheduler.save(options, formal);
+  const planFile = join(env.root, 'schedules.json');
+  const plans = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+  const old = plans.tasks[0];
+  old.dryRun = true;
+  const pinnedFile = join(env.root, 'schedules', old.id, old.revision + '.json');
+  const pinned = JSON.parse(fs.readFileSync(pinnedFile, 'utf8'));
+  pinned.execution.dryRun = true;
+  const text = JSON.stringify(pinned);
+  old.snapshotSha256 = sha(Buffer.from(text));
+  fs.writeFileSync(pinnedFile, text);
+  fs.writeFileSync(planFile, JSON.stringify(plans));
+  scheduler.recover();
+  assert.equal(scheduler.list()[0].enabled, false);
+  assert.equal(scheduler.list()[0].nextAt, null);
+  assert.throws(() => scheduler.enable(saved.id, true), /旧测试任务/);
+  assert.equal(scheduler.runNow(saved.id).status, 'failed');
+  assert.equal(executions, 0);
+  scheduler.save({ ...options, id: saved.id }, formal);
+  assert.equal(scheduler.runNow(saved.id).status, 'completed');
+  assert.equal(executions, 1);
+}));
+
 test('scheduled execution pins code and config while later store updates change the current version', async () => fixture((env, manager) => {
   const { scheduler, advance } = setup(env);
   manager.importBundle(script(1, `module.exports = function (por) {

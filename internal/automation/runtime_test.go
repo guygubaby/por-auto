@@ -311,6 +311,32 @@ func TestHTTPJavaScriptResponse(t *testing.T) {
 	}
 }
 
+func TestHTTPDefaultArrayParserAndErrorPreview(t *testing.T) {
+	r := NewRuntime(context.Background(), NewCredentials())
+	code, err := r.Call("request", "responseCode", Object{"type": "text"})
+	if err != nil || code != `return (res || []).map((item) => item.text).join('\n');` {
+		t.Fatalf("array response default changed: %v %v", code, err)
+	}
+	parser := Object{"type": "javascript", "code": code}
+	value, err := r.Call("request", "parse", `[{"text":"甲"},{"text":"乙"}]`, parser, r.IO())
+	if err != nil || value != "甲\n乙" {
+		t.Fatalf("default parser did not join text with newlines: %v %v", value, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(422)
+		_, _ = w.Write([]byte(`{"error":"参数有误"}`))
+	}))
+	defer server.Close()
+	spec := Object{"url": server.URL, "method": "GET", "query": []any{}, "headers": []any{}, "auth": Object{"type": "none"}, "body": nil, "response": parser, "timeoutSeconds": 5}
+	value, err = r.Call("request", "preview", spec, Object{}, r.IO())
+	if err != nil || object(value)["raw"] != `{"error":"参数有误"}` || !strings.Contains(str(object(value)["parseError"]), "HTTP 422") {
+		t.Fatalf("HTTP error preview lost its body: %v %v", value, err)
+	}
+	if _, err = r.Call("request", "fetch", spec, Object{}, r.IO()); err == nil {
+		t.Fatal("HTTP error response was accepted as a message")
+	}
+}
+
 func TestHTTPJavaScriptPreviewAndSampleUseSameParser(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

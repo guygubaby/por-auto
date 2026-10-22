@@ -118,7 +118,6 @@ module.exports = function (por) {
       if (['POST', 'PUT', 'PATCH'].indexOf(spec.method) >= 0 && body === null) body = Packages.okhttp3.RequestBody.create(jsonType, '');
       builder.method(spec.method, body);
       response = client.newCall(builder.build()).execute();
-      if (response.code() < 200 || response.code() >= 300) return { status: response.code(), body: '' };
       var source = response.body();
       if (source === null || source.contentLength() > 524288) throw new Error('HTTP 响应为空或过大');
       var stream = source.byteStream(), output = new java.io.ByteArrayOutputStream();

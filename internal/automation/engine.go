@@ -316,7 +316,7 @@ func (e *Engine) Store() (Object, error) {
 			}
 		}
 		if !exists && !blocked[key] {
-			installed = append(installed, Object{"key": key, "registryUrl": OfficialURL, "reference": "main", "commit": "bundled", "workflow": w, "executionMode": "native", "dryRun": sends(object(w)), "hooks": Object{}})
+			installed = append(installed, Object{"key": key, "registryUrl": OfficialURL, "reference": "main", "commit": "bundled", "workflow": w, "executionMode": "native", "dryRun": false, "hooks": Object{}})
 		}
 	}
 	store["registries"] = regs
@@ -326,6 +326,7 @@ func (e *Engine) Store() (Object, error) {
 			return nil, err
 		}
 		object(v)["executionMode"] = "native"
+		object(v)["dryRun"] = false
 		e.Credentials.BindConfig(object(v))
 	}
 	return store, nil
@@ -534,10 +535,14 @@ func (e *Engine) Run(ctx context.Context, serial string, snapshot Object, schedu
 	if err := validateWorkflow(w); err != nil {
 		return nil, err
 	}
+	if scheduled && sends(w) && snapshot["dryRun"] != false {
+		return nil, errf("旧测试任务已停用，请重新保存任务配置后执行")
+	}
 	if snapshot["executionMode"] != nil && snapshot["executionMode"] != "native" && snapshot["executionMode"] != "visual" {
 		return nil, errf("执行方式无效")
 	}
 	snapshot = clone(snapshot)
+	snapshot["dryRun"] = false
 	snapshot["executionMode"] = "native"
 	if err := NewRuntime(runCtx, e.Credentials).ValidateConfig(snapshot); err != nil {
 		return nil, err

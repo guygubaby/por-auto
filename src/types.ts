@@ -219,6 +219,8 @@ export interface UpdateStatus {
   total?: number;
   autoCheck: boolean;
 }
+export const defaultResponseCode =
+  "return (res || []).map((item) => item.text).join('\\n');";
 export function defaultRequest(): HttpRequest {
   return {
     url: '',
@@ -227,7 +229,7 @@ export function defaultRequest(): HttpRequest {
     headers: [],
     auth: { type: 'none' },
     body: null,
-    response: { type: 'javascript', code: 'return res.data.message;' },
+    response: { type: 'javascript', code: defaultResponseCode },
     timeoutSeconds: 20,
   };
 }
@@ -238,7 +240,7 @@ export function httpResponseCode(response: HttpRequest['response']): string {
       response.pointer === '' ? [] : response.pointer.slice(1).split('/');
     return `return res${fields.map((field) => `[${JSON.stringify(field.replace(/~1/g, '/').replace(/~0/g, '~'))}]`).join('')};`;
   }
-  return 'return res.data.message;';
+  return defaultResponseCode;
 }
 export function defaultInput(): SendInput {
   return {

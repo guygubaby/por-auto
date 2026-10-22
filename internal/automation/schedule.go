@@ -130,6 +130,9 @@ func (s *Scheduler) runnable(snapshot Object) error {
 	if !supportedWorkflow(object(snapshot["workflow"])) {
 		return errf("微信工作流已移除，任务不能运行")
 	}
+	if sends(object(snapshot["workflow"])) && snapshot["dryRun"] != false {
+		return errf("旧测试任务已停用，请重新保存任务配置后执行")
+	}
 	_, err := s.engine.installed(str(snapshot["key"]))
 	return err
 }
@@ -184,6 +187,7 @@ func (s *Scheduler) Save(input Object) (Object, error) {
 	if id == "" {
 		id = uuid.NewString()
 	}
+	snapshot["dryRun"] = false
 	t := Object{"id": id, "name": name, "enabled": input["enabled"] == true, "cron": input["cron"], "timezone": input["timezone"], "serials": input["serials"], "snapshot": snapshot, "nextRunAt": nil}
 	if t["enabled"] == true {
 		t["nextRunAt"] = times[0]

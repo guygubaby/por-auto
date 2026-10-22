@@ -406,7 +406,7 @@ function HistoryPage() {
                     <td className="py-4 pr-4 font-medium">
                       {r.workflow_name}
                       <p className="text-muted-foreground mt-0.5 text-xs font-normal">
-                        {r.dry_run ? '预演' : '执行'} · v{r.workflow_version}
+                        v{r.workflow_version}
                         {r.schedule_name && ` · ${r.schedule_name}`}
                       </p>
                     </td>

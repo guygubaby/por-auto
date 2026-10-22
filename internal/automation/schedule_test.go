@@ -48,6 +48,58 @@ func TestSchedulePersistenceFailureDoesNotDispatchOrLoseTask(t *testing.T) {
 	}
 }
 
+func TestLegacyTestScheduleIsPausedUntilExplicitSave(t *testing.T) {
+	e := NewEngine(t.TempDir(), nil)
+	store, err := e.Store()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot Object
+	for _, value := range list(store["installed"]) {
+		if sends(object(object(value)["workflow"])) {
+			snapshot = clone(value)
+			break
+		}
+	}
+	if snapshot == nil {
+		t.Fatal("sender workflow missing")
+	}
+	snapshot["dryRun"] = true
+	id := "11111111-1111-4111-8111-111111111111"
+	task := Object{"id": id, "name": "旧测试任务", "enabled": true, "cron": "0 9 * * *", "timezone": "Asia/Shanghai", "serials": []any{"OFFLINE"}, "snapshot": snapshot}
+	if err := atomicJSON(e.path("schedules.json"), Object{"schemaVersion": 1, "tasks": []any{task}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewScheduler(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.scheduler = s
+	defer e.Close()
+	paused := object(list(s.View()["tasks"])[0])
+	if paused["enabled"] != false || paused["nextRunAt"] != nil || object(paused["snapshot"])["dryRun"] != true {
+		t.Fatal("old approved test snapshot was silently turned into live sending")
+	}
+	if err := s.RunNow(id); err == nil {
+		t.Fatal("old test task could execute before it was saved again")
+	}
+	if _, err := e.Run(context.Background(), "OFFLINE", snapshot, true); err == nil {
+		t.Fatal("direct scheduled execution bypassed the old test-task guard")
+	}
+	missingMode := clone(snapshot)
+	delete(missingMode, "dryRun")
+	if err := s.runnable(missingMode); err == nil {
+		t.Fatal("a snapshot without an approved execution mode could become live")
+	}
+	if _, err := e.Run(context.Background(), "OFFLINE", missingMode, true); err == nil {
+		t.Fatal("direct scheduled execution accepted an unapproved legacy mode")
+	}
+	saved, err := s.Save(Object{"id": id, "name": "正式任务", "enabled": false, "cron": "0 9 * * *", "timezone": "Asia/Shanghai", "serials": []any{"OFFLINE"}, "workflowKey": snapshot["key"]})
+	if err != nil || object(saved["snapshot"])["dryRun"] != false {
+		t.Fatalf("explicit save did not adopt formal execution: %v %v", saved, err)
+	}
+}
+
 func TestUninstalledWorkflowCannotRunThroughFrozenSchedule(t *testing.T) {
 	for _, operation := range []string{"enable", "run", "edit", "cron", "restart", "engine"} {
 		t.Run(operation, func(t *testing.T) {

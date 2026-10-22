@@ -29,11 +29,13 @@ function create(io, root, core, cron, execute) {
   function publicTask(task) {
     var value = clone(task); delete value.snapshotSha256; delete value.cacheName; return value;
   }
+  function removedTestTask(task) { return task.scriptId === 'wecom-suite' && task.workflowId === 'wecom-broadcast' && task.dryRun !== false; }
   function save(options, snapshot) {
     if (!object(options) || typeof options.name !== 'string' || !options.name.trim() || options.name.length > 100 || /[\x00-\x1f\x7f]/.test(options.name)
         || typeof options.enabled !== 'boolean' || !object(snapshot) || !object(snapshot.config) || !object(snapshot.execution)
         || !/^[a-zA-Z0-9_-]{1,80}$/.test(snapshot.execution.workflowId || '') || typeof snapshot.execution.dryRun !== 'boolean') throw new Error('定时任务名称、配置或运行方式无效');
     var p = core.catalog({ schemaVersion: 1, workflows: [snapshot.package] }).workflows[0];
+    if (removedTestTask({ scriptId: p.id, workflowId: snapshot.execution.workflowId, dryRun: snapshot.execution.dryRun })) throw new Error('旧测试模式已移除，请使用正式执行配置');
     var source = core.source(snapshot.source), nextAt = cron.next(options.cron, options.timezone, io.now(), io);
     var text = JSON.stringify(snapshot);
     if (io.encode(text).length > 2 * 1024 * 1024) throw new Error('定时任务配置快照超过 2 MiB');
@@ -62,11 +64,13 @@ function create(io, root, core, cron, execute) {
       var current = state(), now = io.now();
       current.tasks.forEach(function (task) {
         if (task.lastRun && task.lastRun.status === 'running') { task.lastRun.status = 'interrupted'; task.lastRun.error = '执行会话已停止，未自动重试'; task.lastRun.finishedAt = now; }
+        if (removedTestTask(task)) { task.enabled = false; task.nextAt = null; }
         if (task.enabled && task.nextAt <= now) { skip(task, 'missed', task.nextAt, now); task.nextAt = next(task, now); }
       }); persist(current);
     });
   }
   function loadSnapshot(task) {
+    if (removedTestTask(task)) throw new Error('旧测试任务已停用，请重新创建定时任务');
     var bytes = io.readBytes(snapshotFile(task));
     if (bytes.length > 2 * 1024 * 1024 || io.sha256(bytes) !== task.snapshotSha256) throw new Error('定时任务快照缺失或完整性校验失败');
     var value = JSON.parse(io.decode(bytes));

@@ -133,8 +133,8 @@ module.exports = {
       "minEngine": 5,
       "id": "wecom-broadcast",
       "name": "企业微信批量发送消息",
-      "version": "1.1.1",
-      "description": "选择全部单聊、全部群聊或两者，按原生列表逐个处理并发送；支持手动或 HTTP 消息、预演、逐会话记录与定时任务。",
+      "version": "1.1.2",
+      "description": "选择全部单聊、全部群聊或两者，按原生列表逐个处理并发送；支持手动或 HTTP 消息、逐会话记录与定时任务。",
       "package": "com.tencent.wework",
       "steps": [
         {

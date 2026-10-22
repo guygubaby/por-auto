@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import type { HttpRequest, Pair } from '@/types';
-import { httpResponseCode } from '@/types';
+import { defaultResponseCode, httpResponseCode } from '@/types';
 import { invoke } from '@/lib/bridge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -122,8 +122,10 @@ export function HttpEditor({
         </FormField>
         <div className="col-span-3">
           <FormField label="请求地址">
-            <Input
-              type="url"
+            <Textarea
+              rows={2}
+              inputMode="url"
+              className="field-sizing-fixed min-h-16 resize-y"
               placeholder="https://example.com/api/message"
               value={value.url}
               spellCheck={false}
@@ -334,10 +336,10 @@ export function HttpEditor({
             >
               <Textarea
                 name="response-code"
-                rows={5}
-                className="min-h-32 resize-y font-mono"
+                rows={2}
+                className="field-sizing-fixed min-h-16 resize-y font-mono"
                 value={httpResponseCode(value.response)}
-                placeholder="return res.data.message;"
+                placeholder={defaultResponseCode}
                 required
                 maxLength={10000}
                 spellCheck={false}
@@ -371,14 +373,31 @@ export function HttpEditor({
         </BusyButton>
       </div>
       {preview && (
-        <div className="bg-card rounded-md border p-3 text-xs">
+        <div className="bg-card space-y-3 rounded-md border p-3 text-xs">
           <p className="mb-2 font-medium">
             HTTP {preview.status} ·{' '}
-            {preview.parseError ? '解析失败' : '解析完成'}
+            {preview.status < 200 || preview.status >= 300
+              ? '请求失败'
+              : preview.parseError
+                ? '解析失败'
+                : '解析完成'}
           </p>
-          <pre className="max-h-48 overflow-auto break-words whitespace-pre-wrap">
-            {preview.parseError ?? preview.message ?? preview.raw}
-          </pre>
+          <FormField label="接口原始返回">
+            <Textarea
+              readOnly
+              rows={8}
+              className="field-sizing-fixed max-h-64 min-h-32 resize-y font-mono text-xs"
+              value={preview.raw}
+            />
+          </FormField>
+          <FormField label="解析结果">
+            <Textarea
+              readOnly
+              rows={3}
+              className="field-sizing-fixed max-h-48 min-h-16 resize-y font-mono text-xs"
+              value={preview.parseError ?? preview.message ?? '已忽略正文'}
+            />
+          </FormField>
         </div>
       )}
       <details className="text-muted-foreground text-xs">

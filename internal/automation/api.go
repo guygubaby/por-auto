@@ -233,7 +233,7 @@ func (e *Engine) changeStore(ctx context.Context, command string, arg Object) (a
 				w := object(v)
 				if w["id"] == arg["id"] {
 					key = storeKey(str(reg["url"]), str(reg["reference"]), str(w["id"]))
-					entry = Object{"key": key, "registryUrl": reg["url"], "reference": reg["reference"], "commit": reg["commit"], "workflow": w, "executionMode": "native", "dryRun": sends(w), "hooks": Object{}}
+					entry = Object{"key": key, "registryUrl": reg["url"], "reference": reg["reference"], "commit": reg["commit"], "workflow": w, "executionMode": "native", "dryRun": false, "hooks": Object{}}
 				}
 			}
 		}
@@ -249,7 +249,7 @@ func (e *Engine) changeStore(ctx context.Context, command string, arg Object) (a
 			if old["key"] != key {
 				out = append(out, old)
 			} else {
-				for _, k := range []string{"input", "hooks", "executionMode", "dryRun"} {
+				for _, k := range []string{"input", "hooks", "executionMode"} {
 					entry[k] = old[k]
 				}
 			}
@@ -289,7 +289,7 @@ func (e *Engine) changeStore(ctx context.Context, command string, arg Object) (a
 			}
 			item["input"] = arg["input"]
 			item["hooks"] = arg["hooks"]
-			item["dryRun"] = arg["dryRun"] == true
+			item["dryRun"] = false
 			item["executionMode"] = "native"
 			secrets := object(arg["secrets"])
 			save := func(spec Object, name string) error {

@@ -422,7 +422,7 @@ function create(io) {
   function run(workflow, config) {
     validateWorkflow(workflow);
     var request = require('./request.js'), outputs = {}, deliveries = [], status = 'running', error = null;
-    var dryRun = config.dryRun !== false, hooks = config.hooks || {};
+    var dryRun = config.dryRun === true, hooks = config.hooks || {};
     var context = { run: { id: io.runId, mode: dryRun ? 'rehearsal' : 'send', status: status }, workflow: { id: workflow.id, name: workflow.name, version: workflow.version } };
     if (io.serial) context.device = { serial: io.serial };
     context.outputs = outputs; context.run.error = null;

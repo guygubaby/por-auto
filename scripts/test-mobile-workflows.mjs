@@ -782,6 +782,9 @@ test('JavaScript response processing shares fetch, preview and offline validatio
   assert.equal(http.preview(request(response), {}, io).message, '甲\n乙');
   assert.equal(http.parse('plain text', { type: 'javascript', code: 'return res.toUpperCase();' }, io), 'PLAIN TEXT');
   assert.equal(http.parse('"JSON string"', { type: 'javascript', code: 'return res;' }, io), 'JSON string');
+  const defaultCode = http.responseCode({ type: 'text' });
+  assert.equal(defaultCode, "return (res || []).map((item) => item.text).join('\\n');");
+  assert.equal(http.parse('[{"text":"甲"},{"text":"乙"}]', { type: 'javascript', code: defaultCode }, io), '甲\n乙');
   for (const code of ['return res;', 'return 42;', 'return null;', 'return " ";', 'return "你".repeat(1334);', 'throw new Error("失败");']) {
     const parser = { type: 'javascript', code };
     assert.throws(() => http.parse(raw, parser, io), /JavaScript 处理失败/);
@@ -848,16 +851,18 @@ test('scheduled entry executes only WeCom workflows and releases resources', () 
     io.prepare = () => prepared++;
     io.finish = () => finished++;
     entry(io)({
-      execution: { workflowId: item.id, dryRun: true },
+      execution: { workflowId: item.id, dryRun: false },
       readConfig: () => ({ input: input(), hooks: {}, dryRun: false }),
     });
     assert.equal(prepared, 1);
     assert.equal(finished, 1);
     assert.equal(state.records.at(-1).status, 'completed');
-    assert.equal(state.sendClicks, 0);
+    assert.equal(state.sendClicks, item.id === 'wecom-broadcast' ? 2 : 0);
   }
 
-  const { io } = fixture();
+  const { io, state } = fixture();
+  assert.throws(() => entry(io)({ execution: { workflowId: 'wecom-broadcast', dryRun: true }, readConfig: () => ({ input: input() }) }), /旧测试任务/);
+  assert.equal(state.sendClicks, 0);
   assert.throws(
     () =>
       entry(io)({
@@ -866,6 +871,19 @@ test('scheduled entry executes only WeCom workflows and releases resources', () 
       }),
     /无效/,
   );
+});
+
+test('HTTP error previews retain original data without executing the response parser', () => {
+  const { io } = fixture();
+  io.request = () => ({ status: 422, body: '{"error":"参数有误"}' });
+  io.evaluateResponse = () => { throw Error('error response must not become a message'); };
+  const spec = request({ type: 'javascript', code: http.responseCode({ type: 'text' }) });
+  const preview = http.preview(spec, {}, io);
+  assert.equal(preview.status, 422);
+  assert.equal(preview.raw, '{"error":"参数有误"}');
+  assert.equal(preview.message, null);
+  assert.match(preview.parseError, /HTTP 422/);
+  assert.throws(() => http.fetch(spec, {}, io), /HTTP 422/);
 });
 
 test('WeCom 5.0.12 keeps verified native control IDs', () => {

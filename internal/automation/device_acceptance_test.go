@@ -228,7 +228,7 @@ func TestLiveStopAndHistory(t *testing.T) {
 	if item == nil {
 		t.Fatal("read-only bundled workflow missing")
 	}
-	item["dryRun"], item["executionMode"], item["hooks"] = true, "native", Object{}
+	item["dryRun"], item["executionMode"], item["hooks"] = false, "native", Object{}
 	result, err := e.Run(ctx, serial, item, false)
 	if err != nil || !stopped || result["error"] == nil {
 		t.Fatal("live stop did not interrupt the workflow", err)
@@ -338,7 +338,7 @@ func TestLiveMinuteCronAndHTTP(t *testing.T) {
 	e.Credentials.cache["http:"+id+":"+endpoint] = credentialValue{Value: "fixture-only"}
 	before := Object{"url": server.URL + "/before", "method": "GET", "query": []any{}, "headers": []any{}, "auth": Object{"type": "none"}, "body": nil, "response": Object{"type": "json", "pointer": "/data/message"}, "timeoutSeconds": 5}
 	after := Object{"url": endpoint, "method": "POST", "query": []any{Object{"name": "mode", "value": "{{run.mode}}"}}, "headers": []any{}, "auth": Object{"type": "bearer", "credential": id}, "body": Object{"status": "{{run.status}}", "mode": "{{run.mode}}", "device": "{{device.serial}}", "runId": "{{run.id}}"}, "response": Object{"type": "ignore"}, "timeoutSeconds": 5}
-	item["dryRun"], item["executionMode"], item["hooks"] = true, "native", Object{"beforeRun": before, "afterRun": after}
+	item["dryRun"], item["executionMode"], item["hooks"] = false, "native", Object{"beforeRun": before, "afterRun": after}
 	if err = e.saveStore(store); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestLiveMinuteCronAndHTTP(t *testing.T) {
 	mu.Lock()
 	observed := append([]Object{}, calls...)
 	mu.Unlock()
-	if len(observed) != 2 || observed[0]["method"] != "GET" || observed[1]["method"] != "POST" || observed[1]["authenticated"] != true || observed[1]["mode"] != "rehearsal" || object(observed[1]["body"])["status"] != "completed" || object(observed[1]["body"])["runId"] == item["key"] {
+	if len(observed) != 2 || observed[0]["method"] != "GET" || observed[1]["method"] != "POST" || observed[1]["authenticated"] != true || observed[1]["mode"] != "send" || object(observed[1]["body"])["status"] != "completed" || object(observed[1]["body"])["runId"] == item["key"] {
 		t.Fatal("pinned HTTP hooks or run context changed")
 	}
 	currentIME, _ := a.Shell(context.Background(), "settings", "get", "secure", "default_input_method")
@@ -385,13 +385,13 @@ func TestLiveMinuteCronAndHTTP(t *testing.T) {
 	if err = atomicJSON(e.path("cron-acceptance.json"), Object{"ok": true, "workflow": "wecom-open", "trigger": "cron", "snapshotPreserved": true, "authenticatedHTTP": true, "noSends": true, "keyboardRestored": true, "calls": observed}); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("PASS actual minute Cron, pinned hooks, authenticated POST, rehearsal context and keyboard")
+	t.Log("PASS actual minute Cron, pinned hooks, authenticated POST, formal context and keyboard")
 }
 
-func TestLiveDeviceRehearsal(t *testing.T) {
+func TestLiveReadOnlyDeviceFlows(t *testing.T) {
 	serial, root := os.Getenv("POR_DEVICE_SERIAL"), os.Getenv("POR_DEVICE_ROOT")
 	if serial == "" || root == "" {
-		t.Skip("set POR_DEVICE_SERIAL and POR_DEVICE_ROOT for an authorized phone rehearsal")
+		t.Skip("set POR_DEVICE_SERIAL and POR_DEVICE_ROOT for an authorized read-only phone check")
 	}
 	if !ValidSerial(serial) {
 		t.Fatal("invalid device serial")
@@ -443,31 +443,14 @@ func TestLiveDeviceRehearsal(t *testing.T) {
 				snapshot = clone(item)
 			}
 		}
-		allowed := map[string]bool{"wecom-open": true, "wecom-nickname": true, "wecom-first-chat": true, "wecom-broadcast": true}
+		allowed := map[string]bool{"wecom-open": true, "wecom-nickname": true, "wecom-first-chat": true}
 		if !allowed[id] || snapshot == nil {
-			t.Fatal("only bundled acceptance workflows are allowed")
+			t.Fatal("only bundled read-only workflows are allowed")
 		}
-		snapshot["dryRun"], snapshot["hooks"] = true, Object{}
+		snapshot["dryRun"], snapshot["hooks"] = false, Object{}
 		snapshot["executionMode"] = "native"
-		if strings.Contains(id, "broadcast") {
-			var names []any
-			raw, er := os.ReadFile(os.Getenv("POR_DEVICE_TARGETS"))
-			if er != nil {
-				t.Fatal("a previously approved target fixture is required")
-			}
-			if json.Unmarshal(raw, &names) != nil || len(names) == 0 || len(names) > 12 {
-				t.Fatal("invalid acceptance target fixture")
-			}
-			switch os.Getenv("POR_DEVICE_RECIPIENTS") {
-			case "groups":
-				snapshot["input"] = Object{"message": Object{"type": "manual", "text": "Go 迁移预演"}, "recipients": Object{"direct": false, "groups": true}, "intervalMs": 1000}
-			case "direct":
-				snapshot["input"] = Object{"message": Object{"type": "manual", "text": "Go 迁移预演"}, "recipients": Object{"direct": true, "groups": false}, "intervalMs": 1000}
-			case "all":
-				snapshot["input"] = Object{"message": Object{"type": "manual", "text": "Go 迁移预演"}, "recipients": Object{"direct": true, "groups": true}, "intervalMs": 1000}
-			default:
-				snapshot["input"] = Object{"message": Object{"type": "manual", "text": "Go 迁移预演"}, "recipients": Object{"scope": "groups", "mode": "selected", "names": names}, "intervalMs": 1000}
-			}
+		if sends(object(snapshot["workflow"])) {
+			t.Fatal("sender workflows require TestLiveWeComFormalGroupSend with explicit authorization")
 		}
 		started := time.Now()
 		result, runErr := e.Run(ctx, serial, snapshot, false)
@@ -476,12 +459,12 @@ func TestLiveDeviceRehearsal(t *testing.T) {
 		}
 		ime, _ := a.Shell(context.Background(), "settings", "get", "secure", "default_input_method")
 		wake, _ := a.Shell(context.Background(), "settings", "get", "global", "stay_on_while_plugged_in")
-		verdict := Object{"workflow": id, "dryRun": true, "ok": runErr == nil, "keyboardRestored": ime == originalIME, "wakeRestored": wake == originalWake, "seconds": time.Since(started).Seconds()}
+		verdict := Object{"workflow": id, "dryRun": false, "ok": runErr == nil, "keyboardRestored": ime == originalIME, "wakeRestored": wake == originalWake, "seconds": time.Since(started).Seconds()}
 		if result != nil {
 			verdict["folder"] = result["folder"]
 			events, _ := os.ReadFile(filepath.Join(str(result["folder"]), "events.jsonl"))
 			if strings.Contains(string(events), `"status":"send_requested"`) || strings.Contains(string(events), `"status":"send_observed"`) {
-				t.Fatal("rehearsal contained a send intent")
+				t.Fatal("read-only workflow contained a send intent")
 			}
 		}
 		if runErr != nil {

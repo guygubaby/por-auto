@@ -87,10 +87,11 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
     var index = dialogs.select('手机定时任务', tasks.map(function (task) { return (task.enabled ? '已启用 · ' : '已暂停 · ') + task.name; }));
     if (index < 0) return;
     var task = tasks[index];
+    var removedTest = task.scriptId === 'wecom-suite' && task.workflowId === 'wecom-broadcast' && task.dryRun !== false;
     var action = dialogs.select(task.name, ['查看详情和结果', '修改名称和时间', task.enabled ? '暂停后续执行' : '启用后续执行', '立即执行一次', '删除任务']);
     if (action === 0) {
       var labels = { completed: '完成', failed: '失败', running: '正在执行', interrupted: '上轮中断', skipped_busy: '操作占用，已跳过', missed: '错过时间，未补跑', overlap: '上一轮未结束，已跳过', busy: '手机正在处理其他任务，已跳过' };
-      show(task.name, task.scriptName + ' · v' + task.version + ' (' + task.versionCode + ')' + '\n' + (task.dryRun ? '预演，不发送' : '正式发送')
+      show(task.name, task.scriptName + ' · v' + task.version + ' (' + task.versionCode + ')' + '\n' + (removedTest ? '旧任务已停用，请重新创建' : '正式执行')
         + '\n' + task.cron + ' · ' + task.timezone + '\n下次：' + (task.nextAt === null ? '已暂停' : io.formatTime(task.nextAt, task.timezone))
         + '\n上次：' + (task.lastRun ? labels[task.lastRun.status] || task.lastRun.status : '尚未执行') + (task.lastRun && task.lastRun.error ? '\n' + task.lastRun.error : '')
         + (task.lastSkip ? '\n最近跳过：' + (labels[task.lastSkip.status] || task.lastSkip.status) + '\n' + io.formatTime(task.lastSkip.at, task.timezone) : '')
@@ -103,8 +104,9 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
       if (dialogs.confirm('修改执行时间', upcoming.map(function (at) { return io.formatTime(at, String(timezone).trim()); }).join('\n') + '\n\n消息、接收对象和代码版本仍保持原快照。')) scheduler.reschedule(task.id, { name: String(name), cron: String(expression).trim(), timezone: String(timezone).trim() });
     } else if (action === 2) scheduler.enable(task.id, !task.enabled);
     else if (action === 3) {
-      if (!timerRunning() || timerStop.get()) throw new Error('请先从「更多」开启手机定时执行，完成本次截图授权');
-      if (!dialogs.confirm('立即执行一次', task.name + '\n' + (task.dryRun ? '预演，不点击发送' : '正式发送，每个目标发送一次') + '\n\n使用保存时的消息和接收配置，不改变之后的计划时间。')) return;
+      if (removedTest) throw new Error('旧测试任务已停用，请重新创建定时任务');
+      if (!timerRunning() || timerStop.get()) throw new Error('请先从「更多」开启手机定时执行');
+      if (!dialogs.confirm('立即执行一次', task.name + '\n正式执行，发送类工作流每个目标发送一次\n\n使用保存时的消息和接收配置，不改变之后的计划时间。')) return;
       var result = scheduler.runNow(task.id); if (result.status !== 'completed') throw new Error(result.error || '任务未完成，请查看运行记录');
     } else if (action === 4 && dialogs.confirm('删除定时任务', task.name + '\n任务配置会删除，已有运行记录保留。')) scheduler.remove(task.id);
   }

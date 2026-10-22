@@ -100,8 +100,7 @@ function Guide() {
               },
               {
                 title: '安装手机工作流',
-                description:
-                  '在商店同步来源或导入离线包，安装企业微信工作流。',
+                description: '在商店同步来源或导入离线包，安装企业微信工作流。',
                 kind: 'workflows',
                 label: '保存离线工作流包',
               },
@@ -133,9 +132,9 @@ function Guide() {
         <div className="border-primary/20 bg-muted/50 flex gap-3 rounded-xl border p-5">
           <ShieldCheck className="text-primary mt-0.5 size-5 shrink-0" />
           <div>
-            <h2 className="text-sm font-medium">从预演开始</h2>
+            <h2 className="text-sm font-medium">执行与发送</h2>
             <p className="text-muted-foreground mt-1 text-sm leading-6">
-              发送类工作流支持预演：只填写、回读并清理本轮文字，不点击发送。正式发送时每个目标只尝试一次，结果不明确就停止，不自动重发。页面只通过系统无障碍控件读取，不截图、不上传画面。
+              发送类工作流会正式发送消息，每个目标只尝试一次；结果不明确就停止，不自动重发。已有草稿不会被覆盖。页面只通过系统无障碍控件读取，不截图、不上传画面。
             </p>
           </div>
         </div>

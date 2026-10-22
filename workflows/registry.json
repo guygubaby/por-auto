@@ -5,7 +5,7 @@
     {
       "id": "wecom-broadcast",
       "path": "workflows/wecom-broadcast/workflow.json",
-      "sha256": "5e3851971d36ea5734567cd357d3b0fd68f97982a2a3fbacd5b7bc3a230fec7f"
+      "sha256": "22694877ae2ecf44e73c0eb035df0fae68b89f6c310f2aeacfe46146e98c1893"
     },
     {
       "id": "wecom-first-chat",
