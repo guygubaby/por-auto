@@ -26,15 +26,11 @@ async function sources(folder = root, prefix = '') {
   }
   return result;
 }
-async function certificate() {
-  const source = await readFile(new URL('../mobile-workflows/wechat-suite/src/native-input.js', import.meta.url),'utf8');
-  return /var CERTIFICATE = '([a-f0-9]{64})';/.exec(source)?.[1];
-}
 export async function readInputArtifact() {
   const metadata = JSON.parse(await readFile(manifest,'utf8'));
   assert.equal(metadata.schemaVersion,1);assert.equal(metadata.protocolVersion,1);assert.equal(metadata.applicationId,'com.por.auto.input');
   assert.ok(Number.isSafeInteger(metadata.versionCode)&&metadata.versionCode>0);assert.equal(metadata.minSdk,26);
-  const signer=await certificate();assert.match(signer||'',/^[a-f0-9]{64}$/);assert.equal(metadata.certificateSha256,signer);
+  assert.match(metadata.certificateSha256||'',/^[a-f0-9]{64}$/);
   assert.deepEqual(metadata.sources,await sources(),'Input component source changed; rebuild and sign before packaging');
   const bytes = await readFile(artifact);
   assert.equal(bytes.length,metadata.bytes);assert.equal(digest(bytes),metadata.sha256);
@@ -51,10 +47,11 @@ async function writeArtifact() {
   const apk = resolve(directory,built.elements[0].outputFile);
   const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;assert.ok(sdk,'Set ANDROID_HOME before recording a signed input component');
   const signature = execFileSync(resolve(sdk,'build-tools/34.0.0/apksigner'),['verify','--print-certs',apk],{encoding:'utf8'});
-  const certificateSha256 = await certificate();assert.ok(certificateSha256);
+  const previous = JSON.parse(await readFile(manifest,'utf8'));
+  const certificateSha256 = previous.certificateSha256;
   assert.ok(signature.includes('Signer #1 certificate SHA-256 digest: '+certificateSha256),'Input signing identity changed; preserve the existing identity');
   const bytes = await readFile(apk);
-  try { assertInputVersionProgress(JSON.parse(await readFile(manifest,'utf8')),{versionCode,sha256:digest(bytes)}); }
+  try { assertInputVersionProgress(previous,{versionCode,sha256:digest(bytes)}); }
   catch(error) {if(error.code!=='ENOENT')throw error;}
   await mkdir(resolve(root,'artifacts'),{recursive:true});await writeFile(artifact,bytes);
   await writeFile(manifest,JSON.stringify({schemaVersion:1,protocolVersion:1,applicationId:'com.por.auto.input',versionCode,minSdk:26,bytes:bytes.length,sha256:digest(bytes),certificateSha256,sources:await sources()},null,2)+'\n');

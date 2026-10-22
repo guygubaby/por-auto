@@ -1,573 +1,653 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import test from 'node:test';
-import { mobileWechatDefinitions, buildMobileCatalog } from './mobile-scripts.mjs';
+import { buildMobileCatalog } from './mobile-scripts.mjs';
 
 const require = createRequire(import.meta.url);
 const modules = new Map();
+
 function loadMobile(path) {
   if (modules.has(path)) return modules.get(path).exports;
-  const module = { exports: {} }; modules.set(path, module);
-  const execute = vm.runInThisContext('(function(require,module,exports){' + readFileSync(path, 'utf8') + '\n})', { filename: path });
-  execute(specifier => loadMobile(createRequire(path).resolve(specifier)), module, module.exports);
+  const module = { exports: {} };
+  modules.set(path, module);
+  const execute = vm.runInThisContext(
+    '(function(require,module,exports){' + readFileSync(path, 'utf8') + '\n})',
+    { filename: path },
+  );
+  execute(
+    specifier => loadMobile(createRequire(path).resolve(specifier)),
+    module,
+    module.exports,
+  );
   return module.exports;
 }
-const mobilePath = fileURLToPath(new URL('../mobile-workflows/wechat-suite/src/', import.meta.url));
-const core = loadMobile(mobilePath + 'core.js');
-const http = loadMobile(mobilePath + 'request.js');
-const definitions = loadMobile(mobilePath + 'definitions.js');
-const markers = loadMobile(mobilePath + 'markers.js');
-const provider = loadMobile(mobilePath + 'provider.js');
-const capture = loadMobile(mobilePath + 'capture.js');
-const nativeInput = loadMobile(mobilePath + 'native-input.js');
-const wecomNative = loadMobile(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)));
-const workflow = id => definitions.workflows.find(w => w.id === id);
-const pair = (role, text, point, value = null) => ({ role, text, point, value, complete: true });
-const request = (response = { type: 'text' }) => ({ url: 'https://example.invalid/message', method: 'GET', query: [], headers: [], auth: { type: 'none' }, body: null, response, timeoutSeconds: 20 });
-const input = (message = { type: 'manual', text: 'Ok' }, names = ['群甲', '群乙']) => ({ message, recipients: { scope: 'groups', mode: 'selected', names }, intervalMs: 1000 });
 
-test('a covered group heading cannot be mistaken for the homepage without its four bottom tabs', () => {
-  const hidden = {page:'home',title:'',certain:true,items:[],editor:null,outgoing:[],listEmpty:true};
-  const group = {...hidden,page:'groups',title:'选择一个群'};
-  let reads=0;
-  const runner=core.create({observe:()=>structuredClone(reads++ ? group : hidden),log(){},sleep(){}});
-  assert.equal(runner.observe().page,'groups');assert.equal(reads,2);
-  assert.throws(()=>core.create({observe:()=>({...group,title:''}),log(){},sleep(){}}).observe(),/页面|标题/);
-  assert.equal(core.create({package:'com.tencent.wework',observe:()=>({...hidden,title:'消息'}),log(){},sleep(){}}).observe().page,'home');
+const sharedPath = fileURLToPath(
+  new URL('../mobile-workflows/shared/src/', import.meta.url),
+);
+const wecomPath = fileURLToPath(
+  new URL('../mobile-workflows/wecom-suite/src/', import.meta.url),
+);
+const core = loadMobile(sharedPath + 'core.js');
+const http = loadMobile(sharedPath + 'request.js');
+const definitions = loadMobile(wecomPath + 'definitions.js');
+const workflow = id => definitions.workflows.find(item => item.id === id);
+
+const pair = (role, text, point, value = null) => ({
+  role,
+  text,
+  point,
+  value,
+  complete: true,
 });
 
-test('native input uses exact session ownership, preserves changed drafts and never retries a mutation', () => {
-  let text='', session='session-a', count=0, unknown=false;
-  const calls=[];
-  const client=nativeInput.create((method,data)=>{
-    calls.push(method);assert.equal(data.protocolVersion,1);assert.equal(data.packageName,'com.tencent.mm');
-    if(method==='write') { if(unknown)throw Error('timeout');text=data.text; }
-    if(method==='clearOwned') { assert.equal(data.ownerId,'owner');text=''; }
-    return {ok:true,protocolVersion:1,versionCode:1,packageName:'com.tencent.mm',sessionId:session,text,complete:true,imeAction:6,ownerId:method==='write'?'owner':undefined};
-  },()=>String(++count),'com.tencent.mm');
-  client.write('1');text='用户的草稿';assert.throws(()=>client.clear('1'),/草稿/);assert.equal(calls.includes('clearOwned'),false);
-  text='1';client.clear('1');assert.equal(text,'');assert.equal(client.observed().text,'');
-  session='session-b';assert.equal(client.observed(),null);
-  unknown=true;const before=calls.filter(x=>x==='write').length;
-  assert.throws(()=>client.write('Ok'),/timeout/);assert.equal(calls.filter(x=>x==='write').length,before+1);
+const request = (response = { type: 'text' }) => ({
+  url: 'https://example.invalid/message',
+  method: 'GET',
+  query: [],
+  headers: [],
+  auth: { type: 'none' },
+  body: null,
+  response,
+  timeoutSeconds: 20,
 });
 
-test('the input-row probe keeps text mode even when a full-screen observation omits the editor', () => {
-  const {io,state}=fixture();const observe=io.observe,click=io.click;let grounded=false,toggles=0;
-  io.observe=()=>{const s=observe();if(s.page==='chat'&&!grounded){s.editor=null;s.items=[pair('keyboard','',[62,966])];}return s;};
-  io.ensureEditor=title=>{assert.equal(title,state.title);grounded=true;return observe();};
-  io.click=p=>{if(String(p)==='62,966'){toggles++;throw Error('must not toggle an unverified keyboard icon');}return click(p);};
-  core.create(io).run(workflow('wechat-send-hello'),{dryRun:true});
-  assert.equal(toggles,0);assert.equal(state.clears,1);assert.equal(state.sendClicks,0);
+const input = (
+  message = { type: 'manual', text: 'Ok' },
+  recipients = { groups: true, direct: false },
+) => ({
+  message,
+  recipients,
+  intervalMs: 1000,
 });
 
-test('native composer geometry fixes the probe points and rejects a press-to-talk label at an allegedly empty center', () => {
-  const target=markers.composerTarget(1080,2280,{bounds:[0,0,1080,2280],density:3,statusBar:84,keyboardTop:null,navigationTop:null});
-  assert.deepEqual(target.point,[450,963]);assert.deepEqual(target.keyboard,[60,963]);assert.deepEqual(target.crop,[0,2112,1080,168]);
-  const pixels=new Int32Array(1080*2280).fill(0xff282828);
-  assert.equal(markers.emptyComposerCenter(pixels,1080,2280,target),true);
-  pixels[Math.floor(2280*.963)*1080+486]=0xffeeeeee;
-  assert.equal(markers.emptyComposerCenter(pixels,1080,2280,target),false);
-});
+function fixture({
+  existingDraft = '',
+  uncertain = false,
+  groups = ['群甲', '群乙'],
+  conversations = ['小王', '小李'],
+} = {}) {
+  const state = {
+    page: 'home',
+    previousPage: 'home',
+    pageIndex: 0,
+    title: '',
+    draft: existingDraft,
+    outgoing: [],
+    sendClicks: 0,
+    requests: [],
+    records: [],
+    typed: [],
+    clears: 0,
+    logs: [],
+  };
 
-test('a homepage with a covered search control is reread before lookup instead of failing mid-batch', () => {
-  const {io,state}=fixture();state.page='home';const observe=io.observe;let reads=0;
-  io.observe=()=>{const s=observe();if(!reads++)s.items=s.items.filter(i=>i.role!=='search');return s;};
-  assert.equal(core.create(io).observe().items.filter(i=>i.role==='search').length,1);assert.equal(reads,2);
-});
-
-test('native header navigation ignores full-screen coordinates and waits for the search transition without a second click', () => {
-  const {io,state}=fixture();const observe=io.observe;let stale=null,clicks=0;
-  io.observe=()=>{if(stale){const previous=stale;stale=null;return previous;}const s=observe();if(s.page==='home')s.items=s.items.filter(i=>i.role!=='search');return s;};
-  io.clickHeader=role=>{const s=observe();assert.equal(role,'search');clicks++;const target=s.items.find(i=>i.role===role);io.click(target.point);stale=s;};
-  core.create(io).run(workflow('wechat-send-hello'),{dryRun:true});
-  assert.equal(clicks,1);assert.deepEqual(state.typed,['1']);assert.equal(state.clears,1);assert.equal(state.sendClicks,0);
-});
-
-test('top toolbar points are fixed by native dimensions and never copied from a model observation', () => {
-  const metrics={bounds:[0,0,1080,2280],density:3,statusBar:84,keyboardTop:null,navigationTop:null};
-  assert.deepEqual(markers.headerTarget(1080,2280,metrics,'search').point,[833,73]);
-  assert.deepEqual(markers.headerTarget(1080,2280,metrics,'more').point,[933,73]);
-  assert.throws(()=>markers.headerTarget(1080,2280,metrics,'send'),/不支持/);
-});
-
-test('a sliding WeCom sidebar cannot be mistaken for the normal messages page', () => {
-  const nodes = [
-    { id: 'ncq', text: '消息', bounds: [489,121,591,190], visible: true, enabled: true },
-    { id: 'czp', text: '', bounds: [0,228,1080,2111], visible: true, enabled: true },
-    { id: 'fg8', text: '全部', bounds: [109,281,168,331], visible: true, enabled: true },
-  ];
-  assert.equal(wecomNative.homeReady(nodes,1080),true);
-  const drawer = structuredClone(nodes); drawer[1].bounds[0]=994;
-  assert.equal(wecomNative.homeReady(drawer,1080),false);
-  drawer[0].bounds=[1483,121,1080,190]; drawer[0].visible=false;
-  assert.equal(wecomNative.homeReady(drawer,1080),false);
-});
-
-test('native send commit rechecks the exact message instead of accepting any nonempty draft', () => {
-  const value={page:'chat',title:'测试群(2)',editor:{text:'Ok'}};
-  assert.equal(wecomNative.exactDraft(value,'测试群','Ok'),true);
-  assert.equal(wecomNative.exactDraft({...value,editor:{text:'用户修改后的草稿'}},'测试群','Ok'),false);
-  assert.equal(wecomNative.exactDraft({...value,title:'其他群(2)'},'测试群','Ok'),false);
-  assert.equal(wecomNative.exactDraft({...value,editor:null},'测试群','Ok'),false);
-});
-
-test('native workflow cleanup leaves the timer wake session owned by the launcher', () => {
-  for (const shared of [false, true]) {
-    const calls = { awake: 0, release: 0, check: 0 };
-    const module = { exports: {} };
-    const sandbox = { module, require: () => ({ create: () => ({ requireAccessibility() {} }) }), auto: { service: {} },
-      device: { keepScreenDim: () => calls.awake++, cancelKeepingAwake: () => calls.release++ },
-      android: { view: { accessibility: { AccessibilityNodeInfo: {} } } } };
-    vm.runInNewContext(readFileSync(fileURLToPath(new URL('../mobile-workflows/wecom-suite/src/wecom.js', import.meta.url)), 'utf8'), sandbox);
-    const io = module.exports.create({ screenSession: shared ? { check: () => calls.check++ } : null }, {});
-    io.prepare(); io.finish();
-    assert.deepEqual(calls, shared ? { awake: 0, release: 0, check: 1 } : { awake: 1, release: 1, check: 0 });
+  function rows(role) {
+    const values = state.page === 'groups' ? groups : conversations;
+    return values
+      .slice(state.pageIndex * 20, state.pageIndex * 20 + 20)
+      .map((name, index) => pair(role, name, [500, 220 + index * 30]));
   }
-});
 
-test('commit waits out a disappearing keyboard suggestion but rejects changed draft, target and persistent changes', () => {
-  const screen = { page: 'chat', title: '测试群(2)', certain: true, items: [], editor: { point: [420,578], text: 'Ok' }, outgoing: [], listEmpty: false };
-  let reads=0;
-  assert.equal(core.confirmStableDraft('测试群','Ok',()=>({screen:structuredClone(screen),unchanged:++reads>1})).editor.text,'Ok');
-  assert.equal(reads,2);
-  for (const changed of [{title:'其他群'}, {editor:{point:[420,578],text:'用户的草稿'}}]) {
-    reads=0;
-    assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>({screen:{...structuredClone(screen),...changed},unchanged:++reads>1})),/会话|草稿/);
-    assert.equal(reads,1);
-  }
-  reads=0;assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>({screen:structuredClone(screen),unchanged:!!(reads++<0)})),/持续变化/);assert.equal(reads,3);
-  reads=0;assert.throws(()=>core.confirmStableDraft('测试群','Ok',()=>{reads++;throw Error('transport failure');}),/transport failure/);assert.equal(reads,1);
-});
-
-function fixture({ existingDraft = '', uncertain = false, targets = ['群甲', '群乙'], groupTitles = false, profileTitle = '个人信息', nicknameLabel = '昵称' } = {}) {
-  const state = { page: 'me', pageIndex: 0, query: '', title: '', draft: existingDraft, outgoing: [], sendClicks: 0, requests: [], records: [], typed: [], clears: 0, logs: [] };
-  const tabs = ['微信', '通讯录', '发现', '我'].map((t, i) => pair('tab', t, [125 + i * 250, 950]));
   function observe() {
-    const rows = role => targets.slice(state.pageIndex * 20, state.pageIndex * 20 + 20).map((name, index) => pair(role, name, [500, 220 + index * 30]));
-    const s = { page: state.page, title: '', certain: true, items: [], editor: null, outgoing: [], listEmpty: false };
-    if (s.page === 'home') s.items = [...tabs, pair('search', '', [850, 50]), pair('more', '', [950, 50]), ...rows('chat')];
-    else if (s.page === 'me') s.items = [...tabs, pair('profile', '本地测试 微信号：tester', [500, 150])];
-    else if (s.page === 'profile') { s.title = profileTitle; s.items = [pair('row', nicknameLabel, [500, 220], '本地测试')]; }
-    else if (s.page === 'search') { s.items = [pair('search_input', '搜索', [500, 80], state.query)]; if (state.query) s.items.push(pair('chat', state.query, [500, 250])); }
-    else if (s.page === 'other') { s.title = '微信菜单'; s.items = [pair('new_chat', '发起群聊', [700, 150])]; }
-    else if (s.page === 'new_chat') s.items = [pair('choose_group', '选择一个已有的群', [500, 150])];
-    else if (s.page === 'groups') { s.title = '选择一个群'; s.items = rows('group'); }
-    else if (s.page === 'chat') { s.title = state.title + (groupTitles ? '(12)' : ''); s.editor = { point: [500, 900], text: state.draft }; s.outgoing = state.outgoing; if (state.draft) s.items.push(pair('send', '发送', [900, 900])); }
-    return structuredClone(s);
+    const screen = {
+      page: state.page,
+      title: '',
+      certain: true,
+      items: [],
+      editor: null,
+      outgoing: [],
+      listEmpty: false,
+    };
+    if (screen.page === 'home') screen.items = rows('chat');
+    else if (screen.page === 'groups') {
+      screen.title = '选择一个群';
+      screen.items = rows('group');
+    } else if (screen.page === 'chat') {
+      screen.title = state.title;
+      screen.editor = { point: [500, 900], text: state.draft };
+      screen.outgoing = state.outgoing;
+      if (state.draft) screen.items.push(pair('send', '发送', [900, 900]));
+    }
+    if (screen.page === 'home' || screen.page === 'groups')
+      screen.listEmpty = !screen.items.length;
+    return structuredClone(screen);
   }
+
   const io = {
-    runId: 'test', now: () => 123, sleep() {}, wake() {}, launch() {},
-    scroll(up) { state.pageIndex = Math.max(0, Math.min(Math.ceil(targets.length / 20) - 1, state.pageIndex + (up ? -1 : 1))); },
-    observe, back() { state.page = 'home'; },
-    beforeCommit() {},
-    clickTab(label) {
-      const matches = observe().items.filter(i => i.role === 'tab' && i.text === label);
-      assert.equal(matches.length, 1); io.click(matches[0].point);
+    package: 'com.tencent.wework',
+    runId: 'test',
+    serial: 'fixture',
+    now: () => 123,
+    sleep() {},
+    wake() {},
+    launch() {},
+    prepare() {},
+    finish() {},
+    requireAccessibility() {},
+    focusedPackage: () => 'com.tencent.wework',
+    home() {
+      state.page = 'home';
+      state.pageIndex = 0;
+      return observe();
     },
+    recipientPage(scope) {
+      state.page = scope === 'groups' ? 'groups' : 'home';
+      state.pageIndex = 0;
+      return observe();
+    },
+    scroll(up) {
+      if (!['home', 'groups'].includes(state.page)) return;
+      const list = state.page === 'groups' ? groups : conversations;
+      state.pageIndex = Math.max(
+        0,
+        Math.min(
+          Math.ceil(list.length / 20) - 1,
+          state.pageIndex + (up ? -1 : 1),
+        ),
+      );
+    },
+    observe,
+    back() {
+      state.page = state.previousPage;
+      state.previousPage = 'home';
+    },
+    beforeCommit() {},
     openRow(title, page) {
       assert.equal(state.page, page);
-      const matches = observe().items.filter(i => ['chat', 'group'].includes(i.role) && i.text === title);
-      assert.equal(matches.length, 1); io.click(matches[0].point);
+      const matches = observe().items.filter(
+        item => ['chat', 'group'].includes(item.role) && item.text === title,
+      );
+      assert.equal(matches.length, 1);
+      io.click(matches[0].point);
     },
     click(point) {
-      const item = observe().items.find(i => String(i.point) === String(point));
-      assert.ok(item, 'Unknown click ' + point + ' on ' + state.page);
-      if (item.role === 'tab') state.page = item.text === '我' ? 'me' : 'home';
-      else if (item.role === 'profile') state.page = 'profile';
-      else if (item.role === 'search') { state.query = ''; state.page = 'search'; }
-      else if (item.role === 'more') state.page = 'other';
-      else if (item.role === 'new_chat') state.page = 'new_chat';
-      else if (item.role === 'choose_group') state.page = 'groups';
-      else if (['chat', 'group'].includes(item.role)) { state.title = item.text; state.page = 'chat'; }
-      else if (item.role === 'send') {
+      const item = observe().items.find(
+        candidate => String(candidate.point) === String(point),
+      );
+      assert.ok(item, `Unknown click ${point} on ${state.page}`);
+      if (['chat', 'group'].includes(item.role)) {
+        state.previousPage = state.page;
+        state.title = item.text;
+        state.page = 'chat';
+      } else if (item.role === 'send') {
         state.sendClicks++;
         if (uncertain) throw Error('connection lost after click');
-        state.outgoing.push({ text: state.draft, failed: false, pending: false }); state.draft = '';
+        state.outgoing.push({
+          text: state.draft,
+          failed: false,
+          pending: false,
+        });
+        state.draft = '';
       }
     },
+    nickname: () => '测试姓名',
     type(value) {
-      if (state.page === 'search') state.query = value;
-      else { assert.equal(state.page, 'chat'); assert.equal(state.draft, ''); state.draft = value; state.typed.push(value); }
+      assert.equal(state.page, 'chat');
+      assert.equal(state.draft, '');
+      state.draft = value;
+      state.typed.push(value);
     },
-    clear(value) { assert.equal(state.draft, value); state.draft = ''; state.clears++; },
-    record(value) { state.records.push(structuredClone(value)); },
-    log(type, details) { state.logs.push({ type, details }); },
-    parseUrl(value) { const u = new URL(value); return { scheme: u.protocol.slice(0, -1), host: u.hostname, username: u.username, password: u.password, fragment: u.hash }; },
-    secret(id, endpoint) { assert.equal(id, '11111111-1111-4111-8111-111111111111'); assert.equal(endpoint, 'https://example.invalid/message'); return 'private-fixture-value'; },
+    clear(value) {
+      assert.equal(state.draft, value);
+      state.draft = '';
+      state.clears++;
+    },
+    record(value) {
+      state.records.push(structuredClone(value));
+    },
+    log(type, details) {
+      state.logs.push({ type, details });
+    },
+    parseUrl(value) {
+      const url = new URL(value);
+      return {
+        scheme: url.protocol.slice(0, -1),
+        host: url.hostname,
+        username: url.username,
+        password: url.password,
+        fragment: url.hash,
+      };
+    },
+    secret(id, endpoint) {
+      assert.equal(id, '11111111-1111-4111-8111-111111111111');
+      assert.equal(endpoint, 'https://example.invalid/message');
+      return 'private-fixture-value';
+    },
     base64: value => Buffer.from(value).toString('base64'),
-    request(value) { state.requests.push(structuredClone(value)); return { status: 200, body: 'fresh-' + state.requests.length }; },
+    request(value) {
+      state.requests.push(structuredClone(value));
+      return { status: 200, body: 'fresh-' + state.requests.length };
+    },
   };
   return { io, state, runner: core.create(io) };
 }
 
-test('mobile bundle contains the five exact desktop workflow definitions and observation contract', async () => {
-  assert.equal(await readFile(new URL('../mobile-workflows/wechat-suite/src/definitions.js', import.meta.url), 'utf8'), await mobileWechatDefinitions());
-  assert.equal(definitions.workflows.length, 5);
-  for (const mobile of definitions.workflows) assert.deepEqual(mobile, JSON.parse(await readFile(new URL('../workflows/' + mobile.id + '/workflow.json', import.meta.url), 'utf8')));
-});
-
-test('every published native package file exists at the exact path used by GitHub online installs', async () => {
+test('mobile catalog publishes only the harmless demo and WeCom package', async () => {
   const { catalog } = await buildMobileCatalog();
-  const native = catalog.workflows.find(item => item.id === 'wecom-suite');
-  assert.ok(native);
-  const names = [];
-  for (const file of native.files) {
-    const bytes = await readFile(new URL('../mobile-workflows/wecom-suite/src/' + file.path, import.meta.url));
-    assert.equal(bytes.length, file.size); names.push(file.path);
-  }
-  assert.ok(names.includes('core.js') && names.includes('request.js') && names.includes('wecom.js'));
-});
-
-test('native WeCom definitions reuse the message lifecycle, freshness and rehearsal checks without a model', async () => {
-  for (const id of ['wecom-open', 'wecom-nickname', 'wecom-first-chat', 'wecom-broadcast']) {
-    const workflow = JSON.parse(await readFile(new URL('../workflows/' + id + '/workflow.json', import.meta.url), 'utf8'));
-    const { io, state } = fixture();
-    io.package = 'com.tencent.wework';
-    io.home = () => { state.page = 'home'; state.pageIndex = 0; return io.observe(); };
-    io.recipientPage = scope => { state.page = scope === 'groups' ? 'groups' : 'home'; state.pageIndex = 0; return io.observe(); };
-    io.openNamed = title => { assert.ok(['群甲', '群乙'].includes(title)); state.title = title; state.page = 'chat'; };
-    io.nickname = () => '测试姓名';
-    const result = core.create(io).run(workflow, { dryRun: true, hooks: { beforeRun: request(), afterRun: request({ type: 'ignore' }) }, input: input({ type: 'http', request: request(), refresh: 'recipient' }) });
-    assert.equal(state.sendClicks, 0); assert.equal(state.records.at(-1).status, 'completed');
-    if (id === 'wecom-nickname') assert.equal(result.nickname, '测试姓名');
-    if (id === 'wecom-broadcast') {
-      assert.deepEqual(state.typed, ['fresh-2', 'fresh-3']); assert.equal(state.clears, 2);
-      assert.equal(state.requests.length, 4); assert.ok(state.records.at(-1).targets.every(t => t.status === 'rehearsed'));
-    }
+  assert.deepEqual(
+    catalog.workflows.map(item => item.id),
+    ['demo-hello', 'wecom-suite'],
+  );
+  assert.deepEqual(
+    definitions.workflows.map(item => item.id),
+    ['wecom-open', 'wecom-nickname', 'wecom-first-chat', 'wecom-broadcast'],
+  );
+  for (const item of definitions.workflows) {
+    assert.deepEqual(
+      item,
+      JSON.parse(
+        await readFile(
+          new URL(`../workflows/${item.id}/workflow.json`, import.meta.url),
+          'utf8',
+        ),
+      ),
+    );
   }
 });
 
-test('all five workflows run through the mobile controller; rehearsal clears its draft and never sends', () => {
-  for (const id of ['wechat-open', 'wechat-nickname', 'wechat-first-chat', 'wechat-send-hello', 'wechat-broadcast']) {
+test('published WeCom package has no screenshot or image-model path', async () => {
+  const { catalog } = await buildMobileCatalog();
+  const pack = catalog.workflows.find(item => item.id === 'wecom-suite');
+  assert.ok(pack);
+  for (const file of pack.files) {
+    const bytes = await readFile(
+      new URL(`../mobile-workflows/wecom-suite/src/${file.path}`, import.meta.url),
+    );
+    assert.equal(bytes.length, file.size);
+  }
+  for (const name of ['core.js', 'io.js', 'main.js', 'wecom.js']) {
+    const source = readFileSync(wecomPath + name, 'utf8');
+    assert.doesNotMatch(
+      source,
+      /requestScreenCapture|chat\/completions|allowScreenshots|images\.captureScreen/,
+    );
+  }
+});
+
+test('all four WeCom workflows run in rehearsal and never click send', () => {
+  for (const item of definitions.workflows) {
     const { runner, state } = fixture();
-    const result = runner.run(workflow(id), { dryRun: true, input: input(), hooks: {} });
-    assert.equal(state.records.at(-1).status, 'completed'); assert.equal(state.sendClicks, 0);
-    assert.equal(state.records.at(-1).workflowVersion, workflow(id).version);
-    if (id === 'wechat-nickname') assert.equal(result.nickname, '本地测试');
-    if (id === 'wechat-send-hello') { assert.deepEqual(state.typed, ['1']); assert.equal(state.clears, 1); }
-    if (id === 'wechat-broadcast') { assert.deepEqual(state.typed, ['Ok', 'Ok']); assert.ok(state.records.at(-1).targets.every(t => t.status === 'rehearsed')); }
+    const result = runner.run(item, {
+      dryRun: true,
+      hooks: {},
+      input: input(),
+    });
+    assert.equal(state.records.at(-1).status, 'completed');
+    assert.equal(state.sendClicks, 0);
+    assert.equal(state.records.at(-1).workflowVersion, item.version);
+    if (item.id === 'wecom-nickname') assert.equal(result.nickname, '测试姓名');
   }
 });
 
-test('scheduled mobile entries run all five workflows without menus and always release their task resources', () => {
-  function entry(io) {
+test('duplicate send actions fail before hooks or device IO', () => {
+  const invalid = structuredClone(workflow('wecom-broadcast'));
+  invalid.steps.push({ id: 'again', name: 'Duplicate', action: { type: 'chat_broadcast' } });
+  const { runner, state } = fixture();
+  assert.throws(() => core.validateWorkflow(invalid), /一个发送动作/);
+  assert.throws(() => runner.run(invalid, { dryRun: false, input: input(), hooks: { beforeRun: request() } }), /一个发送动作/);
+  assert.equal(state.sendClicks, 0);
+  assert.equal(state.requests.length, 0);
+  assert.equal(state.typed.length, 0);
+  assert.equal(state.logs.length, 0);
+});
+
+test('native titles reject digit removal, truncation and similar chat names', () => {
+  const wecom = loadMobile(wecomPath + 'wecom.js');
+  assert.equal(core.sameTitle('测试群(20)', '测试群'), true);
+  for (const [actual, expected] of [
+    ['123测试群', '测试群'],
+    ['测试群2', '测试群'],
+    ['销售…通知(20)', '销售A部门通知'],
+    ['销售…通知(20)', '销售B部门通知'],
+  ]) {
+    assert.equal(core.sameTitle(actual, expected), false);
+    assert.equal(wecom.exactDraft({ page: 'chat', title: actual, editor: { text: 'Ok' } }, expected, 'Ok'), false);
+    const { runner, state, io } = fixture({ groups: [expected] });
+    const observe = io.observe;
+    io.observe = () => {
+      const value = observe();
+      if (value.page === 'chat') value.title = actual;
+      return value;
+    };
+    assert.throws(() => runner.run(workflow('wecom-broadcast'), { dryRun: false, input: input() }), /目标会话/);
+    assert.equal(state.typed.length, 0);
+    assert.equal(state.sendClicks, 0);
+  }
+});
+
+test('native outgoing messages require the unique right avatar in their own row', () => {
+  const wecom = loadMobile(wecomPath + 'wecom.js');
+  for (const [body, avatar, expected] of [
+    [[650, 704, 921, 818], [936, 704, 1050, 818], 1],
+    [[177, 704, 921, 921], [936, 704, 1050, 818], 1],
+    [[159, 704, 450, 818], [30, 704, 144, 818], 0],
+    [[159, 704, 903, 921], [30, 704, 144, 818], 0],
+    [[177, 704, 921, 921], [936, 1000, 1050, 1114], 0],
+  ]) {
+    const nodes = [
+      { id: 'message_row', parent: -1, bounds: [0, 704, 1080, 921] },
+      { id: 'i_d', parent: 0, bounds: body, text: 'Hello' },
+      { id: 'message_avatar', parent: 0, bounds: avatar },
+    ].map(node => ({ ...node, visible: true, enabled: true }));
+    assert.equal(wecom.outgoing(nodes, 1080).length, expected);
+    assert.equal(wecom.outgoing(nodes.slice(0, 2), 1080).length, 0);
+    assert.equal(wecom.outgoing([...nodes, nodes[2]], 1080).length, 0);
+  }
+});
+
+test('real published entry loads its IO factory and decrypts legacy WeCom credentials', () => {
+  const alias = 'com.por.autojs6.wechat.credentials.v1';
+  const id = '11111111-1111-4111-8111-111111111111';
+  const endpoint = 'https://example.invalid/message';
+  const key = randomBytes(32), iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  cipher.setAAD(Buffer.from(endpoint + '\n' + id));
+  const encrypted = Buffer.concat([cipher.update('legacy-secret', 'utf8'), cipher.final(), cipher.getAuthTag()]);
+  const saved = { [id]: { endpoint, iv: iv.toString('base64'), data: encrypted.toString('base64') } };
+  let reads = 0;
+  function JavaString(value) { this.value = Buffer.isBuffer(value) ? value.toString('utf8') : String(value); }
+  JavaString.prototype.getBytes = function () { return Buffer.from(this.value, 'utf8'); };
+  JavaString.prototype.toString = function () { return this.value; };
+  const globals = {
+    java: {
+      lang: { String: JavaString },
+      util: { concurrent: { TimeUnit: {} } },
+      security: { KeyStore: { getInstance: () => ({
+        load() {},
+        containsAlias: value => value === alias,
+        getKey(value) { assert.equal(value, alias); reads++; return key; },
+      }) } },
+    },
+    javax: { crypto: {
+      spec: { GCMParameterSpec: function (_, value) { this.iv = value; } },
+      Cipher: { DECRYPT_MODE: 2, getInstance: () => {
+        let decipher;
+        return {
+          init(_, value, params) { decipher = createDecipheriv('aes-256-gcm', value, params.iv); },
+          updateAAD(value) { decipher.setAAD(value); },
+          doFinal(value) { decipher.setAuthTag(value.subarray(-16)); return Buffer.concat([decipher.update(value.subarray(0, -16)), decipher.final()]); },
+        };
+      } },
+    } },
+    android: {
+      util: { Base64: { NO_WRAP: 2, decode: value => Buffer.from(value, 'base64') } },
+      view: { accessibility: { AccessibilityNodeInfo: {} } },
+    },
+    context: {
+      getPackageName: () => 'org.autojs.autojs6',
+      getPackageManager: () => ({ getPackageInfo: () => ({ versionName: '5.0.12' }) }),
+    },
+    files: { exists: () => true, read: () => JSON.stringify(saved) },
+    sleep() {},
+    dialogs: { select: () => 7 },
+  };
+  const loaded = new Map();
+  function load(path) {
+    if (loaded.has(path)) return loaded.get(path).exports;
     const module = { exports: {} };
-    const wrapper = vm.runInThisContext('(function(require,module,exports){' + readFileSync(mobilePath + 'main.js', 'utf8') + '\n})');
-    wrapper(specifier => specifier === './android.js' ? { create: () => io } : loadMobile(createRequire(mobilePath + 'main.js').resolve(specifier)), module, module.exports);
+    loaded.set(path, module);
+    const wrapper = vm.runInNewContext('(function(require,module,exports){' + readFileSync(path, 'utf8') + '\n})', globals, { filename: path });
+    wrapper(specifier => load(createRequire(path).resolve(specifier)), module, module.exports);
     return module.exports;
   }
-  for (const id of definitions.workflows.map(workflow => workflow.id)) {
-    const { io, state } = fixture(); let prepared = 0, finished = 0;
-    io.prepare = () => prepared++; io.finish = () => finished++;
-    const por = { execution: { workflowId: id, dryRun: true }, readConfig: () => ({ input: input(), hooks: {}, dryRun: false }) };
-    entry(io)(por);
-    assert.equal(prepared, 1); assert.equal(finished, 1); assert.equal(state.sendClicks, 0);
-    assert.equal(state.records.at(-1).status, 'completed');
-  }
-  const { io } = fixture(); let finished = 0;
-  io.prepare = () => { throw Error('permission lost'); }; io.finish = () => finished++;
-  assert.throws(() => entry(io)({ execution: { workflowId: 'wechat-open', dryRun: true }, readConfig: () => ({}) }), /permission lost/);
-  assert.equal(finished, 1);
-  assert.throws(() => entry(io)({ execution: { workflowId: 'unknown', dryRun: true }, readConfig: () => ({}) }), /无效/);
-});
-
-test('all groups and all homepage conversations are enumerated before rehearsal', () => {
-  for (const scope of ['groups', 'conversations']) {
-    const { runner, state } = fixture();
-    const value = input(); value.recipients = { scope, mode: 'all', names: [] };
-    runner.run(workflow('wechat-broadcast'), { dryRun: true, input: value });
-    assert.deepEqual(state.records.at(-1).targets.map(t => t.title), ['群甲', '群乙']); assert.equal(state.sendClicks, 0);
-  }
-});
-
-test('nickname accepts the profile page and name label used by newer WeChat versions', () => {
-  const { runner, state } = fixture({ profileTitle: '个人资料', nicknameLabel: '名字' });
-  assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
-  assert.equal(state.records.at(-1).status, 'completed');
-  assert.equal(state.sendClicks, 0);
-});
-
-test('bottom navigation uses named native controls instead of inaccurate model coordinates', () => {
-  const { runner, io } = fixture();
-  const observe = io.observe;
-  io.observe = hint => { const s = observe(hint); s.items.filter(i => i.role === 'tab').forEach(i => { i.point = [500, 500]; }); return s; };
-  assert.equal(runner.run(workflow('wechat-nickname'), { dryRun: true }).nickname, '本地测试');
-});
-
-test('input geometry follows native window insets and the keyboard instead of model coordinates', () => {
-  const window = { bounds: [0, 0, 1080, 2280], density: 3, statusBar: 84, navigationTop: 2238, keyboardTop: null };
-  const search = markers.inputTarget(1080, 2280, window, 'search_input');
-  assert.deepEqual(search.point, [540, 73]);
-  assert.deepEqual(search.crop, [173, 84, 821, 168]);
-  assert.deepEqual(markers.inputTarget(1080, 2280, { ...window, bounds: [0, 84, 1080, 2238] }, 'search_input'), search, 'status bar insets must not be applied twice');
-  const composer = markers.inputTarget(1080, 2280, window, 'message_editor');
-  const raised = markers.inputTarget(1080, 2280, { ...window, keyboardTop: 1400 }, 'message_editor');
-  assert.deepEqual(composer.point, [450, 944]);
-  assert.deepEqual(raised.point, [450, 577]);
-  assert.equal(raised.crop[1] + raised.crop[3], 1400);
-  const scaled = markers.inputTarget(720, 1520, { bounds: [0, 0, 720, 1520], density: 2, statusBar: 56, navigationTop: 1492 }, 'search_input');
-  assert.ok(scaled.point.every((n, i) => Math.abs(n - search.point[i]) <= 1), 'pixel rounding may differ by at most one normalized unit');
-  for (const invalid of [{ ...window, density: NaN }, { ...window, bounds: [-1, 0, 1080, 2280] }, { ...window, keyboardTop: -1 }, { ...window, statusBar: 2280 }]) assert.throws(() => markers.inputTarget(1080, 2280, invalid, 'search_input'));
-  assert.throws(() => markers.inputTarget(2280, 1080, window, 'search_input'));
-  assert.throws(() => markers.inputTarget(1080, 2280, window, 'password'));
-  assert.doesNotThrow(() => markers.inputConfirmed({ certain: true, kind: 'search_input', text: '' }, 'search_input', ''));
-  for (const value of [{ certain: false, kind: 'search_input', text: '' }, { certain: true, kind: 'message_editor', text: '' }, { certain: true, kind: 'search_input', text: '已有内容' }, { certain: true, kind: 'search_input', text: null }]) assert.throws(() => markers.inputConfirmed(value, 'search_input', ''), /未覆盖/);
-});
-
-test('gesture navigation does not move the composer above its actual input row', () => {
-  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 2238, 1080, 2280]), null);
-  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 2136, 1080, 2280]), 2136);
-  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 0, 1080, 84]), null);
-  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 570, 66, 2280]), null);
-  assert.equal(markers.navigationTop(1080, 2280, 3, [0, 0, 1080, 2280]), null);
-  const value = markers.inputTarget(1080, 2280, { bounds: [0, 0, 1080, 2280], statusBar: 84, density: 3, navigationTop: null }, 'message_editor');
-  assert.deepEqual(value.crop, [108, 2112, 756, 168]);
-  assert.deepEqual(value.point, [450, 963]);
-});
-
-test('search input verification allows its blinking caret but rejects changed contents', () => {
-  const width = 200, height = 600, before = new Array(width * height).fill(0), caret = before.slice();
-  for (let y = 42; y < 70; y++) caret[y * width + 80] = 0xffffff;
-  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], 'search'), true);
-  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], true), false, 'chat titles must still be unchanged');
-  for (let x = 80; x < 100; x++) caret[60 * width + x] = 0xffffff;
-  assert.equal(markers.unchanged(before, caret, width, height, [500, 100], 'search'), false);
-});
-
-test('screen capture releases the host frame and never copies a missing frame or reuses its cached image', () => {
-  let recycled = false, copies = 0, fallback = false;
-  const source = { recycle() { recycled = true; } }, copy = {};
-  const images = { captureScreen() { return copies ? recycled ? null : (fallback = true, source) : source; }, copy(frame) { assert.equal(frame, source); copies++; return copy; } };
-  assert.equal(capture(images, () => {}), copy);
-  assert.equal(recycled, true);
-  assert.throws(() => capture(images, () => {}), /没有取得新的屏幕画面/);
-  assert.equal(copies, 1); assert.equal(fallback, false);
-  recycled = false;
-  assert.throws(() => capture({ captureScreen: () => source, copy() { throw Error('copy failed'); } }, () => {}), /copy failed/);
-  assert.equal(recycled, true, 'failed copies also release the captured Android image');
-  let attempts = 0;
-  assert.equal(capture({ captureScreen: () => ++attempts === 1 ? null : source, copy: () => copy }, () => {}), copy);
-  assert.equal(attempts, 2);
-});
-
-test('an unconfirmed search page stops before any text input', () => {
-  const { runner, io, state } = fixture();
-  const observe = io.observe;
-  io.observe = hint => { const s = observe(hint); if (s.page === 'search') { s.page = 'home'; s.items = []; } return s; };
-  assert.throws(() => runner.run(workflow('wechat-send-hello'), { dryRun: true }), /没有确认微信全局搜索页|页面标题.*不完整/);
-  assert.equal(state.query, ''); assert.deepEqual(state.typed, []); assert.equal(state.sendClicks, 0);
-});
-
-test('opening a chat waits for the page transition without repeating the row click', () => {
-  const { io, runner, state } = fixture();
-  const observe = io.observe, open = io.openRow; let delayed = 0, rowClicks = 0;
-  io.openRow = (...args) => { rowClicks++; return open(...args); };
-  io.observe = hint => {
-    const current = observe(hint);
-    if (state.page === 'chat' && hint?.startsWith('核对是否已进入目标聊天') && delayed++ < 3) return { page: 'search', title: '', certain: true, items: [pair('search_input', '搜索', [500, 80], '文件传输助手')], editor: null, outgoing: [], listEmpty: false };
-    return current;
-  };
-  runner.run(workflow('wechat-send-hello'), { dryRun: true });
-  assert.equal(rowClicks, 1); assert.equal(state.sendClicks, 0); assert.deepEqual(state.typed, ['1']); assert.equal(state.clears, 1);
-});
-
-test('invalid image coordinates are reread with no action until valid; transport and verification failures are not retried', () => {
-  const { runner, state, io } = fixture();
-  const observe = io.observe; let reads = 0;
-  io.observe = hint => { const s = observe(hint); if (++reads === 1) s.items[0].point = [148, 2118]; return s; };
-  runner.run(workflow('wechat-open'), { dryRun: true });
-  assert.ok(state.logs.some(e => e.type === 'observation_rejected')); assert.equal(state.sendClicks, 0);
-  const bad = fixture(); let actions = 0, invalidReads = 0;
-  bad.io.click = () => { actions++; };
-  bad.io.observe = () => { invalidReads++; return { certain: true, page: 'other', items: [] }; };
-  assert.throws(() => bad.runner.run(workflow('wechat-open'), { dryRun: true }), /页面识别不完整/);
-  assert.equal(invalidReads, 3); assert.equal(actions, 0);
-  for (const transport of [false, true]) {
-    const stop = fixture(); let calls = 0;
-    stop.io.observe = () => { calls++; if (transport) throw Error('HTTP 429'); return { page: 'other', title: '安全保护中', certain: true, items: [], editor: null, outgoing: [], listEmpty: false }; };
-    assert.throws(() => stop.runner.run(workflow('wechat-open'), { dryRun: true }), transport ? /HTTP 429/ : /账号本人/);
-    assert.equal(calls, 1);
-  }
-});
-
-test('HTTP freshness is once per run or per recipient; lifecycle receives rehearsal and completed context', () => {
-  for (const refresh of ['run', 'recipient']) {
-    const { runner, state, io } = fixture();
-    const sendRequest = io.request;
-    io.request = value => { assert.equal(state.page, refresh === 'recipient' ? 'chat' : 'home'); return sendRequest(value); };
-    runner.run(workflow('wechat-broadcast'), { dryRun: true, input: input({ type: 'http', request: request(), refresh }) });
-    assert.equal(state.requests.length, refresh === 'run' ? 1 : 2);
-    assert.deepEqual(state.typed, refresh === 'run' ? ['fresh-1', 'fresh-1'] : ['fresh-1', 'fresh-2']);
-  }
-  const { runner, state } = fixture();
-  const after = request({ type: 'ignore' }); after.method = 'POST'; after.body = { mode: '{{run.mode}}', status: '{{run.status}}', completed: '{{result.completed}}' };
-  runner.run(workflow('wechat-broadcast'), { dryRun: true, input: input({ type: 'before_run' }), hooks: { beforeRun: request(), afterRun: after } });
-  assert.deepEqual(state.typed, ['fresh-1', 'fresh-1']);
-  assert.deepEqual(state.requests[1].body, { mode: 'rehearsal', status: 'completed', completed: '2' });
-});
-
-test('existing drafts are preserved; uncertain send stops the batch without replay', () => {
-  const draft = fixture({ existingDraft: '客户原草稿' });
-  assert.throws(() => draft.runner.run(workflow('wechat-send-hello'), { dryRun: true }), /已有草稿/);
-  assert.equal(draft.state.draft, '客户原草稿'); assert.equal(draft.state.sendClicks, 0);
-  const same = fixture({ existingDraft: '1' });
-  same.runner.run(workflow('wechat-send-hello'), { dryRun: true });
-  assert.equal(same.state.draft, '1'); assert.equal(same.state.clears, 0);
-  const send = fixture({ uncertain: true });
-  assert.throws(() => send.runner.run(workflow('wechat-broadcast'), { dryRun: false, input: input() }), /connection lost/);
-  assert.equal(send.state.sendClicks, 1); assert.deepEqual(send.state.records.at(-1).targets.map(t => t.status), ['uncertain', 'skipped']);
-  const changed = fixture();
-  changed.io.beforeCommit = () => { throw Error('screen changed'); };
-  assert.throws(() => changed.runner.run(workflow('wechat-send-hello'), { dryRun: false }), /screen changed/);
-  assert.equal(changed.state.sendClicks, 0); assert.equal(changed.state.draft, '1');
-});
-
-test('1000 selected conversations preserve durable progress and receive the latest HTTP message', () => {
-  const names = Array.from({ length: 1000 }, (_, i) => '会话' + (i + 1));
-  const { runner, state, io } = fixture({ targets: names });
-  io.record = value => { state.last = structuredClone(value); };
-  const value = input({ type: 'http', request: request(), refresh: 'recipient' }, names);
-  value.recipients.scope = 'conversations';
-  runner.run(workflow('wechat-broadcast'), { dryRun: true, input: value });
-  assert.equal(state.requests.length, 1000); assert.equal(state.typed.length, 1000);
-  assert.equal(state.typed[999], 'fresh-1000'); assert.equal(state.clears, 1000); assert.equal(state.sendClicks, 0);
-  assert.equal(state.last.targets.length, 1000); assert.ok(state.last.targets.every(t => t.status === 'rehearsed'));
-});
-
-test('1000 groups use one full inventory and exact search instead of rescanning the group picker per recipient', () => {
-  const names = Array.from({ length: 1000 }, (_, i) => '群聊' + (i + 1));
-  const { runner, state, io } = fixture({ targets: names, groupTitles: true });
-  io.record = value => { state.last = structuredClone(value); };
-  const originalClick = io.click, originalScroll = io.scroll, originalRequest = io.request;
-  let pickerEntries = 0, groupScrolls = 0;
-  io.click = point => { if (state.page === 'new_chat') pickerEntries++; return originalClick(point); };
-  io.scroll = up => { if (state.page === 'groups') groupScrolls++; return originalScroll(up); };
-  io.request = value => { assert.equal(state.page, 'chat'); return originalRequest(value); };
-  const value = input({ type: 'http', request: request(), refresh: 'recipient' });
-  value.recipients = { scope: 'groups', mode: 'all', names: [] };
-  runner.run(workflow('wechat-broadcast'), { dryRun: true, input: value });
-  assert.equal(pickerEntries, 1);
-  assert.ok(groupScrolls < 100, 'navigation must not rescan the full picker 1000 times');
-  assert.equal(state.requests.length, 1000);
-  assert.equal(state.clears, 1000); assert.equal(state.sendClicks, 0);
-  assert.equal(state.last.targets.length, 1000);
-  assert.ok(state.last.targets.every(t => t.status === 'rehearsed'));
-});
-
-test('a plain contact title or ambiguous search falls back to the group picker before fetching or typing a message', () => {
-  for (const ambiguous of [false, true]) {
-    const { runner, state, io } = fixture({ targets: ['同名群'] });
-    const originalObserve = io.observe, originalOpen = io.openRow, originalRequest = io.request;
-    const origins = []; let currentOrigin;
-    if (ambiguous) io.observe = hint => {
-      const page = originalObserve(hint);
-      if (page.page === 'home') page.items = page.items.filter(i => !['chat', 'group'].includes(i.role));
-      if (page.page === 'search' && state.query) page.items.push(pair('group', state.query, [500, 350]));
-      return page;
-    };
-    io.openRow = (title, page) => { origins.push(page); currentOrigin = page; return originalOpen(title, page); };
-    io.request = value => { assert.equal(currentOrigin, 'groups'); return originalRequest(value); };
-    runner.run(workflow('wechat-broadcast'), { dryRun: true, input: input({ type: 'http', request: request(), refresh: 'recipient' }, ['同名群']) });
-    assert.deepEqual(origins, ambiguous ? ['groups'] : ['home', 'groups']);
-    assert.deepEqual(state.typed, ['fresh-1']); assert.equal(state.sendClicks, 0);
-  }
-});
-
-test('request parsing, data variables and auth modes enforce boundaries without retries', () => {
-  const { io, state } = fixture(), credential = '11111111-1111-4111-8111-111111111111';
-  for (const auth of [{ type: 'none' }, { type: 'bearer', credential }, { type: 'basic', username: 'user', credential }, { type: 'api_key', name: 'X-Key', location: 'header', credential }, { type: 'api_key', name: 'key', location: 'query', credential }]) {
-    const spec = request({ type: 'json', pointer: '/data/a~1b' }); spec.auth = auth; spec.method = 'POST';
-    spec.query = [{ name: 'who', value: '{{recipient.title}}' }]; spec.headers = [{ name: 'X-Run', value: '{{run.id}}' }]; spec.body = { mode: '{{run.mode}}' };
-    io.request = value => { state.requests.push(value); return { status: 200, body: '{"data":{"a/b":"你好"}}' }; };
-    assert.equal(http.fetch(spec, { recipient: { title: '测试群' }, run: { id: 'abc', mode: 'rehearsal' } }, io).message, '你好');
-    const actual = state.requests.at(-1);
-    assert.equal(actual.query[0].value, '测试群'); assert.equal(actual.headers[0].value, 'abc'); assert.equal(actual.body.mode, 'rehearsal');
-    if (auth.type === 'bearer') assert.equal(actual.headers[1].value, 'Bearer private-fixture-value');
-    if (auth.type === 'basic') assert.equal(actual.headers[1].value, 'Basic ' + Buffer.from('user:private-fixture-value').toString('base64'));
-    if (auth.type === 'api_key') assert.equal((auth.location === 'query' ? actual.query : actual.headers)[1].value, 'private-fixture-value');
-  }
-  assert.throws(() => http.expand('{{missing}}', {}), /当前时机/);
-  assert.throws(() => http.expand('{{run.id', {}), /括号/);
-  for (const bad of ['http://example.com', 'https://user:password@example.com']) assert.throws(() => http.validate({ ...request(), url: bad }, io), /地址/);
-  assert.throws(() => http.pointer({}, '/missing'), /找不到/); assert.throws(() => http.pointer({}, '/bad~2path'), /路径/);
-  const preview = http.preview(request({ type: 'json', pointer: '/missing' }), {}, io);
-  assert.match(preview.parseError, /找不到/); assert.equal(preview.raw, '{"data":{"a/b":"你好"}}');
-  assert.throws(() => http.fetch(request({ type: 'json', pointer: '/missing' }), {}, io), /找不到/);
-  const before = state.requests.length; io.request = () => { state.requests.push({}); return { status: 429, body: 'secret details' }; };
-  assert.throws(() => http.fetch(request(), {}, io), /HTTP 429/); assert.equal(state.requests.length - before, 1);
-});
-
-test('malformed observations and ambiguous names stop before any click', () => {
-  const { io } = fixture(), valid = io.observe();
-  assert.throws(() => core.validateScreen({ ...valid, certain: false }), /识别不完整/);
-  assert.throws(() => core.validateScreen({ ...valid, items: [pair('group', '群甲', [500, 1280])] }), /格式/);
-  assert.throws(() => core.validateScreen({ ...valid, page: 'chat', title: '' }), /识别不完整/);
-  assert.throws(() => core.validateInput(input({ type: 'manual', text: 'Ok' }, ['群甲', '群 甲'])), /重复/);
-  assert.throws(() => core.mergeNames(['甲', '乙'], ['甲', '丙']), /顺序/);
-});
-
-test('a notification hiding the title is reread before any action, with bounded waiting and no network retries', () => {
-  const { io, state } = fixture();
-  const originalObserve = io.observe, originalClick = io.click;
-  let reads = 0;
-  io.observe = () => ++reads <= 2 ? { ...originalObserve(), page: 'chat', title: '' } : originalObserve();
-  io.click = p => { assert.ok(reads > 2); originalClick(p); };
-  core.create(io).run(workflow('wechat-first-chat'), { dryRun: true });
-  assert.equal(state.logs.filter(l => l.type === 'observation_wait').length, 2);
-  reads = 0; io.click = () => assert.fail('an obscured screen must never be clicked');
-  io.observe = () => { reads++; return { ...originalObserve(), certain: false }; };
-  assert.throws(() => core.create(io).run(workflow('wechat-first-chat'), { dryRun: true }), /识别不完整/);
-  assert.equal(reads, 3);
-  reads = 0; io.observe = () => { reads++; throw new Error('HTTP 429'); };
-  assert.throws(() => core.create(io).run(workflow('wechat-first-chat'), { dryRun: true }), /HTTP 429/);
+  const por = { dataDir: '/fixture', runId: 'fixture', readConfig: () => ({}), log() {} };
+  const io = load(wecomPath + 'wecom.js').create(por, {});
+  assert.equal(typeof io.observe, 'function');
+  assert.equal(io.secret(id, endpoint), 'legacy-secret');
   assert.equal(reads, 1);
+  assert.throws(() => io.secret(id, 'https://other.invalid'), /接口地址改变/);
+  load(wecomPath + 'main.js')(por);
+  assert.throws(() => load(wecomPath + 'main.js')({ ...por, execution: { workflowId: 'invalid', dryRun: true } }), /无效/);
 });
 
-test('phone avatar labels and stale-screen guards match the desktop geometry and reject invented marker IDs', () => {
-  const width = 400, height = 800;
-  const image = new Uint32Array(width * height).fill(0xff1a1a1a);
-  for (const top of [150, 250]) for (let y = top; y < top + 40; y++) for (let x = 18; x < 52; x++) image[y * width + x] = 0xff00c864;
-  const points = markers.detect(image, width, height);
-  assert.deepEqual(points, { 31: [87, 212], 68: [87, 337] });
-  assert.deepEqual(markers.selected({ found: true, marker: 31, text: '群甲' }, points, '群甲'), [87, 212]);
-  for (const marker of [null, '31', 999]) assert.throws(() => markers.selected({ found: true, marker, text: '群甲' }, points, '群甲'), /唯一对应/);
-  assert.throws(() => markers.selected({ found: true, marker: 31, text: '群乙' }, points, '群甲'), /唯一对应/);
-  const crops = markers.candidates(points, width, height, [500, 220]);
-  assert.deepEqual(crops.map(c => c.id), [31, 68]);
-  assert.ok(crops[0].bottom <= crops[1].top, 'candidate images must not include the neighboring title');
-  assert.ok(crops[0].bottom - crops[0].top < height / 3);
-  assert.throws(() => markers.candidates(points, width, height, [0, 220]), /位置/);
-  assert.match(markers.instruction('群甲', 'groups', 68), /candidate ID 68/);
-  const caret = image.slice();
-  for (let y = 710; y < 730; y++) caret[y * width + 100] = 0xffffffff;
-  assert.equal(markers.unchanged(image, caret, width, height, [500, 900], true), true);
-  caret[720 * width + 120] = 0xffffffff;
-  assert.equal(markers.unchanged(image, caret, width, height, [500, 900], true), false);
-  const title = image.slice(); title[70 * width + 100] = 0xffffffff;
-  assert.equal(markers.unchanged(image, title, width, height, [500, 900], true), false);
+test('categorical recipients use their native lists in stable order and deduplicate groups', () => {
+  for (const [recipients, expected] of [
+    [
+      { groups: true, direct: false },
+      ['群甲', '群乙'],
+    ],
+    [
+      { groups: false, direct: true },
+      ['小王', '小李'],
+    ],
+    [
+      { groups: true, direct: true },
+      ['群甲', '群乙', '小王', '小李'],
+    ],
+  ]) {
+    const { runner, state, io } = fixture();
+    io.openNamed = () => {
+      throw Error('categorical processing must not use global search');
+    };
+    runner.run(workflow('wecom-broadcast'), {
+      dryRun: true,
+      input: input(undefined, recipients),
+    });
+    assert.deepEqual(
+      state.records.at(-1).targets.map(item => item.title),
+      expected,
+    );
+    assert.equal(state.typed.length, expected.length);
+    assert.equal(state.sendClicks, 0);
+  }
 });
 
-test('mobile row candidates retain all visible titles when incoming messages reorder conversations', () => {
-  const points = { 1: [87, 100], 2: [87, 260], 3: [87, 420], 4: [87, 580], 5: [87, 740] };
-  const candidates = markers.candidates(points, 400, 1000, [500, 260]);
-  assert.equal(candidates[0].id, 2);
-  assert.equal(candidates.length, 5, 'the model point only ranks candidates; it must not exclude visible rows');
-  assert.ok(candidates.some(candidate => candidate.id === 5));
+test('large group inventory is frozen once and never searched recipient by recipient', () => {
+  const groups = Array.from({ length: 1000 }, (_, index) => `群聊${index + 1}`);
+  const { runner, state, io } = fixture({ groups });
+  let searches = 0;
+  io.openNamed = () => {
+    searches++;
+  };
+  runner.run(workflow('wecom-broadcast'), {
+    dryRun: true,
+    input: input(undefined, { groups: true, direct: false }),
+  });
+  assert.equal(searches, 0);
+  assert.equal(state.typed.length, 1000);
+  assert.equal(state.clears, 1000);
+  assert.equal(state.sendClicks, 0);
+  assert.equal(state.records.at(-1).targets.length, 1000);
 });
 
-test('explicit text-only image providers are rejected while absent capability metadata stays unknown', () => {
-  const value = { data: [
-    { id: 'text', modalities: { input: ['text'] } },
-    { id: 'vision', modalities: { input: ['text', 'image'] } },
-    { id: 'unknown' },
-  ] };
-  assert.equal(provider.imageSupport(value, 'text'), false);
-  assert.equal(provider.imageSupport(value, 'vision'), true);
-  assert.equal(provider.imageSupport(value, 'unknown'), null);
-  assert.equal(provider.imageSupport(value, 'missing'), null);
+test('existing drafts are preserved and uncertain sends are never retried', () => {
+  const draft = fixture({ existingDraft: '客户原草稿', groups: ['群甲'] });
+  assert.throws(
+    () =>
+      draft.runner.run(workflow('wecom-broadcast'), {
+        dryRun: true,
+        input: input(undefined, { groups: true, direct: false }),
+      }),
+    /已有草稿/,
+  );
+  assert.equal(draft.state.draft, '客户原草稿');
+  assert.equal(draft.state.sendClicks, 0);
+
+  const uncertain = fixture({ uncertain: true, groups: ['群甲', '群乙'] });
+  assert.throws(
+    () =>
+      uncertain.runner.run(workflow('wecom-broadcast'), {
+        dryRun: false,
+        input: input(undefined, { groups: true, direct: false }),
+      }),
+    /connection lost/,
+  );
+  assert.equal(uncertain.state.sendClicks, 1);
+  assert.deepEqual(
+    uncertain.state.records.at(-1).targets.map(item => item.status),
+    ['uncertain', 'skipped'],
+  );
+});
+
+test('HTTP message freshness and lifecycle context remain deterministic', () => {
+  const { runner, state } = fixture({ groups: ['群甲', '群乙'] });
+  runner.run(workflow('wecom-broadcast'), {
+    dryRun: true,
+    input: input(
+      { type: 'http', request: request(), refresh: 'recipient' },
+      { groups: true, direct: false },
+    ),
+  });
+  assert.deepEqual(state.typed, ['fresh-1', 'fresh-2']);
+
+  const lifecycle = fixture({ groups: ['群甲', '群乙'] });
+  const after = request({ type: 'ignore' });
+  after.method = 'POST';
+  after.body = {
+    mode: '{{run.mode}}',
+    status: '{{run.status}}',
+    completed: '{{result.completed}}',
+  };
+  lifecycle.runner.run(workflow('wecom-broadcast'), {
+    dryRun: true,
+    input: input(
+      { type: 'before_run' },
+      { groups: true, direct: false },
+    ),
+    hooks: { beforeRun: request(), afterRun: after },
+  });
+  assert.deepEqual(lifecycle.state.requests[1].body, {
+    mode: 'rehearsal',
+    status: 'completed',
+    completed: '2',
+  });
+});
+
+test('HTTP parsing and authentication enforce boundaries without retry', () => {
+  const { io, state } = fixture();
+  const credential = '11111111-1111-4111-8111-111111111111';
+  for (const auth of [
+    { type: 'none' },
+    { type: 'bearer', credential },
+    { type: 'basic', username: 'user', credential },
+    {
+      type: 'api_key',
+      name: 'X-Key',
+      location: 'header',
+      credential,
+    },
+    { type: 'api_key', name: 'key', location: 'query', credential },
+  ]) {
+    const spec = request({ type: 'json', pointer: '/data/message' });
+    spec.auth = auth;
+    spec.method = 'POST';
+    spec.query = [
+      { name: 'who', value: '{{recipient.title}}' },
+    ];
+    spec.body = { mode: '{{run.mode}}' };
+    io.request = value => {
+      state.requests.push(value);
+      return { status: 200, body: '{"data":{"message":"你好"}}' };
+    };
+    assert.equal(
+      http.fetch(
+        spec,
+        { recipient: { title: '测试群' }, run: { id: 'abc', mode: 'send' } },
+        io,
+      ).message,
+      '你好',
+    );
+  }
+  assert.throws(
+    () => http.validate({ ...request(), url: 'http://example.com' }, io),
+    /HTTPS/,
+  );
+});
+
+test('malformed pages and invalid recipient combinations stop before action', () => {
+  const { io } = fixture();
+  const valid = io.observe();
+  assert.throws(
+    () => core.validateScreen({ ...valid, certain: false }),
+    /识别不完整/,
+  );
+  assert.throws(
+    () =>
+      core.validateInput({
+        ...input(),
+        recipients: { groups: false, direct: false },
+      }),
+    /至少选择/,
+  );
+  assert.throws(
+    () => core.validateInput(input(undefined, { groups: 'yes', direct: false })),
+    /勾选/,
+  );
+});
+
+test('scheduled entry executes only WeCom workflows and releases resources', () => {
+  function entry(io) {
+    const module = { exports: {} };
+    const wrapper = vm.runInThisContext(
+      '(function(require,module,exports){' +
+        readFileSync(wecomPath + 'main.js', 'utf8') +
+        '\n})',
+    );
+    wrapper(
+      specifier =>
+        specifier === './wecom.js'
+          ? { create: () => io }
+          : loadMobile(createRequire(wecomPath + 'main.js').resolve(specifier)),
+      module,
+      module.exports,
+    );
+    return module.exports;
+  }
+
+  for (const item of definitions.workflows) {
+    const { io, state } = fixture();
+    let prepared = 0;
+    let finished = 0;
+    io.prepare = () => prepared++;
+    io.finish = () => finished++;
+    entry(io)({
+      execution: { workflowId: item.id, dryRun: true },
+      readConfig: () => ({ input: input(), hooks: {}, dryRun: false }),
+    });
+    assert.equal(prepared, 1);
+    assert.equal(finished, 1);
+    assert.equal(state.records.at(-1).status, 'completed');
+    assert.equal(state.sendClicks, 0);
+  }
+
+  const { io } = fixture();
+  assert.throws(
+    () =>
+      entry(io)({
+        execution: { workflowId: 'wechat-open', dryRun: true },
+        readConfig: () => ({}),
+      }),
+    /无效/,
+  );
+});
+
+test('WeCom 5.0.12 keeps verified native control IDs', () => {
+  const wecom = loadMobile(wecomPath + 'wecom.js');
+  const ids = loadMobile(wecomPath + 'wecom-ids.js');
+  const profile = ids.profile('5.0.12');
+  assert.equal(profile.i_6, 'iu5');
+  assert.equal(profile.i_d, 'ith');
+  assert.equal(profile.lba, 'm0f');
+  assert.equal(profile.km_, 'l_8');
+  const inverse = Object.fromEntries(
+    Object.entries(profile).map(([canonical, raw]) => [raw, canonical]),
+  );
+  const nodes = [
+    { id: 'o6j', text: '消息', bounds: [489, 121, 591, 190] },
+    { id: 'db5', text: '', bounds: [0, 228, 1080, 2111] },
+    { id: 'fwr', text: '全部', bounds: [109, 281, 187, 331] },
+  ].map(node => ({
+    ...node,
+    id: inverse[node.id],
+    visible: true,
+    enabled: true,
+  }));
+  assert.equal(wecom.homeReady(nodes, 1080), true);
+  assert.deepEqual(ids.profile('legacy'), {});
 });

@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-exec "${WECHAT_RUST_LLD:?WECHAT_RUST_LLD is required}" "$@"

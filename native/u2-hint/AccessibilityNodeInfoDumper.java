@@ -1,6 +1,7 @@
 package com.wetest.uia2.stub;
 
 import android.annotation.TargetApi;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.UiAutomation;
 import android.os.Build;
 import android.util.Log;
@@ -72,6 +73,13 @@ class AccessibilityNodeInfoDumper {
         Set<AccessibilityNodeInfo> roots = new HashSet<>();
 //        UiAutomation uiAutomation = InstrumentationRegistry.getInstrumentation().getUiAutomation();
         UiAutomation uiAutomation = UiDevice.getInstance(InstrumentShellWrapper.getInstance()).getUiAutomation();
+        AccessibilityServiceInfo serviceInfo = uiAutomation.getServiceInfo();
+        if (serviceInfo != null) {
+            serviceInfo.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                    | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                    | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+            uiAutomation.setServiceInfo(serviceInfo);
+        }
 
         // Ensure the active window root is included.
         AccessibilityNodeInfo activeRoot = uiAutomation.getRootInActiveWindow();
@@ -168,12 +176,9 @@ class AccessibilityNodeInfoDumper {
             for (int i = 0; i < count; i++) {
                 AccessibilityNodeInfo child = node.getChild(i);
                 if (child != null) {
-                    if (child.isVisibleToUser()) {
-                        dumpNodeRec(child, serializer, i, width, height, maxDepth-1);
-                        child.recycle();
-                    } else {
-                        Log.i(TAG, String.format("Skipping invisible child: %s", child));
-                    }
+                    // WeChat can mark layout containers invisible while exposing actionable descendants.
+                    dumpNodeRec(child, serializer, i, width, height, maxDepth-1);
+                    child.recycle();
                 } else {
                     Log.i(TAG, String.format("Null child %d/%d, parent: %s", i, count, node));
                 }

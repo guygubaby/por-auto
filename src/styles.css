@@ -1,50 +1,218 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/roboto-slab';
+@import '@fontsource-variable/public-sans';
+@custom-variant dark (&:is(.dark *));
 
-@theme {
-  --color-canvas: #080a0f;
-  --color-sidebar: #0b0e15;
-  --color-surface: #10141d;
-  --color-surface-raised: #151a25;
-  --color-surface-soft: #191f2c;
-  --color-line: #252c3b;
-  --color-ink: #f7f8fa;
-  --color-ink-secondary: #a8b0c0;
-  --color-ink-muted: #8993a6;
-  --color-brand: #6d7cff;
-  --color-brand-strong: #8792ff;
-  --color-brand-soft: #202747;
-  --color-success: #48d9a0;
-  --color-success-soft: #102c25;
-  --color-warning: #f2b766;
-  --color-warning-soft: #302519;
-  --color-danger: #ff8996;
-  --color-danger-soft: #321a22;
-  --font-sans: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei UI", sans-serif;
-  --text-xs: 0.75rem;
-  --text-xs--line-height: 1rem;
-  --text-sm: 0.8125rem;
-  --text-sm--line-height: 1.25rem;
-  --text-base: 0.875rem;
-  --text-base--line-height: 1.25rem;
-  --text-lg: 1rem;
-  --text-lg--line-height: 1.5rem;
-  --text-xl: 1.125rem;
-  --text-xl--line-height: 1.5rem;
-  --text-2xl: 1.25rem;
-  --text-2xl--line-height: 1.75rem;
-  --radius-card: 1rem;
-  --radius-control: 0.5rem;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --radius-sm: 0.5rem;
+  --radius-md: 0.65rem;
+  --radius-lg: 0.9rem;
+  --radius-xl: 1.2rem;
+  --font-sans:
+    'Inter', 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
+    sans-serif;
+  --font-serif:
+    'Roboto Slab Variable', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
+    serif;
+  --font-heading:
+    'Public Sans Variable', 'PingFang SC', 'Microsoft YaHei UI', system-ui,
+    sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+:root {
+  --background: #ffffff;
+  --card: #ffffff;
+  --sidebar: #fafafa;
+  --foreground: #262626;
+  --muted-foreground: #737373;
+  --primary: #7c56ae;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5;
+  --muted: #f7f7f7;
+  --accent: #262626;
+  --border: #e5e5e5;
+  --input: #949494;
+  --destructive: oklch(0.577 0.245 27.325);
+  --success: #187b61;
+  --success-soft: #e7f4ed;
+  --warning: #a56b19;
+  color-scheme: light;
+  --card-foreground: #262626;
+  --popover: #ffffff;
+  --popover-foreground: #262626;
+  --secondary-foreground: #262626;
+  --accent-foreground: #ffffff;
+  --ring: #7c56ae;
+  --chart-1: oklch(0.872 0.007 219.6);
+  --chart-2: oklch(0.56 0.021 213.5);
+  --chart-3: oklch(0.45 0.017 213.2);
+  --chart-4: oklch(0.378 0.015 216);
+  --chart-5: oklch(0.275 0.011 216.9);
+  --radius: 0.875rem;
+  --sidebar-foreground: #262626;
+  --sidebar-primary: #7c56ae;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f5f5f5;
+  --sidebar-accent-foreground: #262626;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #7c56ae;
+}
+.dark {
+  --background: #0a0a0a;
+  --card: #141414;
+  --sidebar: #101010;
+  --foreground: #f5f5f5;
+  --muted-foreground: #a3a3a3;
+  --primary: #cbb3ee;
+  --primary-foreground: #171717;
+  --secondary: #242424;
+  --muted: #1f1f1f;
+  --accent: #e5e5e5;
+  --border: #2e2e2e;
+  --input: #767676;
+  --destructive: oklch(0.704 0.191 22.216);
+  --success: #69d3ac;
+  --success-soft: #203b2d;
+  --warning: #e4b671;
+  color-scheme: dark;
+  --card-foreground: #f5f5f5;
+  --popover: #141414;
+  --popover-foreground: #f5f5f5;
+  --secondary-foreground: #f5f5f5;
+  --accent-foreground: #171717;
+  --ring: #cbb3ee;
+  --chart-1: oklch(0.872 0.007 219.6);
+  --chart-2: oklch(0.56 0.021 213.5);
+  --chart-3: oklch(0.45 0.017 213.2);
+  --chart-4: oklch(0.378 0.015 216);
+  --chart-5: oklch(0.275 0.011 216.9);
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #cbb3ee;
+  --sidebar-primary-foreground: #171717;
+  --sidebar-accent: #242424;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: #2e2e2e;
+  --sidebar-ring: #cbb3ee;
+}
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-serif);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  button:not(:disabled),
+  a,
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+  :where(button, a, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-heading);
+  }
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-:root { forced-color-adjust: none; color-scheme: dark; font-family: var(--font-sans); color: var(--color-ink); background: var(--color-canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
-* { box-sizing: border-box; }
-html, body, #app { margin: 0; min-width: 360px; height: 100%; }
-body { font-size: var(--text-sm); line-height: 1.5; background: radial-gradient(ellipse at 70% 0%, #6d7cff09, transparent 60%), var(--color-canvas); }
-button:not(:disabled), select:not(:disabled) { cursor: pointer; }
-:where(button, a, input, textarea, select, summary):focus-visible { outline: 2px solid var(--color-brand-strong); outline-offset: 2px; }
-::selection { background: #6d7cff60; color: white; }
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-thumb { background: #a8b0c038; border-radius: 8px; }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+@media (forced-colors: active) {
+  :root,
+  .dark {
+    --background: Canvas;
+    --card: Canvas;
+    --sidebar: Canvas;
+    --foreground: CanvasText;
+    --muted-foreground: CanvasText;
+    --primary: Highlight;
+    --primary-foreground: HighlightText;
+    --secondary: Canvas;
+    --muted: Canvas;
+    --accent: Canvas;
+    --accent-foreground: CanvasText;
+    --card-foreground: CanvasText;
+    --popover: Canvas;
+    --popover-foreground: CanvasText;
+    --secondary-foreground: CanvasText;
+    --border: CanvasText;
+    --input: CanvasText;
+  }
 }

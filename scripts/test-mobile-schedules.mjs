@@ -49,14 +49,14 @@ function setup(env, execute) {
 }
 function snapshot(env, payload = script()) {
   const store = join(env.root, 'sources', sha(Buffer.from(`${origin.url}\nmain`)));
-  return { source: origin, package: payload.p, cacheName: fs.readdirSync(join(store, 'versions')).find(name => name.startsWith(`${payload.p.id}-${payload.p.versionCode}-`)), config: { text: '冻结消息' }, execution: { workflowId: 'wechat-broadcast', dryRun: true } };
+  return { source: origin, package: payload.p, cacheName: fs.readdirSync(join(store, 'versions')).find(name => name.startsWith(`${payload.p.id}-${payload.p.versionCode}-`)), config: { text: '冻结消息' }, execution: { workflowId: 'wecom-broadcast', dryRun: true } };
 }
 const options = { name: '每天预演', cron: '* * * * *', timezone: 'Asia/Shanghai', enabled: true };
 
 test('scheduled execution pins code and config while later store updates change the current version', async () => fixture((env, manager) => {
   const { scheduler, advance } = setup(env);
   manager.importBundle(script(1, `module.exports = function (por) {
-    if (!por.execution) { por.saveConfig({text:'保存时的消息'}); por.schedules.save(${JSON.stringify(options)}, {workflowId:'wechat-broadcast',dryRun:true}); return; }
+    if (!por.execution) { por.saveConfig({text:'保存时的消息'}); por.schedules.save(${JSON.stringify(options)}, {workflowId:'wecom-broadcast',dryRun:true}); return; }
     var config = por.readConfig(); config.mutated = true;
     por.recordResult({status:'completed',text:config.text,version:por.versionCode,mode:por.execution.dryRun,unchanged:por.readConfig().mutated===undefined});
   };`).bundle);

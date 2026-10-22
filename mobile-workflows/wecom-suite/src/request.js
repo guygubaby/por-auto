@@ -1,4 +1,4 @@
-// GENERATED from mobile-workflows/wechat-suite/src/request.js
+// GENERATED from mobile-workflows/shared/src/request.js
 'use strict';
 
 function fail(message) { throw new Error(message); }

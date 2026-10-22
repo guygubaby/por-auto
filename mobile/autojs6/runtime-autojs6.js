@@ -116,7 +116,7 @@ function createAutoJs6Runtime() {
     isActive: function () { return !!screenActive.get(); },
     hasCapture: function () { return !!sessionCapture; },
     check: function () {
-      if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
+      if (!screenActive.get()) throw new Error('执行会话已停止，请重新开启手机定时执行');
       requireAccessibility();
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
     },

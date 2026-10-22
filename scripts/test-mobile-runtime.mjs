@@ -48,7 +48,7 @@ test('the focused application stays authoritative when the last accessibility ev
   const value=runtimeFixture({reportedPackage:'com.por.auto.input'});
   value.io.screenSession.acquire(false);value.io.screenSession.release();
   assert.equal(value.calls.keepAwake,1);
-  const other=runtimeFixture({focusedApplication:'com.tencent.mm'});
+  const other=runtimeFixture({focusedApplication:'com.tencent.wework'});
   assert.throws(()=>other.io.screenSession.acquire(false),/AutoJs6 前台/);
   assert.equal(other.calls.startForeground,0);
   const dialog=runtimeFixture({focusedSystemDialog:true});

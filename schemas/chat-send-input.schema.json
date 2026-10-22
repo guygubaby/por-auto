@@ -68,62 +68,101 @@
       ]
     },
     "recipients": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scope",
-        "mode"
-      ],
-      "properties": {
-        "scope": {
-          "enum": [
-            "groups",
-            "conversations"
-          ]
-        },
-        "mode": {
-          "enum": [
-            "all",
-            "selected"
-          ]
-        },
-        "names": {
-          "type": "array",
-          "uniqueItems": true,
-          "maxItems": 2000,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          }
-        }
-      },
-      "allOf": [
+      "description": "选择全部单聊、全部群聊或两者；旧名称列表仅用于保持已有固定快照范围。",
+      "oneOf": [
         {
-          "if": {
-            "properties": {
-              "mode": {
-                "const": "selected"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "direct",
+            "groups"
+          ],
+          "properties": {
+            "direct": {
+              "type": "boolean",
+              "description": "首页已有单聊，排除完整群聊列表中的对象"
+            },
+            "groups": {
+              "type": "boolean",
+              "description": "群聊列表中的全部群聊"
+            }
+          },
+          "anyOf": [
+            {
+              "properties": {
+                "direct": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "groups": {
+                  "const": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "mode"
+          ],
+          "properties": {
+            "scope": {
+              "enum": [
+                "groups",
+                "conversations"
+              ]
+            },
+            "mode": {
+              "enum": [
+                "all",
+                "selected"
+              ]
+            },
+            "names": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 2000,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
               }
             }
           },
-          "then": {
-            "properties": {
-              "names": {
-                "minItems": 1
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "selected"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "names": {
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "names"
+                ]
               }
-            },
-            "required": [
-              "names"
-            ]
-          }
+            }
+          ]
         }
       ]
     },
     "intervalMs": {
       "type": "integer",
       "minimum": 500,
-      "maximum": 60000,
+      "maximum": 600000,
       "default": 1000
     }
   },
@@ -281,12 +320,15 @@
         "url": {
           "type": "string",
           "format": "uri",
-          "maxLength": 4000
+          "maxLength": 2000
         },
         "method": {
           "enum": [
             "GET",
-            "POST"
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
           ]
         },
         "query": {
@@ -312,8 +354,8 @@
         },
         "timeoutSeconds": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 60,
+          "minimum": 5,
+          "maximum": 120,
           "default": 20
         }
       },
@@ -328,7 +370,10 @@
           "if": {
             "properties": {
               "method": {
-                "const": "GET"
+                "enum": [
+                  "GET",
+                  "DELETE"
+                ]
               }
             }
           },

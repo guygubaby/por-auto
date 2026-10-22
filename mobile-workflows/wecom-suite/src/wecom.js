@@ -12,9 +12,29 @@ function homeReady(nodes, width) {
   return titles.length === 1 && titles[0].text === '消息' && lists.length === 1
     && lists[0].bounds[0] === 0 && lists[0].bounds[2] === width && filters.length === 1;
 }
+function outgoing(nodes, width) {
+  return nodes.filter(function (body) {
+    if (body.id !== 'i_d' || !body.visible || !body.enabled) return false;
+    var row = body;
+    while (row && row.id !== 'message_row') row = nodes[row.parent];
+    if (!row) return false;
+    var avatars = nodes.filter(function (node) {
+      if (node.id !== 'message_avatar' || !node.visible || !node.enabled) return false;
+      for (var parent = nodes[node.parent]; parent; parent = nodes[parent.parent]) if (parent === row) return true;
+      return false;
+    });
+    if (avatars.length !== 1) return false;
+    var b = body.bounds, a = avatars[0].bounds, r = row.bounds;
+    return b[2] > b[0] && b[3] > b[1] && b[0] >= r[0] && b[2] <= r[2] && b[1] >= r[1] && b[3] <= r[3]
+      && a[0] > width / 2 && a[0] >= b[2] && a[2] > a[0] && a[3] > a[1] && a[2] <= width
+      && a[0] >= r[0] && a[2] <= r[2] && a[1] >= r[1] && a[3] <= r[3] && a[1] < b[3] && a[3] > b[1];
+  }).map(function (body) { return { text: body.text, pending: false, failed: false }; });
+}
 function create(por, config) {
-  var io = require('./android.js').create(por, config), ownedAwake = false;
+  var io = require('./io.js')(por), ownedAwake = false;
   var scope = 'conversations', last = null, lastTitle = null, commit = null;
+  var ids = require('./wecom-ids.js').profile(String(context.getPackageManager().getPackageInfo(PACKAGE, 0).versionName)), canonical = {};
+  Object.keys(ids).forEach(function (id) { canonical[ids[id]] = id; });
   function foreground() {
     io.requireAccessibility();
     if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) fail('手机已锁屏，请先解锁');
@@ -33,7 +53,7 @@ function create(por, config) {
           var raw = queue[n].native, b = new android.graphics.Rect();
           if (!raw.refresh()) fail('页面控件已经失效，请重新运行');
           raw.getBoundsInScreen(b);
-          nodes.push({ index: n, parent: queue[n].parent, id: String(raw.getViewIdResourceName() || '').replace(PACKAGE + ':id/', ''),
+          nodes.push({ index: n, parent: queue[n].parent, id: (function () { var id = String(raw.getViewIdResourceName() || '').replace(PACKAGE + ':id/', ''); return canonical[id] || id; })(),
             text: String(raw.getText() || ''), hint: android.os.Build.VERSION.SDK_INT >= 26 ? !!raw.isShowingHintText() : null,
             bounds: [b.left, b.top, b.right, b.bottom], visible: !!raw.isVisibleToUser(), enabled: !!raw.isEnabled(),
             editable: !!raw.isEditable(), password: !!raw.isPassword(), clickable: !!raw.isClickable(), scrollable: !!raw.isScrollable() });
@@ -56,7 +76,7 @@ function create(por, config) {
         if (!roots.get(w).isFocused() || roots.get(w).getType() !== 1) continue;
         var root = roots.get(w).getRoot(); if (!root) continue; kept.push(root);
         if (String(root.getPackageName()) !== PACKAGE) fail('前台窗口已变化');
-        var matches = root.findAccessibilityNodeInfosByViewId(PACKAGE + ':id/' + id);
+        var matches = root.findAccessibilityNodeInfosByViewId(PACKAGE + ':id/' + (ids[id] || id));
         for (var i = 0; i < matches.size(); i++) { var n = matches.get(i); kept.push(n); if (n.refresh() && n.isVisibleToUser() && n.isEnabled()) found.push(n); }
       }
       if (found.length !== 1) fail('原生操作目标不唯一：' + id);
@@ -71,14 +91,20 @@ function create(por, config) {
     } finally { kept.forEach(function (n) { try { n.recycle(); } catch (_) {} }); }
   }
   var ACTION = android.view.accessibility.AccessibilityNodeInfo;
-  function clickId(id) { if (!rawAction(id, ACTION.ACTION_CLICK)) fail('原生点击未完成：' + id); sleep(650); }
+  function clickId(id) {
+    if (id === 'ndh' && ids[id]) {
+      var node = one(tree(), id), b = node.bounds; foreground();
+      if (!click(Math.floor((b[0]+b[2])/2), Math.floor((b[1]+b[3])/2))) fail('原生搜索入口点击未完成');
+    } else if (!rawAction(id, ACTION.ACTION_CLICK)) fail('原生点击未完成：' + id);
+    sleep(650);
+  }
   function rows(nodes) {
     var list = one(nodes, 'czp'), result = [], seen = [];
     nodes.filter(function (n) { return n.id === 'hrr' && valid(n) && under(nodes, n, list); }).forEach(function (n) {
       var row = n; while (row.parent >= 0 && row.parent !== list.index) row = nodes[row.parent];
       if (!row.clickable || row.bounds[1] < list.bounds[1] || row.bounds[3] > list.bounds[3]) return;
       if (!n.text.trim() || /…|\.\.\.$/.test(n.text)) fail('会话名称不完整，未猜测');
-      if (scope !== 'groups' && ['接收微信中的工作消息', '打卡', '企业微信团队', '我的客服', '添加管理员协助你体验'].indexOf(n.text) >= 0) return;
+      if (scope !== 'groups' && ['客户联系', '行业资讯', '接收微信中的工作消息', '打卡', '企业微信团队', '我的客服', '添加管理员协助你体验'].indexOf(n.text) >= 0) return;
       if (seen.indexOf(n.text) >= 0) fail('会话重名，无法安全区分');
       seen.push(n.text); result.push({ role: scope === 'groups' ? 'group' : 'chat', text: n.text, point: point(n), complete: true, value: null });
     });
@@ -92,7 +118,7 @@ function create(por, config) {
       var editor = editors[0]; if (editor.hint === null || !editor.editable || editor.password) fail('无法核对真实草稿与提示语');
       s.page = 'chat'; s.editor = { point: point(editor), text: editor.hint ? '' : editor.text };
       nodes.filter(function (n) { return valid(n) && n.text === '发送' && n.bounds[0] >= editor.bounds[2] && n.bounds[1] < editor.bounds[3] && n.bounds[3] > editor.bounds[1]; }).forEach(function (n) { s.items.push({ role: 'send', text: '发送', point: point(n), complete: true, value: null }); });
-      nodes.filter(function (n) { return valid(n) && n.id === 'i_d' && n.bounds[0] > device.width / 2; }).forEach(function (n) { s.outgoing.push({ text: n.text, pending: false, failed: false }); });
+      s.outgoing = outgoing(nodes, device.width);
     } else if (homeReady(nodes, device.width)) {
       s.page = scope === 'groups' ? 'groups' : 'home'; s.items = rows(nodes); s.listEmpty = !s.items.length;
     }
@@ -128,13 +154,17 @@ function create(por, config) {
     if (!one(last.nodes,'czp').scrollable) return false;
     var moved = rawAction('czp', up ? ACTION.ACTION_SCROLL_BACKWARD : ACTION.ACTION_SCROLL_FORWARD); sleep(400); return moved;
   }
+  function waitChat(title) {
+    for (var n=0;n<8;n++) { var s=observe(); if(s.page==='chat') { if(!require('./core.js').sameTitle(s.title,title))fail('打开的会话与完整名称不一致'); return; } sleep(750); }
+    fail('原生聊天页面未就绪，未继续输入或发送');
+  }
   function openRow(title, page, p) {
     var s = observe(); if (s.page !== page) fail('会话列表已变化');
     var matches = s.items.filter(function (item) { return item.text === title; }); if (matches.length !== 1) fail('会话行不唯一');
     var nodes = last.nodes, list = one(nodes,'czp'), titleNode = nodes.filter(function (n) { return n.id === 'hrr' && n.text === title && valid(n) && under(nodes,n,list); });
     if (titleNode.length !== 1) fail('会话名称已变化');
     var row = titleNode[0]; while (row.parent >= 0 && row.parent !== list.index) row = nodes[row.parent];
-    var b = row.bounds; if (!click(Math.floor((b[0]+b[2])/2), Math.floor((b[1]+b[3])/2))) fail('打开会话失败'); sleep(650); lastTitle = title;
+    var b = row.bounds; if (!click(Math.floor((b[0]+b[2])/2), Math.floor((b[1]+b[3])/2))) fail('打开会话失败'); sleep(650); lastTitle = title; waitChat(title);
   }
   function openNamed(title, value) {
     home(); clickId('ndh');
@@ -154,7 +184,7 @@ function create(por, config) {
       var row=found[0];while(!row.clickable&&row.parent>=0&&row.parent!==resultList.index)row=nodes[row.parent];
       if(!row.clickable)fail('搜索会话没有可验证的行入口');
       var bounds=row.bounds;if(!click(Math.floor((bounds[0]+bounds[2])/2),Math.floor((bounds[1]+bounds[3])/2)))fail('打开搜索结果未完成');
-      lastTitle=title;sleep(650);return;
+      lastTitle=title;sleep(650);waitChat(title);return;
     }
     var s = recipientPage(value);
     for (var n = 0; n < 300; n++) { if (!scroll(true)) break; s = observe(); }
@@ -198,4 +228,4 @@ function create(por, config) {
   io.nickname = function () { home(); clickId('ndw'); var nodes=tree(), header=one(nodes,'og3'), name=one(nodes,'mi0'); if(!under(nodes,name,header)||!name.text.trim())fail('未确认个人信息中的姓名');return name.text; };
   return io;
 }
-module.exports = { create: create, homeReady: homeReady, exactDraft: exactDraft };
+module.exports = { create: create, homeReady: homeReady, exactDraft: exactDraft, outgoing: outgoing };

@@ -2,18 +2,22 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { Script } from 'node:vm';
 
 const directory = fileURLToPath(new URL('../workflows/', import.meta.url));
+const source = await readFile(new URL('../mobile-workflows/shared/src/core.js', import.meta.url), 'utf8');
+const controller = new Script(`(function(){var module={exports:{}};${source}\nreturn module.exports;})()`).runInNewContext();
 const workflows = [];
 for (const folder of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
   if (!folder.isDirectory()) continue;
   const path = `workflows/${folder.name}/workflow.json`;
   const bytes = await readFile(`${directory}/${folder.name}/workflow.json`);
   const workflow = JSON.parse(bytes);
+  controller.validateWorkflow(workflow);
   assert.match(folder.name, /^[a-zA-Z0-9_-]{1,80}$/);
   assert.equal(workflow.id, folder.name);
   assert.equal(workflow.schemaVersion, 1);
-  assert.ok([1, 2, 3, 4].includes(workflow.minEngine));
+  assert.ok([1, 2, 3, 4, 5].includes(workflow.minEngine));
   assert.ok(Array.isArray(workflow.steps) && workflow.steps.length > 0 && workflow.steps.length <= 40);
   workflows.push({ id: workflow.id, path, sha256: createHash('sha256').update(bytes).digest('hex') });
 }

@@ -5,9 +5,9 @@
     {
       "id": "demo-hello",
       "name": "手机脚本更新测试",
-      "description": "只显示你好并记录运行次数，不打开微信、不发送消息。用于验证安装、版本更新、配置保留和日志。",
-      "version": "1.0.0",
-      "versionCode": 1,
+      "description": "只显示你好并记录运行次数，不打开目标应用、不发送消息。用于验证安装、版本更新、配置保留和日志。",
+      "version": "1.0.1",
+      "versionCode": 2,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
@@ -25,141 +25,49 @@
       ]
     },
     {
-      "id": "wechat-suite",
-      "name": "微信手机工作流（预览）",
-      "description": "预览版，在手机独立执行打开微信、读取昵称、首个会话、文件传输助手和批量消息。支持 HTTP、生命周期请求、定时任务和群聊选择；默认预演。发送使用原生输入组件，可在工作流内安装；页面导航需要截图授权和图像模型接口。",
-      "version": "1.0.0",
-      "versionCode": 35,
-      "minLauncher": 1,
-      "minAutoJs6": "6.7.0",
-      "entry": "main.js",
-      "files": [
-        {
-          "path": "android.js",
-          "size": 40873,
-          "sha256": "d66ada22b69977ffbbfd880bdbd0786f79ad507bd2aa61f50ba0b64f6e8222d6"
-        },
-        {
-          "path": "capture.js",
-          "size": 484,
-          "sha256": "0c5613dfabf19f5cc2d92bddfb729a783e1af3041d36ea54aa6324533237a1a6"
-        },
-        {
-          "path": "core.js",
-          "size": 24361,
-          "sha256": "157cd9ad2f6c7fc3603cd003ad8049bb791daccdaa20762498a3497baf242c1a"
-        },
-        {
-          "path": "definitions.js",
-          "size": 11973,
-          "sha256": "5f3f9ab806af9933a45a10c8c4034ca0d94ee17562a261edff36012b0f0a3c09"
-        },
-        {
-          "path": "input-apk.js",
-          "size": 39463,
-          "sha256": "096d44022b787fff3993fba2c517c752c217f82a40a73b761ed852d57f36435d"
-        },
-        {
-          "path": "input-setup.js",
-          "size": 5744,
-          "sha256": "d854a222c47d62863e1e4ea7107d5128d0a73cfd084c818d58c5a444df130582"
-        },
-        {
-          "path": "main.js",
-          "size": 17009,
-          "sha256": "2c9346d0b50d4fdde2549b75e32eaf9215d185e3c9efce68a77676e9bd0abafd"
-        },
-        {
-          "path": "markers.js",
-          "size": 10431,
-          "sha256": "e68d64ad7a268024e0d7d21df5b2ec1347b123bcfdf8a83cfd4a3867973987a8"
-        },
-        {
-          "path": "native-input.js",
-          "size": 2651,
-          "sha256": "6749d218b9e889894ba553390773fd31c1b63c6ef45c80fa9623bf64b64359a1"
-        },
-        {
-          "path": "provider.js",
-          "size": 474,
-          "sha256": "1edb3175e6ba88273066c7fc1ef0a1d1e072f937d4a8b56e10fbeee5eeb6db16"
-        },
-        {
-          "path": "request.js",
-          "size": 6855,
-          "sha256": "e5fcde727c1314d0808ea7c52dbe2a6b089831e31318294a43f328db86149c5f"
-        }
-      ]
-    },
-    {
       "id": "wecom-suite",
       "name": "企业微信手机工作流",
-      "description": "在手机独立运行打开企业微信、读取姓名、首个会话和批量消息。消息支持手动或 HTTP，群聊和首页会话支持勾选或全部，包含前后置请求和定时任务。通过原生控件执行，无需图像模型；默认预演，不点击发送。",
-      "version": "1.0.0",
-      "versionCode": 19,
+      "description": "在手机独立运行打开企业微信、读取姓名、首个会话和批量消息。消息支持手动或 HTTP，群聊和单聊按类型自动处理全部，包含前后置请求和定时任务。通过原生控件执行，无需图像模型；默认预演，不点击发送。",
+      "version": "1.0.12",
+      "versionCode": 58,
       "minLauncher": 1,
       "minAutoJs6": "6.7.0",
       "entry": "main.js",
       "files": [
         {
-          "path": "android.js",
-          "size": 40936,
-          "sha256": "1805d77e2764b4f8bd589042de9a88d49d92f222e9e0332341ef92da32ee6073"
-        },
-        {
-          "path": "capture.js",
-          "size": 547,
-          "sha256": "33feb3cc98f033e46df95e7a63579e9a32b9455eb78158b3c290a5d1616ed22b"
-        },
-        {
           "path": "core.js",
-          "size": 24421,
-          "sha256": "6d83e2250b7b3d037b7f78ddcabd658f733f067503105079082c07246ce6962a"
+          "size": 31671,
+          "sha256": "0862e67c50589bb9594fee78f5de6f893b7a7e29324a29784f3e787b2ad3beae"
         },
         {
           "path": "definitions.js",
-          "size": 4337,
-          "sha256": "202ec0ecccf646844dbe392998208ba383726c3c4089a31de583443127d8fdf1"
+          "size": 4367,
+          "sha256": "154b454d6626c2c320200f4376bdc03694db08862200c612eff23c886ddfe8d4"
         },
         {
-          "path": "input-apk.js",
-          "size": 39528,
-          "sha256": "34c8005d4694132df8b17ff030f8ea640ae6bb2ecc0caafb0b47b6357b8ddb10"
-        },
-        {
-          "path": "input-setup.js",
-          "size": 5811,
-          "sha256": "ed9cd738a02030bd385a2002f7e18fa93385d3cb6123d54fcb9a721f4053a6cf"
+          "path": "io.js",
+          "size": 8060,
+          "sha256": "14aef5e5d58929ccbd4682598e4d0272b6ff804785bb7c6e189a86fb0f4e35cc"
         },
         {
           "path": "main.js",
-          "size": 17069,
-          "sha256": "38f24a8f8110410d2488f37b04b84bb01153f1da06c0b22a3d5e7aa772296ad3"
-        },
-        {
-          "path": "markers.js",
-          "size": 10494,
-          "sha256": "67f6c36ec229d63bb9db4b405d2df83b42c96e8be80e5c3f0a3374922e80d0e7"
-        },
-        {
-          "path": "native-input.js",
-          "size": 2719,
-          "sha256": "1d9b2a05098ab3230f03a870ff0ff7c6b48ee18d70c60d3ffe78d63fddbe60dd"
-        },
-        {
-          "path": "provider.js",
-          "size": 538,
-          "sha256": "124282edf3b9b9d2b8c2df702b1af309370cb3f11034dcb08cb7879702189883"
+          "size": 13850,
+          "sha256": "0c4a5db382bc30ac32133e5e5c9ddfaab27c3df0059383f6f3dd0e376ed5eb29"
         },
         {
           "path": "request.js",
-          "size": 6918,
-          "sha256": "150d4c3d35b0e96ec7f9e7194ad6315a596140a00ddf562ddf45f764ec7c5eac"
+          "size": 6912,
+          "sha256": "6d0bafe79d287c6929e8f8fd194b785bc2de0cffaff9914bdbc8de2127cc5249"
+        },
+        {
+          "path": "wecom-ids.js",
+          "size": 443,
+          "sha256": "7e207eb966a0dcb48c35d637680e8452b58b9aaa74ffd083566643dc8d07097d"
         },
         {
           "path": "wecom.js",
-          "size": 14630,
-          "sha256": "2ea97dd5f1615b5aba880e846662ddb4cb183c64e49cda455c9fc835a78da610"
+          "size": 16390,
+          "sha256": "2300a383bf632cecb3eb365808d34fc22ee43ecedbab67b6946c5c5686825ba9"
         }
       ]
     }

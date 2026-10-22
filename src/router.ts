@@ -1,11 +1,12 @@
-import { createRouter, createWebHashHistory } from 'vue-router';
-import { nextTick } from 'vue';
-import { routes } from 'vue-router/auto-routes';
-
-export const router = createRouter({ history: createWebHashHistory(), routes });
-router.afterEach(async route => {
-  document.title = `${String(route.meta.title ?? '工作台')} · Por Auto`;
-  await nextTick();
-  document.getElementById('main-content')?.scrollTo({ top: 0 });
-  document.getElementById('main-content')?.focus({ preventScroll: true });
+import { createRouter, createHashHistory } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+export const router = createRouter({
+  routeTree,
+  history: createHashHistory(),
+  defaultPreload: 'intent',
 });
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}

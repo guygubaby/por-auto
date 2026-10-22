@@ -1,12 +1,12 @@
-// GENERATED from mobile-workflows/wechat-suite/src/main.js
+// GENERATED from mobile-workflows/shared/src/main.js
 'use strict';
 
 module.exports = function (por) {
   var core = require('./core.js'), requests = require('./request.js'), definitions = require('./definitions.js');
-  var config = por.readConfig(), native = definitions.package === 'com.tencent.wework', label = native ? '企业微信' : '微信';
-  if (!config.input) config.input = { message: { type: 'manual', text: 'Ok' }, recipients: { scope: 'groups', mode: 'selected', names: [] }, intervalMs: 1000 };
+  var config = por.readConfig(), label = '企业微信';
+  if (!config.input) config.input = { message: { type: 'manual', text: '' }, recipients: { direct: false, groups: true }, intervalMs: 1000 };
   if (!config.hooks) config.hooks = {};
-  var io = require(native ? './wecom.js' : './android.js').create(por, config);
+  var io = require('./wecom.js').create(por, config);
   function execute(workflow) {
     var result, error = null;
     try { io.prepare(workflow); result = core.create(io).run(workflow, config); }
@@ -65,30 +65,21 @@ module.exports = function (por) {
     requests.validate(value, io); return value;
   }
   function testRequest(value) {
-    var preview = requests.preview(value, { run: { id: por.runId, mode: 'rehearsal', status: 'running' }, workflow: { id: native ? 'wecom-broadcast' : 'wechat-broadcast', name: label + '批量发送消息', version: '1.0.0' }, recipient: { title: '测试会话', index: 1, total: 1 } }, io);
+    var preview = requests.preview(value, { run: { id: por.runId, mode: 'rehearsal', status: 'running' }, workflow: { id: 'wecom-broadcast', name: label + '批量发送消息', version: '1.0.0' }, recipient: { title: '测试会话', index: 1, total: 1 } }, io);
     dialogs.alert(preview.parseError ? '请求成功，解析未通过' : '请求与解析通过', '状态：' + preview.status + '\n耗时：' + preview.elapsedMs + ' ms\n\n最终消息：\n'
       + (preview.parseError || (preview.message === null ? '已忽略正文' : preview.message)) + '\n\n原始内容（最多显示 2000 字）：\n' + preview.raw.slice(0, 2000));
   }
   function chooseRecipients() {
-    var next = JSON.parse(JSON.stringify(config.input));
-    next.recipients.scope = pick('接收范围', ['群聊', '首页聊天会话']) === 0 ? 'groups' : 'conversations';
-    var selection = pick('选择接收对象', ['读取列表后勾选', '手动填写完整名称', '全部']);
-    if (selection === 2) next.recipients = { scope: next.recipients.scope, mode: 'all', names: [] };
-    else if (selection === 1) {
-      next.recipients.mode = 'selected';
-      next.recipients.names = ask('每行一个完整名称，不支持模糊匹配', next.recipients.names.join('\n')).split(/\r?\n/).map(function (n) { return n.trim(); }).filter(Boolean);
-    } else {
-      var items;
-      try { io.prepare(); io.launch(); items = core.create(io).discover(next.recipients.scope); }
-      finally { io.finish(); }
-      if (!items.length) throw new Error('没有读取到会话');
-      var selected = dialogs.multiChoice('勾选接收对象', items, items.map(function (n, i) { return next.recipients.names.indexOf(n) >= 0 ? i : -1; }).filter(function (i) { return i >= 0; }));
-      if (selected === null) throw new Error('已取消');
-      next.recipients.mode = 'selected'; next.recipients.names = [];
-      for (var i = 0; i < selected.length; i++) next.recipients.names.push(items[Number(selected[i])]);
-    }
-    next.intervalMs = Number(ask('每个会话处理完后的间隔（毫秒，至少 1000）', next.intervalMs));
-    core.validateInput(next); config.input = next; por.saveConfig(config);
+    var next = JSON.parse(JSON.stringify(config.input)), previous = next.recipients;
+    var legacy = !core.recipientCategories(previous);
+    var categories = legacy ? { direct: previous.scope === 'conversations', groups: true } : previous;
+    var defaults = []; if (categories.direct) defaults.push(0); if (categories.groups) defaults.push(1);
+    var selected = dialogs.multiChoice('接收类型（可同时勾选，自动读取全部现有会话）', ['单聊 · 首页已有单聊', '群聊 · 全部群聊'], defaults);
+    if (selected === null) return;
+    var choices = []; for (var i = 0; i < selected.length; i++) choices.push(Number(selected[i]));
+    next.recipients = { direct: choices.indexOf(0) >= 0, groups: choices.indexOf(1) >= 0 };
+    if (!next.recipients.direct && !next.recipients.groups) throw new Error('至少选择单聊或群聊');
+    config.input = next; if (legacy) config.dryRun = true; por.saveConfig(config);
   }
   function chooseMessage() {
     var type = pick('消息从哪里获取', ['手动输入', '接口获取', '使用前置请求的返回内容']);
@@ -105,27 +96,12 @@ module.exports = function (por) {
     if (next.type === 'manual') core.validateMessage(next.text);
     config.input.message = next; por.saveConfig(config);
   }
-  function provider() {
-    var previous = config.provider || {}, next = {};
-    next.baseUrl = ask('图像接口根地址，例如 https://example.com/v1\n手机上的 127.0.0.1 不是电脑。独立运行需要手机可访问的接口。', previous.baseUrl || 'https://').replace(/\/+$/, '');
-    var parsed = io.parseUrl(next.baseUrl);
-    if (!parsed || !(parsed.scheme === 'https' || parsed.scheme === 'http' && ['localhost', '127.0.0.1', '::1', '[::1]'].indexOf(parsed.host) >= 0) || parsed.username || parsed.password || /[?#]/.test(next.baseUrl) || /\/chat\/completions$/.test(next.baseUrl)) throw new Error('请填写不含鉴权信息的 HTTPS 接口根地址；仅手机本机可用 HTTP');
-    next.model = ask('支持图片输入的模型名称', previous.model || '').trim();
-    if (!next.model || next.model.length > 200 || /[\x00-\x1f]/.test(next.model)) throw new Error('模型名称无效');
-    next.timeoutSeconds = previous.timeoutSeconds || 120;
-    if (typeof previous.thinking === 'boolean') next.thinking = previous.thinking;
-    if (previous.credential && previous.baseUrl === next.baseUrl && dialogs.confirm('接口凭据', '保留之前保存的 API Key？')) next.credential = previous.credential;
-    else if (dialogs.confirm('接口凭据', '这个接口需要 API Key 吗？')) next.credential = io.saveSecret(next.baseUrl, secret('模型 API Key'));
-    io.checkModel(next);
-    next.allowScreenshots = dialogs.confirm('允许读取微信画面', '运行时会把微信截图发送到你填写的接口，画面可能包含昵称和聊天内容。\n\n接口：' + next.baseUrl + '\n模型：' + next.model + '\n\n是否允许？');
-    config.provider = next; por.saveConfig(config);
-  }
   function exportLast() {
     var path = por.dataDir + '/last-result.json';
     if (!files.exists(path)) throw new Error('尚无工作流结果');
     var parent = context.getExternalFilesDir(null);
     if (!parent) throw new Error('手机文件导出目录不可用');
-    var output = String(parent.getPath()) + '/por-auto-exports/wechat-mobile-' + Date.now() + '.json';
+    var output = String(parent.getPath()) + '/por-auto-exports/wecom-mobile-' + Date.now() + '.json';
     files.createWithDirs(output);
     if (!files.copy(path, output)) throw new Error('导出失败');
     dialogs.alert('已导出结果', output + '\n包含每个接收会话的状态，不包含 API Key。'); app.viewFile(output);
@@ -133,10 +109,9 @@ module.exports = function (por) {
   function schedule() {
     if (!por.schedules) throw new Error('请重新导入最新版手机商店启动脚本，再设置定时任务；原配置保留');
     var workflow = definitions.workflows[pick('定时运行哪个工作流', definitions.workflows.map(function (item) { return item.name; }))];
-    var sender = workflow.steps.some(function (step) { return ['wechat_send_text', 'wechat_broadcast', 'chat_send_text', 'chat_broadcast'].indexOf(step.action.type) >= 0; });
+    var sender = workflow.steps.some(function (step) { return ['chat_send_text', 'chat_broadcast'].indexOf(step.action.type) >= 0; });
     var dryRun = !sender || pick('定时运行方式', ['预演：核对草稿后清理，不发送', '正式发送：每个目标发送一次']) === 0;
-    if (['wechat-broadcast', 'wecom-broadcast'].indexOf(workflow.id) >= 0) core.validateInput(config.input);
-    if (!native && (!config.provider || !config.provider.allowScreenshots)) throw new Error('请先完成模型与截图设置');
+    if (workflow.id === 'wecom-broadcast') { if (!core.recipientCategories(config.input.recipients)) throw new Error('请先在接收类型中勾选单聊或群聊'); core.validateInput(config.input); }
     if (config.hooks.beforeRun) requests.validate(config.hooks.beforeRun, io);
     if (config.hooks.afterRun) requests.validate(config.hooks.afterRun, io);
     if (config.input.message.type === 'http') requests.validate(config.input.message.request, io);
@@ -150,27 +125,19 @@ module.exports = function (por) {
     por.schedules.save({ name: name, cron: expression, timezone: timezone, enabled: true }, { workflowId: workflow.id, dryRun: dryRun });
     dialogs.alert('定时任务已保存', '回到商店「更多 → 定时任务」管理启停或立即运行。修改消息或接收范围后，请重新创建任务以使用新配置。');
   }
-  function inputComponent(){
-    var setup=require('./input-setup.js'),status=setup.state();
-    var choice=pick('输入组件 · '+(status.installed?'已安装':'待安装')+' / '+(status.enabled?'已启用':'待启用')+'\n运行时自动切换，结束后恢复先前的键盘。', ['安装或更新输入组件','在系统中启用组件','选择日常键盘','返回']);
-    if(choice===0){setup.install();return true;}
-    if(choice===1){setup.settings();return true;}
-    if(choice===2){setup.pick();return true;}
-    return false;
-  }
   while (true) {
-    var menu=['运行工作流','配置消息内容','选择接收对象','前置 / 结束请求',native?'原生控件说明':'模型与截图设置','导出上次运行结果','新建定时任务'];
-    if(!native)menu.push('输入组件');menu.push('退出');
+    var menu=['运行工作流','配置消息内容','设置接收类型','前置 / 结束请求','原生控件说明','导出上次运行结果','新建定时任务','退出'];
     var choice = dialogs.select(label + '手机工作流',menu);
     if (choice < 0 || choice === menu.length-1) return;
     try {
       if (choice === 0) {
         var workflow = definitions.workflows[pick('选择工作流', definitions.workflows.map(function (w) { return w.name + ' · v' + w.version; }))];
-        var sender = workflow.steps.some(function (s) { return ['wechat_send_text', 'wechat_broadcast', 'chat_send_text', 'chat_broadcast'].indexOf(s.action.type) >= 0; });
+        var sender = workflow.steps.some(function (s) { return ['chat_send_text', 'chat_broadcast'].indexOf(s.action.type) >= 0; });
         config.dryRun = sender && pick('运行方式', ['预演：填入并核对草稿后清理，不点击发送', '正式发送：每个目标发送一次']) === 0;
-        if (['wechat-broadcast', 'wecom-broadcast'].indexOf(workflow.id) >= 0) core.validateInput(config.input);
+        if (workflow.id === 'wecom-broadcast') { if (!core.recipientCategories(config.input.recipients)) throw new Error('请先在接收类型中勾选单聊或群聊'); core.validateInput(config.input); }
         var scope = config.input.recipients;
-        var detail = ['wechat-broadcast', 'wecom-broadcast'].indexOf(workflow.id) >= 0 ? '\n接收：' + (scope.mode === 'all' ? '全部' : scope.names.length + ' 个指定') + (scope.scope === 'groups' ? '群聊' : '首页会话') : '';
+        var types = []; if (scope.direct) types.push('单聊'); if (scope.groups) types.push('群聊');
+        var detail = workflow.id === 'wecom-broadcast' ? '\n接收：全部' + types.join('和') : '';
         if (!dialogs.confirm('开始' + (sender ? config.dryRun ? '预演' : '发送' : '运行'), workflow.name + detail + '\n\n运行中请保持手机解锁，不要手动切换页面。')) continue;
         var result = execute(workflow);
         var labels = { nickname: label + '姓名', chat_title: '当前会话', target_count: '已处理对象', message_status: '处理状态' };
@@ -184,10 +151,9 @@ module.exports = function (por) {
         if (config.hooks[name] && dialogs.confirm('移除请求', '删除当前配置的这个请求？选择取消可编辑。')) delete config.hooks[name];
         else config.hooks[name] = editRequest(config.hooks[name], name === 'afterRun');
         por.saveConfig(config);
-      } else if (choice === 4) { if (native) dialogs.alert('原生控件执行', '企业微信通过系统控件读取和输入，不需要截图授权或图像模型。'); else provider(); }
+      } else if (choice === 4) dialogs.alert('原生控件执行', label + '通过系统无障碍节点读取和操作，不需要截图授权或图像模型。');
       else if (choice === 5) exportLast();
       else if (choice === 6) schedule();
-      else if (choice === 7 && !native) {if(inputComponent())return;}
     } catch (e) {
       if (String(e.message || e) === '已取消') continue;
       if (choice === 0) throw e;

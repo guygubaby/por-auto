@@ -1,128 +1,75 @@
-name: Signed desktop release
-
+name: Signed MyGo desktop release
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag, for example v0.1.1
+        description: Existing release tag
         required: true
         type: string
-
 permissions:
   contents: read
-
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
-
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform: windows-x86_64
-            adb: windows
-            bundles: nsis
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            platform: darwin-aarch64
-            adb: macos
-            bundles: app,dmg
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            platform: darwin-x86_64
-            adb: macos
-            bundles: app,dmg
+          - {os: macos-latest, platform: darwin/arm64, target: darwin-arm64, adb: macos}
+          - {os: macos-latest, platform: darwin/amd64, target: darwin-amd64, adb: macos}
+          - {os: windows-latest, platform: windows/amd64, target: windows-amd64, adb: windows}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
+        with: {ref: '${{ env.RELEASE_TAG }}'}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@1.93.1
-        with:
-          targets: ${{ matrix.target }}
+        with: {node-version: '24', cache: pnpm}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.27.1', cache: true}
       - run: pnpm install --frozen-lockfile
-      - name: Validate release version and tests
+      - run: pnpm prepare:adb ${{ matrix.adb }}
+      - run: pnpm prepare:assets
+      - run: pnpm release:check --tag ${{ env.RELEASE_TAG }}
+      - run: pnpm registry:check
+      - run: pnpm test:mobile
+      - run: pnpm test
+      - run: go test ./internal/...
+      - run: pnpm test:updates
+      - name: Build signed MyGo archive and installer
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         shell: bash
         run: |
-          pnpm release:check --tag "$RELEASE_TAG"
-          pnpm registry:check
-          pnpm test:mobile
-          pnpm test:http-editor
-          pnpm test:devices
-          pnpm test:schedules
-          pnpm test:updates
-      - run: pnpm prepare:adb ${{ matrix.adb }}
-      - run: pnpm prepare:u2
-      - name: Verify Windows ADB resource paths
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $component = Join-Path $env:RUNNER_TEMP 'por-adb-path-test'
-          Expand-Archive src-tauri/resources/platform-tools.zip $component -Force
-          $env:POR_ADB_TEST_BINARY = Join-Path $component 'platform-tools/adb.exe'
-          pnpm test:adb-paths
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - name: Verify native credential storage
-        run: cargo test --manifest-path src-tauri/Cargo.toml desktop_credentials -- --ignored
-      - name: Build signed installer and updater artifacts
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          test -n "$MYGO_UPDATER_PRIVATE_KEY" || { echo "Missing MyGo updater signing key" >&2; exit 1; }
+          go run github.com/egoist/mygo/cmd/mygo build -platform '${{ matrix.platform }}'
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}
+          name: release-${{ matrix.target }}
           if-no-files-found: error
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe.sig
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-
+          path: build/${{ matrix.target }}/
   publish:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
+        with: {ref: '${{ env.RELEASE_TAG }}'}
       - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
+        with: {node-version: '24'}
       - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          path: release-artifacts
-      - name: Validate signed artifact set and assemble update manifest
-        run: node scripts/release-manifest.mjs --tag "$RELEASE_TAG"
-      - name: Publish only after every platform is ready
-        env:
-          GH_TOKEN: ${{ github.token }}
+        with: {pattern: 'release-*', path: release-artifacts}
+      - run: node scripts/release-manifest.mjs --tag ${{ env.RELEASE_TAG }}
+      - name: Publish complete signed artifact set
+        env: {GH_TOKEN: '${{ github.token }}'}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
-            node -e "if (!JSON.parse(require('fs').readFileSync('release-state.json')).isDraft) throw new Error('Published versions cannot be overwritten; bump the version')"
-            gh release upload "$RELEASE_TAG" release-assets/* --clobber
-            gh release edit "$RELEASE_TAG" --notes-file release-notes.md
-          else
-            gh release create "$RELEASE_TAG" release-assets/* --draft --verify-tag --title "Por Auto ${RELEASE_TAG#v}" --notes-file release-notes.md
-          fi
+          gh release create "$RELEASE_TAG" release-assets/* --draft --verify-tag --title "Por Auto ${RELEASE_TAG#v}" --notes-file release-notes.md
           gh release edit "$RELEASE_TAG" --draft=false --latest

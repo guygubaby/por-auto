@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<hierarchy><node package="com.tencent.mm" class="android.widget.FrameLayout" bounds="[0,0][1080,1920]">
-  <node package="com.tencent.mm" class="android.widget.TextView" text="测试联系人" bounds="[100,70][700,150]"/>
-  <!-- messages -->
-  <node package="com.tencent.mm" class="android.widget.EditText" text="" resource-id="com.tencent.mm:id/input" enabled="true" bounds="[100,1700][840,1810]"/>
-  <node package="com.tencent.mm" class="android.widget.Button" text="发送" clickable="true" enabled="true" bounds="[870,1700][1050,1810]"/>
-</node></hierarchy>

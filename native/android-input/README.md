@@ -2,7 +2,7 @@
 
 仅提供 Android InputMethodService 和受校验的本地 ContentProvider，不包含应用页面、网络访问、截图、OCR 或发送动作。电脑和 AutoJs6 共用相同的原生完整文本读取与输入协议。
 
-微信 8.0.79 / Android 9 已验证中文搜索、文件传输助手草稿 1、完整回读、已有草稿保护及清理；优化后的 Kotlin 版本已通过手机真实工作流调用，并验证切换与恢复原键盘。完整群聊与桌面执行仍需继续验收，不能据此宣称所有工作流已完成。
+当前产品只支持企业微信，并通过无障碍编辑控件直接输入，不依赖本组件。已签名组件及协议仍保留用于既有制品校验，它本身没有发送动作。此前微信 8.0.79 / Android 9 的中文输入、回读、草稿保护和键盘恢复测试仅为历史记录，不代表普通微信仍受产品支持。
 
 构建：JDK 17+、Android SDK 34 / build-tools 34.0.0，运行 `./gradlew testDebugUnitTest assembleRelease`。Release 启用 R8 与资源裁剪；签名通过外部环境变量 `POR_INPUT_KEYSTORE`、`POR_INPUT_STORE_PASSWORD`、`POR_INPUT_KEY_PASSWORD` 提供，别名为 `por-input`。密钥不得放入仓库。未提供签名时只生成未签名验证包。
 

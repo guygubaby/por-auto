@@ -652,7 +652,7 @@ function createAutoJs6Runtime() {
     isActive: function () { return !!screenActive.get(); },
     hasCapture: function () { return !!sessionCapture; },
     check: function () {
-      if (!screenActive.get()) throw new Error('截图会话已停止，请重新开启手机定时执行');
+      if (!screenActive.get()) throw new Error('执行会话已停止，请重新开启手机定时执行');
       requireAccessibility();
       if (context.getSystemService(android.content.Context.KEYGUARD_SERVICE).isKeyguardLocked()) throw new Error('手机已锁屏，请解锁后重新开启手机定时执行');
     },
@@ -816,14 +816,13 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   function version(p) { return 'v' + p.version + ' · ' + p.versionCode; }
   function startTimer() {
     if (timerRunning()) return '手机定时执行已开启';
-    var capture = scheduler.list().some(function (task) { return task.enabled && task.scriptId !== 'wecom-suite'; });
-    if (!dialogs.confirm('开启手机定时执行', (capture ? '视觉工作流会申请本次截图授权。' : '当前任务使用原生控件，无需截图授权。') + '保持手机唤醒，请保持解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
+    if (!dialogs.confirm('开启手机定时执行', '当前任务使用原生无障碍控件，无需截图授权。保持手机唤醒，请保持解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
     var ready = threads.disposable(); timerStop = new java.util.concurrent.atomic.AtomicBoolean(false);
     timerThread = threads.start(function () {
       var notified = false, failure = null;
       try {
         io.withLock(io.root + '/scheduler-session.lock', function () {
-          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(capture); scheduler.recover(); });
+          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(false); scheduler.recover(); });
           ready.setAndNotify(null); notified = true;
           ui.run(function () { if (!closed) { ui.timerStatus.setText('手机定时：执行会话已开启'); ui.timerStatus.attr('textColor', green); } });
           while (!timerStop.get()) {
@@ -1021,6 +1020,6 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   });
 }
 
-try { launchMobileScripts(core, createAutoJs6Runtime(), {"schemaVersion":1,"catalog":{"schemaVersion":1,"name":"离线测试脚本","workflows":[{"id":"demo-hello","name":"手机脚本更新测试","description":"只显示你好并记录运行次数，不打开微信、不发送消息。用于验证安装、版本更新、配置保留和日志。","version":"1.0.0","versionCode":1,"minLauncher":1,"minAutoJs6":"6.7.0","entry":"main.js","files":[{"path":"lib/message.js","size":99,"sha256":"2e574061cf08bc158f46b3ae6619cf557e5a0ca89db3afdaa1a7097ea63a9670"},{"path":"main.js","size":341,"sha256":"3901374a4d60174cc9f66aeab55d3f9279ee6682f071aef6eb8d10d3a8c23948"}]}]},"files":[{"id":"demo-hello","path":"lib/message.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAodmVyc2lvbikgewogIHJldHVybiAn5L2g5aW977yM5omL5py66ISa5pys5bey6L+Q6KGMIMK3IHYnICsgdmVyc2lvbjsKfTsK"},{"id":"demo-hello","path":"main.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAocG9yKSB7CiAgdmFyIG1lc3NhZ2UgPSByZXF1aXJlKCcuL2xpYi9tZXNzYWdlLmpzJyk7CiAgdmFyIGNvbmZpZyA9IHBvci5yZWFkQ29uZmlnKCk7CiAgY29uZmlnLnJ1bnMgPSAodHlwZW9mIGNvbmZpZy5ydW5zID09PSAnbnVtYmVyJyA/IGNvbmZpZy5ydW5zIDogMCkgKyAxOwogIHBvci5zYXZlQ29uZmlnKGNvbmZpZyk7CiAgcG9yLmxvZyhtZXNzYWdlKHBvci52ZXJzaW9uKSwgeyBydW5zOiBjb25maWcucnVucyB9KTsKICB0b2FzdChtZXNzYWdlKHBvci52ZXJzaW9uKSArICdcbuesrCAnICsgY29uZmlnLnJ1bnMgKyAnIOasoei/kOihjCcpOwp9Owo="}]}, schedulerCore, cron); }
+try { launchMobileScripts(core, createAutoJs6Runtime(), {"schemaVersion":1,"catalog":{"schemaVersion":1,"name":"离线测试脚本","workflows":[{"id":"demo-hello","name":"手机脚本更新测试","description":"只显示你好并记录运行次数，不打开目标应用、不发送消息。用于验证安装、版本更新、配置保留和日志。","version":"1.0.1","versionCode":2,"minLauncher":1,"minAutoJs6":"6.7.0","entry":"main.js","files":[{"path":"lib/message.js","size":99,"sha256":"2e574061cf08bc158f46b3ae6619cf557e5a0ca89db3afdaa1a7097ea63a9670"},{"path":"main.js","size":341,"sha256":"3901374a4d60174cc9f66aeab55d3f9279ee6682f071aef6eb8d10d3a8c23948"}]}]},"files":[{"id":"demo-hello","path":"lib/message.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAodmVyc2lvbikgewogIHJldHVybiAn5L2g5aW977yM5omL5py66ISa5pys5bey6L+Q6KGMIMK3IHYnICsgdmVyc2lvbjsKfTsK"},{"id":"demo-hello","path":"main.js","base64":"bW9kdWxlLmV4cG9ydHMgPSBmdW5jdGlvbiAocG9yKSB7CiAgdmFyIG1lc3NhZ2UgPSByZXF1aXJlKCcuL2xpYi9tZXNzYWdlLmpzJyk7CiAgdmFyIGNvbmZpZyA9IHBvci5yZWFkQ29uZmlnKCk7CiAgY29uZmlnLnJ1bnMgPSAodHlwZW9mIGNvbmZpZy5ydW5zID09PSAnbnVtYmVyJyA/IGNvbmZpZy5ydW5zIDogMCkgKyAxOwogIHBvci5zYXZlQ29uZmlnKGNvbmZpZyk7CiAgcG9yLmxvZyhtZXNzYWdlKHBvci52ZXJzaW9uKSwgeyBydW5zOiBjb25maWcucnVucyB9KTsKICB0b2FzdChtZXNzYWdlKHBvci52ZXJzaW9uKSArICdcbuesrCAnICsgY29uZmlnLnJ1bnMgKyAnIOasoei/kOihjCcpOwp9Owo="}]}, schedulerCore, cron); }
 catch (error) { dialogs.alert('启动器未能运行', String(error.message || error)); }
 })();

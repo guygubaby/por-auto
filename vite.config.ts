@@ -1,10 +1,16 @@
-import tailwindcss from '@tailwindcss/vite';
-import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
-import VueRouter from 'vue-router/vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
-  plugins: [VueRouter({ routesFolder: 'src/pages', dts: 'src/typed-router.d.ts' }), vue(), tailwindcss()],
-  clearScreen: false,
+  plugins: [
+    tanstackRouter({ target: 'react', autoCodeSplitting: true }),
+    react(),
+    tailwindcss(),
+  ],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: { host: '127.0.0.1', port: 1420, strictPort: true },
+  build: { target: 'es2022' },
 });

@@ -11,7 +11,7 @@ if (!(target in targets)) throw new Error('Use windows or macos');
 const { suffix, sha1 } = targets[target];
 const version = '37.0.1';
 const url = `https://dl.google.com/android/repository/platform-tools_r${version}-${suffix}.zip`;
-const directory = fileURLToPath(new URL('../src-tauri/resources/', import.meta.url));
+const directory = fileURLToPath(new URL('../assets/', import.meta.url));
 await mkdir(directory, { recursive: true });
 let bytes;
 if (process.env.POR_ADB_ARCHIVE) {

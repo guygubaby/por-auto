@@ -1,0 +1,10 @@
+work/
+node_modules/
+dist/
+build/
+assets/
+src/mygo.ts
+src/routeTree.gen.ts
+mobile/
+mobile-workflows/
+deliverables/

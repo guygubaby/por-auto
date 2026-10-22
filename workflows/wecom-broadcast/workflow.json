@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "minEngine": 4,
+  "minEngine": 5,
   "id": "wecom-broadcast",
   "name": "企业微信批量发送消息",
-  "version": "1.0.0",
-  "description": "配置手动或接口消息，选择群聊或首页会话，支持全部或勾选、逐会话获取、预演和定时执行。",
+  "version": "1.1.1",
+  "description": "选择全部单聊、全部群聊或两者，按原生列表逐个处理并发送；支持手动或 HTTP 消息、预演、逐会话记录与定时任务。",
   "package": "com.tencent.wework",
   "steps": [
     {

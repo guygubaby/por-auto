@@ -52,14 +52,13 @@ function launchMobileScripts(core, io, bundled, schedulerCore, cron) {
   function version(p) { return 'v' + p.version + ' · ' + p.versionCode; }
   function startTimer() {
     if (timerRunning()) return '手机定时执行已开启';
-    var capture = scheduler.list().some(function (task) { return task.enabled && task.scriptId !== 'wecom-suite'; });
-    if (!dialogs.confirm('开启手机定时执行', (capture ? '视觉工作流会申请本次截图授权。' : '当前任务使用原生控件，无需截图授权。') + '保持手机唤醒，请保持解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
+    if (!dialogs.confirm('开启手机定时执行', '当前任务使用原生无障碍控件，无需截图授权。保持手机唤醒，请保持解锁。\n\n离开当前页面后仍可执行；关闭脚本、重启或系统停止宿主后，需要重新开启。错过的时间不补跑，失败不自动重发。')) return '已取消开启';
     var ready = threads.disposable(); timerStop = new java.util.concurrent.atomic.AtomicBoolean(false);
     timerThread = threads.start(function () {
       var notified = false, failure = null;
       try {
         io.withLock(io.root + '/scheduler-session.lock', function () {
-          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(capture); scheduler.recover(); });
+          io.withLock(io.root + '/operation.lock', function () { io.screenSession.acquire(false); scheduler.recover(); });
           ready.setAndNotify(null); notified = true;
           ui.run(function () { if (!closed) { ui.timerStatus.setText('手机定时：执行会话已开启'); ui.timerStatus.attr('textColor', green); } });
           while (!timerStop.get()) {
