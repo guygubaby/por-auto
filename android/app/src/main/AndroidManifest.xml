@@ -49,10 +49,6 @@
         </service>
 
         <receiver
-            android:name=".capture.CaptureReceiver"
-            android:exported="false" />
-
-        <receiver
             android:name=".schedule.ScheduleReceiver"
             android:exported="false" />
 

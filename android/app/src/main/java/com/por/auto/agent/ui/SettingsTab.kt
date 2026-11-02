@@ -36,8 +36,7 @@ import com.por.auto.agent.MainUiState
 @Composable
 fun SettingsTab(
     state: MainUiState,
-    onNotify: () -> Unit,
-    onCapture: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
@@ -66,10 +65,20 @@ fun SettingsTab(
                 },
             )
             divider()
+            divider()
             SettingRow(
-                title = "通知按钮",
-                subtitle = "下拉通知栏也能触发读屏",
-                trailing = { TextAction("显示") { onNotify() } },
+                title = "通知",
+                subtitle = if (state.notificationsEnabled) {
+                    "已开启，跑完和定时会提醒"
+                } else {
+                    "未开启，跑完不会提醒"
+                },
+                status = state.notificationsEnabled,
+                trailing = {
+                    if (!state.notificationsEnabled) {
+                        TextAction("去开启") { onOpenNotificationSettings() }
+                    }
+                },
             )
             divider()
             SettingRow(
@@ -114,37 +123,6 @@ fun SettingsTab(
             )
         }
 
-        Section(
-            title = "调试",
-            trailing = { TextAction(if (showJson) "收起" else "查看") { showJson = !showJson } },
-        ) {
-            SettingRow(
-                title = "读取当前屏幕",
-                subtitle = state.latestSummary ?: "还没有记录",
-                trailing = { TextAction("读取") { onCapture() } },
-            )
-            state.message?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            if (showJson && state.latestJson != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    TextAction("复制") { copy(context, state.latestJson) }
-                    TextAction("分享") { share(context, state.latestJson) }
-                }
-                SelectionContainer {
-                    Text(
-                        state.latestJson.take(4_000),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
 
         Section(title = "关于") {
             SettingRow(title = "PorAuto", subtitle = "版本 ${appVersion(context)}")

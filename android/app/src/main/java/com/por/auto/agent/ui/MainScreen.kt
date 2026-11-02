@@ -49,7 +49,7 @@ private val TABS = listOf(
 )
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -121,8 +121,7 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                     3 -> LogsTab(state, viewModel::refresh)
                     else -> SettingsTab(
                         state = state,
-                        onNotify = onNotify,
-                        onCapture = viewModel::captureNow,
+                        onOpenNotificationSettings = onOpenNotificationSettings,
                         onCheckUpdate = viewModel::checkUpdate,
                         onDownloadUpdate = viewModel::downloadUpdate,
                         onDismissUpdate = viewModel::dismissUpdate,

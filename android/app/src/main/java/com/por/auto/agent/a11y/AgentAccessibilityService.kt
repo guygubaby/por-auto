@@ -4,15 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.view.accessibility.AccessibilityEvent
-import com.por.auto.agent.capture.CaptureNotifier
-import com.por.auto.agent.capture.CaptureRunner
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
- * P0 读屏服务：让 App 拿到当前屏的无障碍树，并提供一个悬浮「读屏」按钮。
- * 点击、输入、手势在 P1 再加。
+ * 读屏服务：给群发和助手提供无障碍树、点击与输入能力。
  */
 class AgentAccessibilityService : AccessibilityService() {
 
@@ -46,13 +40,6 @@ class AgentAccessibilityService : AccessibilityService() {
     fun hideRunStatus() {
         runStatus?.hide()
         runStatus = null
-    }
-
-    private fun captureFromOverlay() {
-        val appContext = applicationContext
-        CoroutineScope(Dispatchers.IO).launch {
-            CaptureNotifier(appContext).showResult(CaptureRunner.capture(appContext))
-        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {

@@ -8,10 +8,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.por.auto.agent.a11y.AgentAccessibilityService
-import com.por.auto.agent.a11y.ScreenReader
-import com.por.auto.agent.a11y.SnapshotJson
-import com.por.auto.agent.capture.CaptureNotifier
-import com.por.auto.agent.capture.DumpStore
 import com.por.auto.agent.ai.AiClient
 import com.por.auto.agent.ai.AiConfig
 import com.por.auto.agent.ai.AiConfigStore
@@ -78,8 +74,6 @@ data class UpdateState(
 
 data class MainUiState(
     val accessibilityEnabled: Boolean = false,
-    val latestJson: String? = null,
-    val latestSummary: String? = null,
     val message: String? = null,
     val p1Running: Boolean = false,
     val p1DryRunText: String? = null,
@@ -102,6 +96,7 @@ data class MainUiState(
     val agentStatus: String? = null,
     val update: UpdateState = UpdateState(),
     val passcode: PasscodeState = PasscodeState(),
+    val notificationsEnabled: Boolean = true,
     val theme: ThemeMode = ThemeMode.System,
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
@@ -130,7 +125,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val latest = DumpStore(app).latest()
                 val lastRun = RunStore(app).latest()
                 val schedules = ScheduleStore(app).all()
                 val runs = RunStore(app).history()
@@ -138,48 +132,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { current ->
                     current.copy(
                         accessibilityEnabled = AgentAccessibilityService.isRunning,
-                        latestJson = latest,
-                        latestSummary = latest?.let(::summarize),
                         p1Results = current.p1Results.ifEmpty { lastRun?.results.orEmpty() },
                         schedules = schedules,
                         exactAlarmAllowed = AlarmScheduler(app).canScheduleExact(),
                         runs = runs,
                         aiConfig = aiConfig,
+                        notificationsEnabled = NotificationManagerCompat.from(app).areNotificationsEnabled(),
                     )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(message = "读取记录失败：${e.message}") }
-            }
-        }
-    }
-
-    fun captureNow() {
-        val service = AgentAccessibilityService.instance
-        if (service == null) {
-            _state.update { it.copy(message = "无障碍服务未开启") }
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val snapshot = ScreenReader.read(service)
-                val json = SnapshotJson.encode(snapshot)
-                DumpStore(getApplication()).save(json)
-                snapshot to json
-            }.onSuccess { (snapshot, json) ->
-                _state.update {
-                    it.copy(
-                        accessibilityEnabled = true,
-                        latestJson = json,
-                        latestSummary = summarize(json),
-                        message = "已读取 ${snapshot.elements.size} 个控件",
-                    )
-                }
-            }.onFailure {
-                _state.update { state ->
-                    state.copy(message = "读取失败：${it.message ?: it.javaClass.simpleName}")
-                }
             }
         }
     }
@@ -541,16 +505,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(aiDraft = null, aiDraftScope = null) }
     }
 
-    fun showCaptureNotification() {
-        val app = getApplication<Application>()
-        if (!NotificationManagerCompat.from(app).areNotificationsEnabled()) {
-            _state.update { it.copy(message = "通知权限未开启，请在系统设置里允许通知") }
-            return
-        }
-        CaptureNotifier(app).showReady()
-        _state.update { it.copy(message = "已显示通知，去企微页面下拉通知栏") }
-    }
-
     /** 启动时问一次服务端口令；没设口令或本地指纹一致就直接放行。 */
     fun checkPasscode() {
         viewModelScope.launch {
@@ -672,14 +626,4 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(update = it.update.copy(release = null)) }
     }
 
-    private fun summarize(json: String): String = runCatching {
-        val root = JSONObject(json)
-        val pkg = if (root.isNull("packageName")) "未知" else root.optString("packageName")
-        val count = root.optJSONArray("elements")?.length() ?: 0
-        val time = root.optLong("capturedAt")
-        val formatted = Instant.ofEpochMilli(time)
-            .atZone(ZoneId.systemDefault())
-            .format(DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
-        "$pkg · $count 个控件 · $formatted"
-    }.getOrDefault("已保存")
 }
