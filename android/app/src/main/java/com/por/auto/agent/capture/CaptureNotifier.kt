@@ -38,7 +38,7 @@ class CaptureNotifier(private val context: Context) {
                 val app = result.snapshot.packageName ?: "当前屏幕"
                 "已读取 $app" to "${result.snapshot.elements.size} 个控件 · ${result.snapshot.windows.size} 个窗口"
             }
-            CaptureResult.NoService -> "无障碍未开启" to "打开 PorAuto Agent，开启无障碍服务后再试"
+            CaptureResult.NoService -> "无障碍未开启" to "打开 PorAuto，开启无障碍服务后再试"
             CaptureResult.NoWindow -> "没有读到控件" to "确认当前页面已加载，再试一次"
             is CaptureResult.Error -> "读取失败" to result.message
         }

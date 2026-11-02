@@ -132,6 +132,9 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                         onToggleOverlay = viewModel::toggleOverlay,
                         onNotify = onNotify,
                         onCapture = viewModel::captureNow,
+                        onCheckUpdate = viewModel::checkUpdate,
+                        onDownloadUpdate = viewModel::downloadUpdate,
+                        onDismissUpdate = viewModel::dismissUpdate,
                     )
                 }
             }

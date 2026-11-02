@@ -24,6 +24,8 @@ import com.por.auto.agent.wecom.BroadcastResult
 import com.por.auto.agent.wecom.RecipientResult
 import com.por.auto.agent.wecom.RunRecord
 import com.por.auto.agent.wecom.RunStore
+import com.por.auto.agent.update.ReleaseInfo
+import com.por.auto.agent.update.UpdateChecker
 import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.WecomScope
 import kotlinx.coroutines.CancellationException
@@ -35,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -45,6 +48,14 @@ data class ResumeJob(
     val scope: WecomScope,
     val dryRun: Boolean,
     val remaining: List<String>,
+)
+
+/** 更新检查的状态：release 有值表示服务端有更新，file 有值表示已下载完。 */
+data class UpdateState(
+    val busy: Boolean = false,
+    val message: String? = null,
+    val release: ReleaseInfo? = null,
+    val file: File? = null,
 )
 
 data class MainUiState(
@@ -72,6 +83,7 @@ data class MainUiState(
     val agentRunning: Boolean = false,
     val agentSteps: List<String> = emptyList(),
     val agentStatus: String? = null,
+    val update: UpdateState = UpdateState(),
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
     fun rehearsed(text: String, scope: WecomScope): Boolean =
@@ -207,6 +219,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     },
                 )
             }
+            bringAppForward()
+        }
+    }
+
+    /** 群发跑完把界面带回前台，别把人留在企微里。 */
+    private fun bringAppForward() {
+        val app = getApplication<Application>()
+        runCatching {
+            app.startActivity(
+                Intent(app, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                ),
+            )
         }
     }
 
@@ -479,6 +506,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         CaptureNotifier(app).showReady()
         _state.update { it.copy(message = "已显示通知，去企微页面下拉通知栏") }
+    }
+
+    fun checkUpdate() {
+        if (_state.value.update.busy) return
+        _state.update { it.copy(update = it.update.copy(busy = true, message = "正在检查…")) }
+        viewModelScope.launch {
+            val checker = UpdateChecker(getApplication())
+            val result = runCatching {
+                checker.latest()?.takeIf { it.versionCode > checker.currentVersionCode() }
+            }.onFailure { if (it is CancellationException) throw it }
+            _state.update { current ->
+                val update = result.fold(
+                    onSuccess = { release ->
+                        if (release == null) {
+                            UpdateState(message = "已经是最新版本")
+                        } else {
+                            UpdateState(release = release, message = "有新版本 ${release.versionName}")
+                        }
+                    },
+                    onFailure = { UpdateState(message = it.message ?: "检查更新失败") },
+                )
+                current.copy(update = update)
+            }
+        }
+    }
+
+    fun downloadUpdate() {
+        val release = _state.value.update.release ?: return
+        if (_state.value.update.busy) return
+        _state.update { it.copy(update = it.update.copy(busy = true, message = "正在下载…")) }
+        viewModelScope.launch {
+            val checker = UpdateChecker(getApplication())
+            val file = runCatching { checker.download(release) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrElse { error ->
+                    _state.update {
+                        it.copy(update = UpdateState(release = release, message = error.message))
+                    }
+                    return@launch
+                }
+            _state.update {
+                it.copy(update = UpdateState(release = release, file = file, message = "已下载，正在安装"))
+            }
+            runCatching { checker.install(file) }.onFailure { error ->
+                _state.update {
+                    it.copy(update = UpdateState(release = release, file = file, message = "打开安装失败：${error.message}"))
+                }
+            }
+        }
+    }
+
+    fun dismissUpdate() {
+        _state.update { it.copy(update = it.update.copy(release = null)) }
     }
 
     private fun summarize(json: String): String = runCatching {

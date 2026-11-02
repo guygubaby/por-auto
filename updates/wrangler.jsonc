@@ -1,0 +1,8 @@
+{
+  "name": "por-auto-updates",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "por-auto-releases" }],
+  "routes": [{ "pattern": "por-auto-u.guygubaby.top", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

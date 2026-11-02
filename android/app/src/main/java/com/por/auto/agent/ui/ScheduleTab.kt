@@ -38,7 +38,7 @@ fun ScheduleTab(
     onDelete: (String) -> Unit,
     onRunNow: (String) -> Unit,
 ) {
-    var text by rememberSaveable { mutableStateOf("1") }
+    var text by rememberSaveable { mutableStateOf("OK") }
     var time by rememberSaveable { mutableStateOf("09:00") }
     var scope by rememberSaveable { mutableStateOf(WecomScope.Groups) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }

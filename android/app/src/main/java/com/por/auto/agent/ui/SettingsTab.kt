@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +40,9 @@ fun SettingsTab(
     onToggleOverlay: () -> Unit,
     onNotify: () -> Unit,
     onCapture: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit,
 ) {
     val context = LocalContext.current
     var showJson by remember { mutableStateOf(false) }
@@ -140,13 +145,49 @@ fun SettingsTab(
         }
 
         Section(title = "关于") {
-            SettingRow(title = "PorAuto Agent", subtitle = "版本 ${appVersion(context)}")
+            SettingRow(title = "PorAuto", subtitle = "版本 ${appVersion(context)}")
+            divider()
+            SettingRow(
+                title = "检查更新",
+                subtitle = state.update.message ?: "从 por-auto-u.guygubaby.top 获取新版本",
+                status = state.update.release != null,
+                trailing = {
+                    if (!state.update.busy) TextAction("检查") { onCheckUpdate() }
+                },
+            )
             Text(
                 "已知版本按资源 ID 定位，未收录的企微版本按界面结构定位。发送成功只代表界面出现新消息，不代表对方已收到。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+
+    state.update.release?.let { release ->
+        AlertDialog(
+            onDismissRequest = onDismissUpdate,
+            title = { Text("发现新版本 ${release.versionName}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    if (release.notes.isNotBlank()) {
+                        Text(release.notes, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Text(
+                        "安装包 ${"%.1f".format(release.size / 1024.0 / 1024.0)} MB，下载后交给系统安装",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDownloadUpdate, enabled = !state.update.busy) {
+                    Text(if (state.update.busy) "请稍候" else "下载并安装")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissUpdate) { Text("以后再说") }
+            },
+        )
     }
 }
 
