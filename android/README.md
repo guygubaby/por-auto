@@ -33,7 +33,7 @@
 设置 → AI 配置（独立页面，左上角返回）：
 
 1. 选 `OpenAI 兼容`、`Anthropic 兼容` 或 `OpenCode Go`（选了会自动填好 Base URL）；
-2. 填 Base URL（如 `https://api.deepseek.com/v1`；OpenCode Go 是 `https://opencode.ai/inference/go/openai/v1`）；
+2. 填 Base URL（如 `https://api.deepseek.com/v1`；OpenCode Go 是 `https://opencode.ai/zen/go/v1`）；
 3. 填 API Key（Keystore 加密保存，留空表示不修改）；
 4. 点「获取模型」，从列表里选一个；
 5. 点「保存并测试」，通过后群发页就能用「AI 生成」：一句话同时填好消息正文和范围，仍需自己试运行确认。

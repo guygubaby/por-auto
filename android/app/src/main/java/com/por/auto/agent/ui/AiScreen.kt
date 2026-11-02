@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,11 +17,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -35,7 +37,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -56,6 +57,7 @@ fun AiScreen(
     var baseUrl by rememberSaveable(state.aiConfig.baseUrl) { mutableStateOf(state.aiConfig.baseUrl) }
     var apiKey by remember { mutableStateOf("") }
     var model by rememberSaveable(state.aiConfig.model) { mutableStateOf(state.aiConfig.model) }
+    var expanded by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -141,14 +143,6 @@ fun AiScreen(
             }
 
             Section(title = "模型") {
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("模型名") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                )
                 CompactButton(
                     text = if (state.aiBusy) "请稍候" else "获取模型",
                     onClick = { onFetchModels(provider, baseUrl, apiKey) },
@@ -156,37 +150,53 @@ fun AiScreen(
                     filled = false,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (state.aiModels.isNotEmpty()) {
+                val options = state.aiModels
+                ExposedDropdownMenuBox(
+                    expanded = expanded && options.isNotEmpty(),
+                    onExpandedChange = { if (options.isNotEmpty()) expanded = it },
+                ) {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("模型") },
+                        placeholder = { Text(if (options.isEmpty()) "先获取模型" else "选一个") },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded && options.isNotEmpty())
+                        },
+                        modifier = Modifier
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth(),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded && options.isNotEmpty(),
+                        onDismissRequest = { expanded = false },
+                        shape = MaterialTheme.shapes.medium,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ) {
+                        options.forEach { name ->
+                            DropdownMenuItem(
+                                text = { Text(name, style = MaterialTheme.typography.bodyMedium) },
+                                onClick = {
+                                    model = name
+                                    expanded = false
+                                },
+                                trailingIcon = if (name == model) {
+                                    { Icon(Icons.Filled.Check, contentDescription = "当前模型") }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                    }
+                }
+                if (options.isNotEmpty()) {
                     Text(
-                        "共 ${state.aiModels.size} 个，点选即设为当前模型",
+                        "共 ${options.size} 个，选中后才能保存并测试",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    state.aiModels.take(12).forEachIndexed { index, name ->
-                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.small)
-                                .clickable { model = name }
-                                .padding(vertical = Space.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Space.sm),
-                        ) {
-                            Text(
-                                name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (name == model) {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = "当前模型",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
@@ -197,7 +207,7 @@ fun AiScreen(
                         onSaveAi(provider, baseUrl, apiKey, model, true)
                         apiKey = ""
                     },
-                    enabled = !state.aiBusy,
+                    enabled = !state.aiBusy && model.isNotBlank() && baseUrl.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.aiStatus?.let {

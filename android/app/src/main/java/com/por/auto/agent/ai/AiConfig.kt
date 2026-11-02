@@ -14,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 enum class AiProvider(val label: String, val defaultBaseUrl: String = "") {
     OpenAiCompatible("OpenAI 兼容"),
     Anthropic("Anthropic 兼容"),
-    OpenCodeGo("OpenCode Go", "https://opencode.ai/inference/go/openai/v1"),
+    OpenCodeGo("OpenCode Go", "https://opencode.ai/zen/go/v1"),
 }
 
 data class AiConfig(
