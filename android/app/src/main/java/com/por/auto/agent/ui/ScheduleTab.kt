@@ -1,5 +1,6 @@
 package com.por.auto.agent.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,10 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,8 +47,8 @@ fun ScheduleTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = Space.lg, end = Space.lg, top = Space.sm, bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.lg),
     ) {
         Section(title = "新建任务") {
             OutlinedTextField(
@@ -58,7 +61,7 @@ fun ScheduleTab(
             )
             ScopePicker(scope = scope, onScope = { scope = it })
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OutlinedTextField(
@@ -99,11 +102,7 @@ fun ScheduleTab(
 
         Section(title = "任务") {
             if (state.schedules.isEmpty()) {
-                Text(
-                    "还没有定时任务",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                EmptyState("还没有定时任务", "在上面填好内容、范围和时间，点「每天发送」。")
             }
             state.schedules.forEachIndexed { index, schedule ->
                 if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -120,22 +119,14 @@ private fun ScheduleRow(
     onDelete: (String) -> Unit,
     onRunNow: (String) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.md),
         ) {
-            Text(
-                schedule.timeLabel,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                schedule.scope.label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(schedule.timeLabel, style = MaterialTheme.typography.titleLarge)
+            ScopeTag(schedule.scope)
             Text(
                 schedule.text,
                 style = MaterialTheme.typography.bodyMedium,
@@ -150,10 +141,26 @@ private fun ScheduleRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             TextAction("立即运行") { onRunNow(schedule.id) }
             TextAction("删除") { onDelete(schedule.id) }
         }
+    }
+}
+
+@Composable
+private fun ScopeTag(scope: WecomScope) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Text(
+            scope.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Space.sm, vertical = 2.dp),
+        )
     }
 }
 

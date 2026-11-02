@@ -36,8 +36,8 @@ fun AssistantTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = Space.lg, end = Space.lg, top = Space.sm, bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.lg),
     ) {
         if (!state.accessibilityEnabled) {
             Section {
@@ -57,11 +57,11 @@ fun AssistantTab(
                 placeholder = { Text("例如：打开企业微信，看看今天有哪些群消息") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 64.dp),
+                    .heightIn(min = 96.dp),
                 enabled = !state.agentRunning,
                 textStyle = MaterialTheme.typography.bodyMedium,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                 CompactButton(
                     text = if (state.agentRunning) "执行中" else "开始",
                     onClick = { onStart(goal) },
@@ -80,7 +80,7 @@ fun AssistantTab(
                 if (state.aiConfig.ready) {
                     "AI 会直接操作当前屏幕，随时可以点停止；删除、退出、支付这类操作会被拦下。"
                 } else {
-                    "还没配置 AI，去设置页填 Base URL 和模型后才能用。"
+                    "还没配置 AI，去设置 → AI 配置 填好接口和模型后才能用。"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -96,7 +96,7 @@ fun AssistantTab(
                 } else {
                     MaterialTheme.colorScheme.primary
                 },
-                modifier = Modifier.padding(horizontal = 4.dp),
+                modifier = Modifier.padding(horizontal = Space.xs),
             )
         }
 

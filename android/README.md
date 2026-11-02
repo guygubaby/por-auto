@@ -12,7 +12,12 @@
 | 定时 | 每天固定时间执行一次群发（范围自选）；暂停 / 立即运行 / 删除 |
 | 助手 | 一句话交给 AI，按当前屏幕一步步操作；随时可停，不可撤销的操作会被拦下 |
 | 日志 | 每次运行的时间、类型、成功失败数；展开看每个会话的结果 |
-| 设置 | 无障碍状态、悬浮读屏按钮、通知按钮、精确闹钟、AI 配置、调试 JSON、版本 |
+| 设置 | 无障碍状态、悬浮读屏按钮、通知按钮、精确闹钟；「AI 配置」点进去是独立页面；调试 JSON、版本 |
+
+界面用 Compose Material 3 + 自带设计层：`Theme.kt` 统一配色（暖纸张底 / 近黑主色 / 琥珀强调）、
+字体比例、圆角和 `Space` 间距；`Components.kt` 提供 `AppHeader`、`Section`、`SettingRow`、
+`CompactButton`、`ScopePicker`、`StatusDot`、`EmptyState`。所有页面都按状态栏 / 导航栏 insets
+留白（edge-to-edge），AI 配置页单独处理 IME inset。
 
 ## App 图标
 
@@ -25,7 +30,7 @@
 
 ## AI 配置
 
-设置 → AI：
+设置 → AI 配置（独立页面，左上角返回）：
 
 1. 选 `OpenAI 兼容` 或 `Anthropic 兼容`；
 2. 填 Base URL（如 `https://api.deepseek.com/v1`）；

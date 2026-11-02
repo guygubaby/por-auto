@@ -28,34 +28,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.por.auto.agent.MainUiState
-import com.por.auto.agent.ai.AiProvider
 
 @Composable
 fun SettingsTab(
     state: MainUiState,
+    onOpenAi: () -> Unit,
     onToggleOverlay: () -> Unit,
     onNotify: () -> Unit,
     onCapture: () -> Unit,
-    onFetchModels: (AiProvider, String, String) -> Unit,
-    onSaveAi: (AiProvider, String, String, String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     var showJson by remember { mutableStateOf(false) }
+    val divider = @Composable { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = Space.lg, end = Space.lg, top = Space.sm, bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.lg),
     ) {
         Section(title = "权限") {
             SettingRow(
                 title = "无障碍服务",
-                subtitle = if (state.accessibilityEnabled) "已开启，可以读取和操作企微" else "未开启，群发无法运行",
+                subtitle = if (state.accessibilityEnabled) "已开启，可以读取和操作屏幕" else "未开启，群发和助手都无法运行",
                 status = state.accessibilityEnabled,
                 trailing = {
                     TextAction(if (state.accessibilityEnabled) "设置" else "去开启") {
@@ -63,7 +61,7 @@ fun SettingsTab(
                     }
                 },
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            divider()
             SettingRow(
                 title = "悬浮读屏按钮",
                 subtitle = "在企微页面上点一下读取当前界面",
@@ -71,13 +69,13 @@ fun SettingsTab(
                     Switch(checked = state.overlayVisible, onCheckedChange = { onToggleOverlay() })
                 },
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            divider()
             SettingRow(
                 title = "通知按钮",
                 subtitle = "下拉通知栏也能触发读屏",
                 trailing = { TextAction("显示") { onNotify() } },
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            divider()
             SettingRow(
                 title = "精确闹钟",
                 subtitle = if (state.exactAlarmAllowed) "已允许，定时按点执行" else "未允许，后台任务可能延迟或跳过",
@@ -95,7 +93,19 @@ fun SettingsTab(
             )
         }
 
-        AiSection(state, onFetchModels, onSaveAi)
+        Section(title = "智能") {
+            SettingRow(
+                title = "AI 配置",
+                subtitle = if (state.aiConfig.ready) {
+                    "${state.aiConfig.provider.label} · ${state.aiConfig.model}"
+                } else {
+                    "还没配置，群发和助手用不了 AI"
+                },
+                status = state.aiConfig.ready,
+                chevron = true,
+                onClick = onOpenAi,
+            )
+        }
 
         Section(
             title = "调试",
@@ -114,7 +124,7 @@ fun SettingsTab(
                 )
             }
             if (showJson && state.latestJson != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                     TextAction("复制") { copy(context, state.latestJson) }
                     TextAction("分享") { share(context, state.latestJson) }
                 }
@@ -132,7 +142,7 @@ fun SettingsTab(
         Section(title = "关于") {
             SettingRow(title = "PorAuto Agent", subtitle = "版本 ${appVersion(context)}")
             Text(
-                "只支持企业微信 5.0.12。发送成功只代表界面出现新消息，不代表对方已收到。",
+                "已知版本按资源 ID 定位，未收录的企微版本按界面结构定位。发送成功只代表界面出现新消息，不代表对方已收到。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

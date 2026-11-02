@@ -12,7 +12,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -21,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -57,8 +57,8 @@ fun BroadcastTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = Space.lg, end = Space.lg, top = Space.sm, bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.lg),
     ) {
         if (!state.accessibilityEnabled) {
             Section {
@@ -71,31 +71,46 @@ fun BroadcastTab(
             }
         }
 
-        Section(
-            title = "消息",
-            trailing = if (state.aiConfig.ready) {
-                { Text("AI 已配置", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-            } else {
-                null
-            },
-        ) {
+        Section(title = "消息") {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
                 placeholder = { Text("要发送的内容") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 64.dp),
+                    .heightIn(min = 72.dp),
                 enabled = !state.p1Running,
                 textStyle = MaterialTheme.typography.bodyLarge,
             )
+            if (state.aiConfig.ready) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = instruction,
+                        onValueChange = { instruction = it },
+                        placeholder = { Text("让 AI 写：提醒大家下午三点开会") },
+                        singleLine = true,
+                        enabled = !state.p1Running && !state.aiBusy,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                    )
+                    CompactButton(
+                        text = if (state.aiBusy) "生成中" else "生成",
+                        onClick = { onAiGenerate(instruction) },
+                        enabled = !state.aiBusy && instruction.isNotBlank(),
+                        filled = false,
+                    )
+                }
+            }
             ScopePicker(scope = scope, onScope = { scope = it }, enabled = !state.p1Running)
             Text(
                 "范围：${scope.label}。正式发送前必须先试运行。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                 CompactButton(
                     text = "试运行",
                     onClick = { onRun(true, text, scope) },
@@ -119,27 +134,6 @@ fun BroadcastTab(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (state.aiConfig.ready) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = instruction,
-                        onValueChange = { instruction = it },
-                        placeholder = { Text("让 AI 写：例如 提醒大家下午三点开会") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                    )
-                    CompactButton(
-                        text = if (state.aiBusy) "生成中" else "AI 生成",
-                        onClick = { onAiGenerate(instruction) },
-                        enabled = !state.aiBusy && instruction.isNotBlank(),
-                        filled = false,
-                    )
-                }
-            }
         }
 
         state.message?.let {
@@ -147,7 +141,7 @@ fun BroadcastTab(
                 it,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                modifier = Modifier.padding(horizontal = Space.xs),
             )
         }
 
@@ -161,21 +155,26 @@ fun BroadcastTab(
                 },
             ) {
                 state.p1Results.forEach { result ->
-                    val suffix = result.error?.let { " · $it" }.orEmpty()
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val ok = result.status == "sent" || result.status == "rehearsed"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                    ) {
+                        StatusDot(ok)
+                        Column(Modifier.weight(1f)) {
+                            Text(result.title, style = MaterialTheme.typography.bodyMedium)
+                            result.error?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         Text(
                             statusLabel(result.status),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (result.status == "sent" || result.status == "rehearsed") {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                        )
-                        Text(
-                            "${result.title}$suffix",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (ok) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         )
                     }
                 }

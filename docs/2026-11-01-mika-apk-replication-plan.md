@@ -862,6 +862,20 @@ P3 AI：`ai/` 下的 `AiConfigStore`（Keystore AES-GCM 加密 Key）、`AiClien
 **参考。** phongent（`mylea1/phongent`，Mika 的多设备版本）证明同一件事：agent 不该依赖固定资源 ID，
 而是每一步读实时控件清单再决定动作；它的知识库是自然语言的 App 说明，不是版本映射表。
 
+## 11. 界面重做（2026-11-02）
+
+不引入第三方 UI 套件：Compose Material 3 本身就是框架，缺的是设计层。于是补了三层——
+
+- **主题**（`Theme.kt`）：墨 + 琥珀配色（暖纸张底、近黑主色、琥珀只做强调），亮暗两套；
+  统一字体比例、圆角（8/10/14/20/28）和 `Space` 间距尺度。
+- **组件**（`Components.kt`）：`AppHeader`、`Section`、`SettingRow`（含箭头/状态点/整行点击）、
+  `CompactButton`（48dp）、`TextAction`、`ScopePicker`（胶囊分段）、`StatusDot`、`EmptyState`。
+- **页面**：五个标签统一「大标题 + 一行说明」的头部；AI 配置从设置内联搬成独立页面，由设置页的
+  导航行进入，系统返回键和左上角返回都能退出。
+
+安全区：应用已 `enableEdgeToEdge()`，自绘头部补 `statusBarsPadding()`；AI 页用 `TopAppBar`
+自带的系统栏 inset，并单独加 `imePadding()`，键盘弹起时保存按钮仍可滚动到。
+
 ## 附录 A：Mika 工具清单
 
 **通用**：`wait`、`view_past_screens`、`view_user_screen`、`ask_user`、`request_confirmation`、`hand_to_user`、`handle_obstacle`、`end_not_done`、`knowledge_search`、`knowledge_read`、`skill_search`、`skill_read`、`skill_save`、`memory_search`、`memory_save`、`profile_edit`、`schedule_task`、`spawn_agent`。
