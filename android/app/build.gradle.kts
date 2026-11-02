@@ -19,8 +19,8 @@ android {
         applicationId = "com.por.auto.agent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.2.0"
+        versionCode = 12
+        versionName = "0.2.1"
 
         // 日志上传的入网令牌放在仓库外（local.properties），构建机没有就留空。
         val ingestKey = Properties().apply {

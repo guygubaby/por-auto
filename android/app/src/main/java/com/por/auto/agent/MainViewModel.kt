@@ -103,7 +103,6 @@ data class MainUiState(
     val update: UpdateState = UpdateState(),
     val passcode: PasscodeState = PasscodeState(),
     val theme: ThemeMode = ThemeMode.System,
-    val mirroring: Boolean = false,
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
     fun rehearsed(text: String, scope: WecomScope): Boolean =
@@ -613,10 +612,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             aiSyncedVersion = version
             _state.update { it.copy(aiConfig = stored, aiStatus = "已从服务器同步 AI 配置") }
         }
-    }
-
-    fun setMirror(on: Boolean) {
-        _state.update { it.copy(mirroring = on) }
     }
 
     fun setTheme(mode: ThemeMode) {
