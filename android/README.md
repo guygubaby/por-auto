@@ -51,6 +51,25 @@ ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:testDebugUnitTest :app:lin
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+### 正式签名包（交付测试用）
+
+签名证书是真实的 4096 位 RSA 证书（CN=PorAuto Agent），有效期 30 年，打出来的包不 debuggable、
+v2 + v3 签名，可以直接装到手机上。
+
+```sh
+cd android
+ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:assembleRelease
+cp app/build/outputs/apk/release/app-release.apk dist/PorAuto-Agent-0.1.0-release.apk
+$HOME/Library/Android/sdk/build-tools/35.0.0/apksigner verify --print-certs dist/PorAuto-Agent-0.1.0-release.apk
+```
+
+- keystore 存放在仓库外：`~/.por-auto/por-auto-release.jks`（别删，删了以后装不上覆盖更新），
+  口令在同目录的构建机文件 `android/keystore.properties`（已 gitignore）。
+- 换一台机器构建时，把 `.jks` 拷过去，按 `storeFile / storePassword / keyAlias / keyPassword`
+  重建 `keystore.properties` 即可；没有该文件时 release 任务产出未签名包。
+- 证书 SHA-256：`922f3b9f3b2403ccfc81de42d43e404602ad99cd3ccdbfbbfb8dc7c143167ca5`。
+- 签名和 debug 包不同，同一台机器上装过 debug 包的测试机要先卸载旧包。
+
 ## 测试
 
 单元测试（JVM，不依赖设备）：

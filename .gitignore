@@ -25,3 +25,7 @@ archive/build/
 archive/dist/
 archive/deliverables/
 !archive/deliverables/客户试用说明.md
+
+# 构建机上的签名配置（keystore 在仓库外）
+android/keystore.properties
+android/dist/
