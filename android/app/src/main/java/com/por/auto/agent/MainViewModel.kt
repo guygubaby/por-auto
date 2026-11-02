@@ -37,6 +37,14 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+/** 一次没跑完的任务：正文、范围、模式和剩下的会话都按原样保存，续跑不改内容。 */
+data class ResumeJob(
+    val text: String,
+    val scope: WecomScope,
+    val dryRun: Boolean,
+    val remaining: List<String>,
+)
+
 data class MainUiState(
     val accessibilityEnabled: Boolean = false,
     val overlayVisible: Boolean = false,
@@ -45,8 +53,11 @@ data class MainUiState(
     val message: String? = null,
     val p1Running: Boolean = false,
     val p1DryRunText: String? = null,
+    val p1DryRunScope: WecomScope? = null,
     val p1Log: List<String> = emptyList(),
     val p1Results: List<RecipientResult> = emptyList(),
+    /** 上次没处理成功的会话；有值时界面可以只补发这些。 */
+    val p1Resume: ResumeJob? = null,
     val schedules: List<Schedule> = emptyList(),
     val exactAlarmAllowed: Boolean = true,
     val runs: List<RunRecord> = emptyList(),
@@ -55,7 +66,12 @@ data class MainUiState(
     val aiBusy: Boolean = false,
     val aiStatus: String? = null,
     val aiDraft: String? = null,
-)
+    val aiDraftScope: WecomScope? = null,
+) {
+    /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
+    fun rehearsed(text: String, scope: WecomScope): Boolean =
+        p1DryRunText == text && p1DryRunScope == scope
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -121,21 +137,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun runBroadcast(dryRun: Boolean, text: String) {
+    fun runBroadcast(dryRun: Boolean, text: String, scope: WecomScope, only: List<String>? = null) {
         if (_state.value.p1Running) return
         val service = AgentAccessibilityService.instance
         if (service == null) {
             _state.update { it.copy(message = "无障碍服务未开启") }
             return
         }
-        if (!dryRun && _state.value.p1DryRunText != text) {
-            _state.update { it.copy(message = "消息已修改或还没试运行，请先试运行") }
+        if (!dryRun && !_state.value.rehearsed(text, scope)) {
+            _state.update { it.copy(message = "消息或范围已变化，请先试运行") }
             return
         }
         _state.update {
             it.copy(
                 p1Running = true,
-                p1DryRunText = null,
+                p1Resume = null,
                 p1Log = emptyList(),
                 p1Results = emptyList(),
                 message = if (dryRun) "试运行中…" else "发送中…",
@@ -146,12 +162,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { state -> state.copy(p1Log = (state.p1Log + line).takeLast(60)) }
             }
             val result = runCatching {
-                runner.run(text, WecomScope.Groups, dryRun)
+                runner.run(text, scope, dryRun, only)
             }.getOrElse {
                 if (it is CancellationException) throw it
                 BroadcastResult(
                     dryRun = dryRun,
-                    results = listOf(RecipientResult("—", WecomScope.Groups, "failed", it.message)),
+                    results = listOf(RecipientResult("—", scope, "failed", it.message)),
                     error = it.message ?: it.javaClass.simpleName,
                 )
             }
@@ -160,7 +176,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     p1Running = false,
-                    p1DryRunText = text.takeIf { result.rehearsed },
+                    // 只有「覆盖全部收件人」的试运行才授权正式发送；正式发送不推翻已有结论。
+                    p1DryRunText = when {
+                        result.rehearsed && only == null -> text
+                        dryRun -> null
+                        else -> it.p1DryRunText
+                    },
+                    p1DryRunScope = when {
+                        result.rehearsed && only == null -> scope
+                        dryRun -> null
+                        else -> it.p1DryRunScope
+                    },
+                    p1Resume = result.results
+                        .filter { r -> r.status == "failed" || r.status == "skipped" }
+                        .map { it.title }
+                        .filter { it != "—" }
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { ResumeJob(text = text, scope = scope, dryRun = dryRun, remaining = it) },
                     p1Results = result.results,
                     runs = runs,
                     message = when {
@@ -173,7 +205,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addSchedule(text: String, hour: Int, minute: Int) {
+    /** 只补发上次没成功的会话，正文和范围沿用原任务。 */
+    fun resumeBroadcast() {
+        val job = _state.value.p1Resume ?: return
+        runBroadcast(job.dryRun, job.text, job.scope, job.remaining)
+    }
+
+    fun addSchedule(text: String, hour: Int, minute: Int, scope: WecomScope) {
         val validation = runCatching { WecomBroadcastRunner.validateText(text) }
         if (validation.isFailure) {
             _state.update { it.copy(message = validation.exceptionOrNull()?.message) }
@@ -184,7 +222,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         changeSchedules { store, scheduler ->
-            val schedule = Schedule.create(text, hour, minute)
+            val schedule = Schedule.create(text, hour, minute, scope)
             store.upsert(schedule)
             scheduler.schedule(schedule)
         }
@@ -321,23 +359,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = runCatching {
                 val store = AiConfigStore(getApplication())
                 val config = store.load()
-                AiClient().chat(config, store.keyFor(config.provider, config.baseUrl, ""), instruction)
+                AiClient().plan(config, store.keyFor(config.provider, config.baseUrl, ""), instruction)
             }.onFailure { if (it is CancellationException) throw it }
             _state.update {
                 it.copy(
                     aiBusy = false,
                     aiStatus = result.fold(
-                        onSuccess = { text -> "已生成，请检查后再试运行" },
+                        onSuccess = { plan ->
+                            if (plan.scopeKey == null) "已生成，范围请自己选" else "已填好消息和范围，请检查"
+                        },
                         onFailure = { error -> "生成失败：${error.message}" },
                     ),
-                    aiDraft = result.getOrNull(),
+                    aiDraft = result.getOrNull()?.text,
+                    aiDraftScope = result.getOrNull()?.scopeKey?.let { key ->
+                        runCatching { WecomScope.fromKey(key) }.getOrNull()
+                    },
                 )
             }
         }
     }
 
     fun consumeAiDraft() {
-        _state.update { it.copy(aiDraft = null) }
+        _state.update { it.copy(aiDraft = null, aiDraftScope = null) }
     }
 
     fun toggleOverlay() {

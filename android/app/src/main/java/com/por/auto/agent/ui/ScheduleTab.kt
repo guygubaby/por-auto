@@ -25,17 +25,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.por.auto.agent.MainUiState
 import com.por.auto.agent.schedule.Schedule
+import com.por.auto.agent.wecom.WecomScope
 
 @Composable
 fun ScheduleTab(
     state: MainUiState,
-    onAdd: (String, Int, Int) -> Unit,
+    onAdd: (String, Int, Int, WecomScope) -> Unit,
     onToggle: (String, Boolean) -> Unit,
     onDelete: (String) -> Unit,
     onRunNow: (String) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("1") }
     var time by rememberSaveable { mutableStateOf("09:00") }
+    var scope by rememberSaveable { mutableStateOf(WecomScope.Groups) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(
@@ -54,6 +56,7 @@ fun ScheduleTab(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge,
             )
+            ScopePicker(scope = scope, onScope = { scope = it })
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -73,7 +76,11 @@ fun ScheduleTab(
                     text = "每天发送",
                     onClick = {
                         val parsed = parseTime(time)
-                        if (parsed == null) error = "时间格式应为 HH:mm" else onAdd(text, parsed.first, parsed.second)
+                        if (parsed == null) {
+                            error = "时间格式应为 HH:mm"
+                        } else {
+                            onAdd(text, parsed.first, parsed.second, scope)
+                        }
                     },
                     modifier = Modifier.weight(1f),
                 )
@@ -123,6 +130,11 @@ private fun ScheduleRow(
                 schedule.timeLabel,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                schedule.scope.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 schedule.text,

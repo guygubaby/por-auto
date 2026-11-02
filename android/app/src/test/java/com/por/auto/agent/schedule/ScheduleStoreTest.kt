@@ -1,5 +1,6 @@
 package com.por.auto.agent.schedule
 
+import com.por.auto.agent.wecom.WecomScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -68,6 +69,16 @@ class ScheduleStoreTest {
         store().upsert(schedule.copy(enabled = false))
         assertNull(store().claimDue(schedule.id, now))
         assertNull(store().claimDue("missing", now))
+    }
+
+    @Test
+    fun scopeSurvivesRoundTrip() {
+        WecomScope.entries.forEach { scope ->
+            val schedule = Schedule.create("hello", 9, 0, scope)
+            store().upsert(schedule)
+            assertEquals(scope, store().find(schedule.id)?.scope)
+            store().remove(schedule.id)
+        }
     }
 
     @Test

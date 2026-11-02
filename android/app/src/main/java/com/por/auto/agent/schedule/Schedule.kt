@@ -29,7 +29,6 @@ data class Schedule(
     init {
         require(id.isNotBlank()) { "任务 ID 不能为空" }
         require(hour in 0..23 && minute in 0..59) { "任务时间无效" }
-        require(scope == WecomScope.Groups) { "当前只支持群聊分类" }
         WecomBroadcastRunner.validateText(text)
     }
 
@@ -38,7 +37,7 @@ data class Schedule(
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("text", text)
-        put("scope", scope.name.lowercase())
+        put("scope", scope.key)
         put("hour", hour)
         put("minute", minute)
         put("enabled", enabled)
@@ -52,10 +51,7 @@ data class Schedule(
         fun from(json: JSONObject): Schedule = Schedule(
             id = json.getString("id"),
             text = json.getString("text"),
-            scope = when (json.getString("scope")) {
-                "groups" -> WecomScope.Groups
-                else -> throw IllegalArgumentException("不支持的会话分类")
-            },
+            scope = WecomScope.fromKey(json.getString("scope")),
             hour = json.getInt("hour"),
             minute = json.getInt("minute"),
             enabled = json.optBoolean("enabled", true),

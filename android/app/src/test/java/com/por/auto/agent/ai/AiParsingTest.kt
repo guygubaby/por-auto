@@ -89,6 +89,27 @@ class AiParsingTest {
     }
 
     @Test
+    fun planReadsJsonEvenBehindCodeFence() {
+        val reply = "```json\n{\"message\":\"下午三点开会\",\"scope\":\"direct\"}\n```"
+        val plan = AiParsing.plan(reply)
+        assertEquals("下午三点开会", plan.text)
+        assertEquals("direct", plan.scopeKey)
+    }
+
+    @Test
+    fun planFallsBackToPlainText() {
+        assertEquals(AiPlan("下午三点开会", null), AiParsing.plan("  下午三点开会 "))
+        assertThrows(AiException::class.java) { AiParsing.plan("  ") }
+    }
+
+    @Test
+    fun planDropsUnknownScopeAndEmptyMessage() {
+        assertEquals(null, AiParsing.plan("""{"message":"1","scope":"全公司"}""").scopeKey)
+        assertEquals("1", AiParsing.plan("""{"text":"1","scope":"groups"}""").text)
+        assertThrows(AiException::class.java) { AiParsing.plan("""{"message":"  "}""") }
+    }
+
+    @Test
     fun configReadyNeedsUrlModelAndKey() {
         assertTrue(AiConfig(baseUrl = "u", model = "m", hasKey = true).ready)
         assertEquals(false, AiConfig(baseUrl = "u", model = "m", hasKey = false).ready)

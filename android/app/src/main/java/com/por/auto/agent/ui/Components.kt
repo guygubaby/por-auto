@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.por.auto.agent.wecom.WecomScope
 
 private val RowMinHeight = 52.dp
 private val ButtonHeight = 48.dp
@@ -132,6 +134,25 @@ fun CompactButton(
             shape = MaterialTheme.shapes.small,
             contentPadding = padding,
         ) { Text(text, maxLines = 1) }
+    }
+}
+
+/** 收件人范围：群聊 / 单聊 / 全部。 */
+@Composable
+fun ScopePicker(
+    scope: WecomScope,
+    onScope: (WecomScope) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WecomScope.entries.forEach { option ->
+            FilterChip(
+                selected = scope == option,
+                onClick = { onScope(option) },
+                label = { Text(option.label, style = MaterialTheme.typography.labelLarge) },
+                enabled = enabled,
+            )
+        }
     }
 }
 

@@ -82,6 +82,7 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                     0 -> BroadcastTab(
                         state = state,
                         onRun = viewModel::runBroadcast,
+                        onResume = viewModel::resumeBroadcast,
                         onOpenAccessibility = {
                             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },

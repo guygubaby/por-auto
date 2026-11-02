@@ -24,18 +24,29 @@ class AiClient {
     }
 
     suspend fun chat(config: AiConfig, apiKey: String, instruction: String): String =
-        withContext(Dispatchers.IO) {
-            when (config.provider) {
-                AiProvider.OpenAiCompatible -> openAiChat(config, apiKey, instruction)
-                AiProvider.Anthropic -> anthropicChat(config, apiKey, instruction)
-            }
-        }
+        complete(config, apiKey, instruction, SYSTEM_PROMPT)
 
-    private fun openAiChat(config: AiConfig, apiKey: String, instruction: String): String {
+    /** 让模型把一句话变成「正文 + 范围」。只填表，不执行任何动作。 */
+    suspend fun plan(config: AiConfig, apiKey: String, instruction: String): AiPlan =
+        AiParsing.plan(complete(config, apiKey, instruction, PLAN_PROMPT))
+
+    private suspend fun complete(
+        config: AiConfig,
+        apiKey: String,
+        instruction: String,
+        system: String,
+    ): String = withContext(Dispatchers.IO) {
+        when (config.provider) {
+            AiProvider.OpenAiCompatible -> openAiChat(config, apiKey, instruction, system)
+            AiProvider.Anthropic -> anthropicChat(config, apiKey, instruction, system)
+        }
+    }
+
+    private fun openAiChat(config: AiConfig, apiKey: String, instruction: String, system: String): String {
         val body = JSONObject().apply {
             put("model", config.model)
             put("messages", JSONArray().apply {
-                put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
+                put(JSONObject().put("role", "system").put("content", system))
                 put(JSONObject().put("role", "user").put("content", instruction))
             })
             put("temperature", 0.3)
@@ -49,11 +60,11 @@ class AiClient {
         return AiParsing.openAiContent(response)
     }
 
-    private fun anthropicChat(config: AiConfig, apiKey: String, instruction: String): String {
+    private fun anthropicChat(config: AiConfig, apiKey: String, instruction: String, system: String): String {
         val body = JSONObject().apply {
             put("model", config.model)
             put("max_tokens", 1024)
-            put("system", SYSTEM_PROMPT)
+            put("system", system)
             put("messages", JSONArray().apply {
                 put(JSONObject().put("role", "user").put("content", instruction))
             })
@@ -104,5 +115,11 @@ class AiClient {
     private companion object {
         const val SYSTEM_PROMPT =
             "你在帮用户写一条发到企业微信群的短消息。只输出消息正文，不要解释、不要引号、不要 Markdown。"
+
+        const val PLAN_PROMPT =
+            "把用户的要求整理成一条企业微信群发。只输出 JSON，不要解释、不要 Markdown。" +
+                "格式：{\"message\":\"要发送的正文\",\"scope\":\"groups|direct|both\"}。" +
+                "scope 取值：groups=全部群聊，direct=全部单聊，both=全部会话。" +
+                "用户没说范围时用 groups。message 必须是可直接发送的正文。"
     }
 }

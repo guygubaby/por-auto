@@ -26,24 +26,29 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.por.auto.agent.MainUiState
+import com.por.auto.agent.wecom.WecomScope
 
 @Composable
 fun BroadcastTab(
     state: MainUiState,
-    onRun: (Boolean, String) -> Unit,
+    onRun: (Boolean, String, WecomScope) -> Unit,
+    onResume: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onAiGenerate: (String) -> Unit,
     onConsumeAiDraft: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("1") }
     var instruction by rememberSaveable { mutableStateOf("") }
+    var scope by rememberSaveable { mutableStateOf(WecomScope.Groups) }
     var confirm by remember { mutableStateOf(false) }
+    var confirmResume by remember { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
-    val canSend = !state.p1Running && state.p1DryRunText == text && text.isNotBlank()
+    val canSend = !state.p1Running && state.rehearsed(text, scope) && text.isNotBlank()
 
     androidx.compose.runtime.LaunchedEffect(state.aiDraft) {
         state.aiDraft?.let {
             text = it
+            state.aiDraftScope?.let { generated -> scope = generated }
             onConsumeAiDraft()
         }
     }
@@ -84,15 +89,16 @@ fun BroadcastTab(
                 enabled = !state.p1Running,
                 textStyle = MaterialTheme.typography.bodyLarge,
             )
+            ScopePicker(scope = scope, onScope = { scope = it }, enabled = !state.p1Running)
             Text(
-                "范围：全部群聊。正式发送前必须先试运行。",
+                "范围：${scope.label}。正式发送前必须先试运行。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompactButton(
                     text = "试运行",
-                    onClick = { onRun(true, text) },
+                    onClick = { onRun(true, text, scope) },
                     enabled = !state.p1Running && text.isNotBlank(),
                     filled = false,
                     modifier = Modifier.weight(1f),
@@ -102,6 +108,15 @@ fun BroadcastTab(
                     onClick = { confirm = true },
                     enabled = canSend,
                     modifier = Modifier.weight(1f),
+                )
+            }
+            state.p1Resume?.let { job ->
+                CompactButton(
+                    text = "继续${if (job.dryRun) "试运行" else "发送"}剩余 ${job.remaining.size} 个",
+                    onClick = { if (job.dryRun) onResume() else confirmResume = true },
+                    enabled = !state.p1Running,
+                    filled = false,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             if (state.aiConfig.ready) {
@@ -182,15 +197,34 @@ fun BroadcastTab(
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("确认发送") },
-            text = { Text("将向全部群聊发送「$text」，确定？") },
+            text = { Text("将向${scope.label}发送「$text」，确定？") },
             confirmButton = {
                 TextButton(onClick = {
                     confirm = false
-                    onRun(false, text)
+                    onRun(false, text, scope)
                 }) { Text("发送") }
             },
             dismissButton = {
                 TextButton(onClick = { confirm = false }) { Text("取消") }
+            },
+        )
+    }
+
+    state.p1Resume?.takeIf { confirmResume }?.let { job ->
+        AlertDialog(
+            onDismissRequest = { confirmResume = false },
+            title = { Text("继续发送") },
+            text = {
+                Text("将向剩余 ${job.remaining.size} 个${job.scope.label}发送「${job.text}」，确定？")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmResume = false
+                    onResume()
+                }) { Text("继续") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmResume = false }) { Text("取消") }
             },
         )
     }

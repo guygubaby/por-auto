@@ -62,6 +62,28 @@ class BroadcastSafetyTest {
     }
 
     @Test
+    fun resumeOnlyTouchesRemainingRecipients() {
+        val all = listOf("群 A", "群 B", "群 C")
+        assertEquals(all, WecomBroadcastRunner.selectTargets(all, null))
+        assertEquals(
+            listOf("群 A", "群 C"),
+            WecomBroadcastRunner.selectTargets(all, listOf("群 C", "群 A")),
+        )
+        assertThrows(WecomException::class.java) {
+            WecomBroadcastRunner.selectTargets(all, listOf("群 D"))
+        }
+    }
+
+    @Test
+    fun scopeKeysRoundTripAndMapToPages() {
+        WecomScope.entries.forEach { assertEquals(it, WecomScope.fromKey(it.key)) }
+        assertThrows(WecomException::class.java) { WecomScope.fromKey("unknown") }
+        assertEquals("群聊", WecomScope.Groups.page)
+        assertEquals("全部", WecomScope.Direct.page)
+        assertEquals("全部", WecomScope.Both.page)
+    }
+
+    @Test
     fun textValidationUsesUtf8BytesAndRejectsControls() {
         WecomBroadcastRunner.validateText("a".repeat(4000))
         WecomBroadcastRunner.validateText("line 1\nline 2\tend")

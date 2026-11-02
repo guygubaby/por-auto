@@ -5,7 +5,19 @@ import com.por.auto.agent.a11y.AgentAccessibilityService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
-enum class WecomScope { Groups, Direct, Both }
+enum class WecomScope(val label: String, val key: String) {
+    Groups("群聊", "groups"),
+    Direct("单聊", "direct"),
+    Both("全部", "both");
+
+    /** 消息页的会话分类。单聊没有独立分类，只能从「全部」里排除群聊得到。 */
+    val page: String get() = if (this == Groups) "群聊" else "全部"
+
+    companion object {
+        fun fromKey(key: String): WecomScope =
+            entries.firstOrNull { it.key == key } ?: throw WecomException("不支持的会话分类：$key")
+    }
+}
 
 data class RecipientResult(
     val title: String,
@@ -37,12 +49,20 @@ class WecomBroadcastRunner(
     private val actions = WecomActions(service)
     private lateinit var ids: WecomIds
 
-    suspend fun run(text: String, scope: WecomScope, dryRun: Boolean): BroadcastResult =
-        BroadcastGate.withRun { execute(text, scope, dryRun) }
+    suspend fun run(
+        text: String,
+        scope: WecomScope,
+        dryRun: Boolean,
+        only: List<String>? = null,
+    ): BroadcastResult = BroadcastGate.withRun { execute(text, scope, dryRun, only) }
 
-    private suspend fun execute(text: String, scope: WecomScope, dryRun: Boolean): BroadcastResult {
+    private suspend fun execute(
+        text: String,
+        scope: WecomScope,
+        dryRun: Boolean,
+        only: List<String>?,
+    ): BroadcastResult {
         validateText(text)
-        if (scope != WecomScope.Groups) throw WecomException("当前只支持群聊分类")
         val results = mutableListOf<RecipientResult>()
         try {
             ids = WecomIds.forVersion(packageVersion())
@@ -51,10 +71,8 @@ class WecomBroadcastRunner(
             waitForPackage(15_000)
             log("回到消息首页")
             home()
-            log("切换到${if (scope == WecomScope.Groups) "群聊" else "全部"}")
-            recipientPage(scope)
             log("读取会话列表")
-            val recipients = discover(scope)
+            val recipients = selectTargets(freezeRecipients(scope), only)
             if (recipients.isEmpty()) throw WecomException("没有可处理的会话")
             log("名单已冻结：${recipients.size} 个")
 
@@ -160,8 +178,23 @@ class WecomBroadcastRunner(
         return null
     }
 
+    /** 冻结名单。单聊先读一遍群聊分类，再从「全部」里按完整名称排除群会话。 */
+    private suspend fun freezeRecipients(scope: WecomScope): List<String> {
+        if (scope != WecomScope.Direct) {
+            log("切换到${scope.page}")
+            recipientPage(scope)
+            return discover(scope)
+        }
+        log("先读群聊分类，用于从全部会话里排除群")
+        recipientPage(WecomScope.Groups)
+        val groups = discover(WecomScope.Groups).map(WecomTitle::key).toSet()
+        log("群聊 ${groups.size} 个，改读全部会话")
+        recipientPage(WecomScope.Direct)
+        return discover(WecomScope.Direct, exclude = groups)
+    }
+
     private suspend fun recipientPage(scope: WecomScope) {
-        val desired = if (scope == WecomScope.Groups) "群聊" else "全部"
+        val desired = scope.page
         repeat(6) {
             val tree = readTree()
             try {
@@ -189,18 +222,18 @@ class WecomBroadcastRunner(
         throw WecomException("未能切换到会话分类：$desired")
     }
 
-    private suspend fun discover(scope: WecomScope): List<String> {
+    private suspend fun discover(scope: WecomScope, exclude: Set<String> = emptySet()): List<String> {
         scrollToTop()
         val collected = RecipientSnapshot()
         repeat(60) {
             val tree = readTree()
             try {
                 val list = tree.one(ids.list)
-                if (tree.one(ids.filterText).text != "群聊") {
+                if (tree.one(ids.filterText).text != scope.page) {
                     throw WecomException("会话分类已变化")
                 }
                 collected.addPage(
-                    rows(tree, scope),
+                    rows(tree, scope, exclude),
                     list.native.collectionInfo?.rowCount?.takeIf { it >= 0 },
                 )
             } finally {
@@ -212,7 +245,7 @@ class WecomBroadcastRunner(
         throw WecomException("无法确认会话列表末尾，未冻结名单")
     }
 
-    private fun rows(tree: WecomTree, scope: WecomScope): List<RecipientRow> {
+    private fun rows(tree: WecomTree, scope: WecomScope, exclude: Set<String>): List<RecipientRow> {
         val list = tree.one(ids.list)
         val titles = tree.nodes.filter { it.id == ids.rowTitle && it.valid && tree.under(it, list) }
         val result = mutableListOf<RecipientRow>()
@@ -224,8 +257,8 @@ class WecomBroadcastRunner(
             if (name.isEmpty() || name.endsWith("…") || name.endsWith("...")) {
                 throw WecomException("会话名称不完整，未猜测")
             }
-            if (scope != WecomScope.Groups && name in DIRECT_EXCLUDES) continue
             val key = WecomTitle.key(name)
+            if (scope != WecomScope.Groups && (name in DIRECT_EXCLUDES || key in exclude)) continue
             if (!seen.add(key)) throw WecomException("会话重名，无法安全区分：$name")
             result += RecipientRow(name, row.position ?: title.position)
         }
@@ -255,7 +288,7 @@ class WecomBroadcastRunner(
 
     /** 每次处理完一个会话都回到列表页，否则下一次读不到列表。 */
     private suspend fun returnToList(scope: WecomScope) {
-        val listPage = if (scope == WecomScope.Groups) "群聊" else "全部"
+        val listPage = scope.page
         repeat(6) {
             val tree = readTree()
             try {
@@ -348,7 +381,7 @@ class WecomBroadcastRunner(
     }
 
     private suspend fun isOnList(scope: WecomScope): Boolean {
-        val expected = if (scope == WecomScope.Groups) "群聊" else "全部"
+        val expected = scope.page
         val tree = readTree()
         return try {
             tree.all(ids.filterText).any { it.text == expected }
@@ -557,6 +590,18 @@ class WecomBroadcastRunner(
         }
 
         private const val MAX_SEARCH_SCROLLS = 80
+
+        /**
+         * 续跑时只处理上一次失败/跳过的会话。名单里已经找不到的会话直接停，
+         * 不把「少发一个」当成成功。
+         */
+        internal fun selectTargets(recipients: List<String>, only: List<String>?): List<String> {
+            if (only == null) return recipients
+            val wanted = only.map(WecomTitle::key).toSet()
+            val missing = only.firstOrNull { title -> recipients.none { WecomTitle.key(it) == WecomTitle.key(title) } }
+            if (missing != null) throw WecomException("会话已不在列表里：$missing")
+            return recipients.filter { WecomTitle.key(it) in wanted }
+        }
 
         private val DIRECT_EXCLUDES = setOf(
             "客户联系", "行业资讯", "接收微信中的工作消息", "打卡",

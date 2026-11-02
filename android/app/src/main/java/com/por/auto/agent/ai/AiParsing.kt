@@ -3,6 +3,10 @@ package com.por.auto.agent.ai
 import org.json.JSONObject
 import java.net.URI
 
+data class AiPlan(val text: String, val scopeKey: String?)
+
+private val SCOPE_KEYS = setOf("groups", "direct", "both")
+
 /** 纯函数：URL 拼接与两种协议的响应解析，方便单测。 */
 object AiParsing {
 
@@ -45,6 +49,25 @@ object AiParsing {
         }.getOrNull()
         if (text.isNullOrBlank()) throw AiException("返回里没有消息内容")
         return text.trim()
+    }
+
+    /**
+     * 把模型回复解析成「正文 + 范围」。模型经常带 ```json 围栏或前后解释，
+     * 只要能抠出第一个对象就用它；抠不出来就整段当正文，范围留空由用户选。
+     */
+    fun plan(reply: String): AiPlan {
+        if (reply.isBlank()) throw AiException("返回里没有消息内容")
+        val start = reply.indexOf('{')
+        val end = reply.lastIndexOf('}')
+        val json = if (start >= 0 && end > start) {
+            runCatching { JSONObject(reply.substring(start, end + 1)) }.getOrNull()
+        } else {
+            null
+        } ?: return AiPlan(reply.trim(), null)
+        val text = json.optString("message").ifBlank { json.optString("text") }.trim()
+        if (text.isEmpty()) throw AiException("返回里没有消息内容")
+        val scope = json.optString("scope").trim().lowercase().takeIf { it in SCOPE_KEYS }
+        return AiPlan(text, scope)
     }
 
     /** 错误响应里带 message 时给出更具体的原因。 */
