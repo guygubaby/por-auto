@@ -49,7 +49,7 @@ private val TABS = listOf(
 )
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit, onToggleMirror: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -123,6 +123,7 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                         state = state,
                         onNotify = onNotify,
                         onCapture = viewModel::captureNow,
+                        onToggleMirror = onToggleMirror,
                         onCheckUpdate = viewModel::checkUpdate,
                         onDownloadUpdate = viewModel::downloadUpdate,
                         onDismissUpdate = viewModel::dismissUpdate,

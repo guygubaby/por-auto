@@ -38,6 +38,7 @@ fun SettingsTab(
     state: MainUiState,
     onNotify: () -> Unit,
     onCapture: () -> Unit,
+    onToggleMirror: () -> Unit,
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
@@ -63,6 +64,14 @@ fun SettingsTab(
                     TextAction(if (state.accessibilityEnabled) "设置" else "去开启") {
                         context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     }
+                },
+            )
+            divider()
+            SettingRow(
+                title = "镜像小窗",
+                subtitle = "右上角实时显示当前屏幕，方便看它在点什么",
+                trailing = {
+                    Switch(checked = state.mirroring, onCheckedChange = { onToggleMirror() })
                 },
             )
             divider()
