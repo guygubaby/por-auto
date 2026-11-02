@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      BroadcastService 在调用 startForeground 之前用 checkSelfPermission 检查前台服务权限，
+      并对 SecurityException 兜底；lint 无法跨函数跟踪这条路径。
+    -->
+    <issue id="MissingPermission">
+        <ignore path="src/main/java/com/por/auto/agent/schedule/BroadcastService.kt" />
+    </issue>
+</lint>

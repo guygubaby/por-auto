@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">PorAuto Agent</string>
+    <string name="a11y_service_name">PorAuto 读屏</string>
+    <string name="a11y_description">读取当前屏幕的控件，用于 PorAuto 工作流调试。</string>
+</resources>
