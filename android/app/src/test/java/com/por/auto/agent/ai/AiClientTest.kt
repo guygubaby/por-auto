@@ -49,4 +49,44 @@ class AiClientTest {
             server.join(5_000)
         }
     }
+
+    @Test
+    fun openCodeGoSendsItsOwnUserAgentAndStableSession() = runTest {
+        val seen = mutableListOf<String>()
+        val gateway = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        val server = thread(name = "ai-opencode-test", isDaemon = true) {
+            try {
+                gateway.accept().use { socket ->
+                    socket.soTimeout = 5_000
+                    val input = socket.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = input.readLine() ?: break
+                        if (line.isEmpty()) break
+                        synchronized(seen) { seen.add(line.lowercase()) }
+                    }
+                    socket.getOutputStream().write(
+                        "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"data\":[]}"
+                            .toByteArray(Charsets.UTF_8),
+                    )
+                }
+            } catch (e: SocketException) {
+                if (!gateway.isClosed) throw e
+            }
+        }
+        try {
+            val config = AiConfig(
+                provider = AiProvider.OpenCodeGo,
+                baseUrl = "http://127.0.0.1:${gateway.localPort}",
+                model = "glm-5.3",
+                sessionId = "stable-session",
+            )
+            AiClient().fetchModels(config, "test-key")
+            assertTrue(seen.contains("user-agent: porauto-agent/0.1.0"))
+            assertTrue(seen.contains("x-opencode-session: stable-session"))
+            assertTrue(seen.contains("authorization: bearer test-key"))
+        } finally {
+            gateway.close()
+            server.join(5_000)
+        }
+    }
 }

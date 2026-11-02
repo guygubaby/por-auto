@@ -5,14 +5,16 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-enum class AiProvider(val label: String) {
+enum class AiProvider(val label: String, val defaultBaseUrl: String = "") {
     OpenAiCompatible("OpenAI 兼容"),
     Anthropic("Anthropic 兼容"),
+    OpenCodeGo("OpenCode Go", "https://opencode.ai/inference/go/openai/v1"),
 }
 
 data class AiConfig(
@@ -20,6 +22,8 @@ data class AiConfig(
     val baseUrl: String = "",
     val model: String = "",
     val hasKey: Boolean = false,
+    /** OpenCode Go 需要每次请求带同一个会话 ID；安装后固定不变。 */
+    val sessionId: String = "",
 ) {
     val ready: Boolean get() = baseUrl.isNotBlank() && model.isNotBlank() && hasKey
 
@@ -77,7 +81,12 @@ class AiConfigStore(private val context: Context) {
         baseUrl = prefs.getString(KEY_BASE_URL, "").orEmpty(),
         model = prefs.getString(KEY_MODEL, "").orEmpty(),
         hasKey = !prefs.getString(KEY_SECRET, null).isNullOrEmpty(),
+        sessionId = sessionId(),
     )
+
+    /** 首次使用时生成并存下来，之后每次都带同一个值。 */
+    fun sessionId(): String = prefs.getString(KEY_SESSION, null)
+        ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_SESSION, it).apply() }
 
     /** apiKey 为空表示沿用已保存的 Key。 */
     fun save(config: AiConfig, apiKey: String?) {
@@ -115,5 +124,6 @@ class AiConfigStore(private val context: Context) {
         const val KEY_BASE_URL = "baseUrl"
         const val KEY_MODEL = "model"
         const val KEY_SECRET = "secret"
+        const val KEY_SESSION = "session"
     }
 }

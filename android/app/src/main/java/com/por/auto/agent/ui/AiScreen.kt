@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,7 +44,7 @@ import com.por.auto.agent.MainUiState
 import com.por.auto.agent.ai.AiProvider
 
 /** 独立的 AI 配置页：服务商、连接、模型，保存并测试。 */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AiScreen(
     state: MainUiState,
@@ -87,12 +89,24 @@ fun AiScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                    verticalArrangement = Arrangement.spacedBy(Space.sm),
+                ) {
                     AiProvider.entries.forEach { item ->
                         ProviderPill(
                             label = item.label,
                             selected = provider == item,
-                            onClick = { provider = item },
+                            onClick = {
+                                // 切到自带默认地址的服务商时顺手填好，省得手打。
+                                if (item.defaultBaseUrl.isNotBlank() &&
+                                    (baseUrl.isBlank() ||
+                                        AiProvider.entries.any { it.defaultBaseUrl == baseUrl.trim() })
+                                ) {
+                                    baseUrl = item.defaultBaseUrl
+                                }
+                                provider = item
+                            },
                         )
                     }
                 }
@@ -117,6 +131,13 @@ fun AiScreen(
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.bodyMedium,
                 )
+                if (provider == AiProvider.OpenCodeGo) {
+                    Text(
+                        "OpenCode Go 填到 /v1 这一层；请求会带应用自己的 User-Agent 和固定的 x-opencode-session 会话头。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Section(title = "模型") {

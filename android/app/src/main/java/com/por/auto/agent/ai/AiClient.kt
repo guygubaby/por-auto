@@ -13,13 +13,14 @@ class AiException(message: String) : Exception(message)
 
 /**
  * 只实现两种协议：OpenAI 兼容（/chat/completions、/models）和 Anthropic 兼容（/messages、/models）。
+ * OpenCode Go 走 OpenAI 协议，另加应用自己的 User-Agent 和固定的 x-opencode-session 会话头。
  * base URL 由用户填写，末尾斜杠会被去掉。
  */
 class AiClient {
 
     suspend fun fetchModels(config: AiConfig, apiKey: String): List<String> = withContext(Dispatchers.IO) {
         val url = AiParsing.join(config.baseUrl, "models")
-        val response = request(url, apiKey, config.provider, body = null)
+        val response = request(url, apiKey, config, body = null)
         AiParsing.models(response)
     }
 
@@ -41,7 +42,8 @@ class AiClient {
         system: String,
     ): String = withContext(Dispatchers.IO) {
         when (config.provider) {
-            AiProvider.OpenAiCompatible -> openAiChat(config, apiKey, instruction, system)
+            AiProvider.OpenAiCompatible, AiProvider.OpenCodeGo ->
+                openAiChat(config, apiKey, instruction, system)
             AiProvider.Anthropic -> anthropicChat(config, apiKey, instruction, system)
         }
     }
@@ -58,7 +60,7 @@ class AiClient {
         val response = request(
             AiParsing.join(config.baseUrl, "chat/completions"),
             apiKey,
-            config.provider,
+            config,
             body.toString(),
         )
         return AiParsing.openAiContent(response)
@@ -76,13 +78,13 @@ class AiClient {
         val response = request(
             AiParsing.join(config.baseUrl, "messages"),
             apiKey,
-            config.provider,
+            config,
             body.toString(),
         )
         return AiParsing.anthropicContent(response)
     }
 
-    private fun request(url: String, apiKey: String, provider: AiProvider, body: String?): String {
+    private fun request(url: String, apiKey: String, config: AiConfig, body: String?): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             // Do not forward provider credentials to a redirect destination.
             instanceFollowRedirects = false
@@ -91,11 +93,19 @@ class AiClient {
             readTimeout = 60_000
             setRequestProperty("Accept", "application/json")
             if (body != null) setRequestProperty("Content-Type", "application/json")
-            when (provider) {
+            when (config.provider) {
                 AiProvider.OpenAiCompatible -> setRequestProperty("Authorization", "Bearer $apiKey")
                 AiProvider.Anthropic -> {
                     setRequestProperty("x-api-key", apiKey)
                     setRequestProperty("anthropic-version", "2023-06-01")
+                }
+                // OpenCode Go 要求按编程 Agent 识别：自己的 UA + 稳定的会话头。
+                AiProvider.OpenCodeGo -> {
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                    setRequestProperty("User-Agent", USER_AGENT)
+                    config.sessionId.takeIf { it.isNotBlank() }?.let {
+                        setRequestProperty("x-opencode-session", it)
+                    }
                 }
             }
         }
@@ -117,6 +127,8 @@ class AiClient {
     }
 
     private companion object {
+        const val USER_AGENT = "PorAuto-Agent/0.1.0"
+
         const val SYSTEM_PROMPT =
             "你在帮用户写一条发到企业微信群的短消息。只输出消息正文，不要解释、不要引号、不要 Markdown。"
 

@@ -358,7 +358,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.aiBusy) return
         _state.update { it.copy(aiBusy = true, aiStatus = "正在获取模型…") }
         viewModelScope.launch(Dispatchers.IO) {
-            val config = AiConfig(provider = provider, baseUrl = baseUrl.trim(), model = "", hasKey = true)
+            val config = AiConfig(provider = provider, baseUrl = baseUrl.trim(), model = "", hasKey = true,
+                sessionId = AiConfigStore(getApplication()).sessionId(),
+            )
             val result = runCatching {
                 val key = AiConfigStore(getApplication()).keyFor(provider, baseUrl, apiKey)
                 AiClient().fetchModels(config, key)
