@@ -78,7 +78,6 @@ data class UpdateState(
 
 data class MainUiState(
     val accessibilityEnabled: Boolean = false,
-    val overlayVisible: Boolean = false,
     val latestJson: String? = null,
     val latestSummary: String? = null,
     val message: String? = null,
@@ -139,7 +138,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { current ->
                     current.copy(
                         accessibilityEnabled = AgentAccessibilityService.isRunning,
-                        overlayVisible = AgentAccessibilityService.instance?.overlayVisible == true,
                         latestJson = latest,
                         latestSummary = latest?.let(::summarize),
                         p1Results = current.p1Results.ifEmpty { lastRun?.results.orEmpty() },
@@ -541,28 +539,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeAiDraft() {
         _state.update { it.copy(aiDraft = null, aiDraftScope = null) }
-    }
-
-    fun toggleOverlay() {
-        val service = AgentAccessibilityService.instance
-        if (service == null) {
-            _state.update { it.copy(message = "无障碍服务未开启") }
-            return
-        }
-        runCatching {
-            if (service.overlayVisible) service.hideOverlay() else service.showOverlay()
-        }.onSuccess {
-            _state.update {
-                it.copy(
-                    overlayVisible = service.overlayVisible,
-                    message = if (service.overlayVisible) "悬浮按钮已显示，去企微页面点「读屏」" else "悬浮按钮已隐藏",
-                )
-            }
-        }.onFailure {
-            _state.update { state ->
-                state.copy(message = "悬浮按钮失败：${it.message ?: it.javaClass.simpleName}")
-            }
-        }
     }
 
     fun showCaptureNotification() {

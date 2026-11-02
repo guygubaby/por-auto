@@ -16,7 +16,6 @@ import kotlinx.coroutines.launch
  */
 class AgentAccessibilityService : AccessibilityService() {
 
-    private var overlay: OverlayHost? = null
     private var runStatus: RunStatusOverlay? = null
 
     override fun onServiceConnected() {
@@ -33,19 +32,6 @@ class AgentAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
     override fun onInterrupt() = Unit
-
-    fun showOverlay() {
-        val host = overlay ?: OverlayHost(this)
-        host.show { captureFromOverlay() }
-        overlay = host
-    }
-
-    fun hideOverlay() {
-        overlay?.hide()
-        overlay = null
-    }
-
-    val overlayVisible: Boolean get() = overlay != null
 
     /** 群发 / 定时跑动时的小状态条，不吃触摸。 */
     fun showRunStatus(text: String) {
@@ -70,14 +56,12 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        hideOverlay()
         hideRunStatus()
         if (instance === this) instance = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        hideOverlay()
         hideRunStatus()
         if (instance === this) instance = null
         super.onDestroy()

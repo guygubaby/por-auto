@@ -121,7 +121,6 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                     3 -> LogsTab(state, viewModel::refresh)
                     else -> SettingsTab(
                         state = state,
-                        onToggleOverlay = viewModel::toggleOverlay,
                         onNotify = onNotify,
                         onCapture = viewModel::captureNow,
                         onCheckUpdate = viewModel::checkUpdate,

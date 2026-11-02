@@ -36,7 +36,6 @@ import com.por.auto.agent.MainUiState
 @Composable
 fun SettingsTab(
     state: MainUiState,
-    onToggleOverlay: () -> Unit,
     onNotify: () -> Unit,
     onCapture: () -> Unit,
     onCheckUpdate: () -> Unit,
@@ -64,14 +63,6 @@ fun SettingsTab(
                     TextAction(if (state.accessibilityEnabled) "设置" else "去开启") {
                         context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     }
-                },
-            )
-            divider()
-            SettingRow(
-                title = "悬浮读屏按钮",
-                subtitle = "在企微页面上点一下读取当前界面",
-                trailing = {
-                    Switch(checked = state.overlayVisible, onCheckedChange = { onToggleOverlay() })
                 },
             )
             divider()
