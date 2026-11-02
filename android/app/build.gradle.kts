@@ -19,12 +19,19 @@ android {
         applicationId = "com.por.auto.agent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 6
+        versionName = "0.1.5"
+
+        // 日志上传的入网令牌放在仓库外（local.properties），构建机没有就留空。
+        val ingestKey = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+        }.getProperty("ingestKey").orEmpty()
+        buildConfigField("String", "INGEST_KEY", "\"$ingestKey\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {

@@ -101,11 +101,7 @@ fun SettingsTab(
         Section(title = "智能") {
             SettingRow(
                 title = "AI 配置",
-                subtitle = if (state.aiConfig.ready) {
-                    "${state.aiConfig.provider.label} · ${state.aiConfig.model}"
-                } else {
-                    "还没配置，群发和助手用不了 AI"
-                },
+                subtitle = if (state.aiConfig.ready) "已配置" else "还没配置，群发和助手用不了 AI",
                 status = state.aiConfig.ready,
                 chevron = true,
                 onClick = onOpenAi,
@@ -149,7 +145,7 @@ fun SettingsTab(
             divider()
             SettingRow(
                 title = "检查更新",
-                subtitle = state.update.message ?: "从 por-auto-u.guygubaby.top 获取新版本",
+                subtitle = state.update.message ?: "从 por-auto.guygubaby.top 获取新版本",
                 status = state.update.release != null,
                 trailing = {
                     if (!state.update.busy) TextAction("检查") { onCheckUpdate() }

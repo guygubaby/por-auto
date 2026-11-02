@@ -15,7 +15,22 @@ enum class AiProvider(val label: String, val defaultBaseUrl: String = "") {
     OpenAiCompatible("OpenAI 兼容"),
     Anthropic("Anthropic 兼容"),
     OpenCodeGo("OpenCode Go", "https://opencode.ai/zen/go/v1"),
+    ;
+
+    companion object {
+        /** 服务端配置里用的短名：openai / anthropic / opencode。 */
+        fun fromKey(key: String): AiProvider =
+            entries.firstOrNull { it.key == key.trim().lowercase() }
+                ?: throw AiException("服务端给的协议不认识：$key")
+    }
 }
+
+val AiProvider.key: String
+    get() = when (this) {
+        AiProvider.OpenAiCompatible -> "openai"
+        AiProvider.Anthropic -> "anthropic"
+        AiProvider.OpenCodeGo -> "opencode"
+    }
 
 data class AiConfig(
     val provider: AiProvider = AiProvider.OpenAiCompatible,

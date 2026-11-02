@@ -122,6 +122,6 @@ class UpdateChecker(private val context: Context) {
     }
 
     private companion object {
-        const val BASE_URL = "https://por-auto-u.guygubaby.top"
+        const val BASE_URL = "https://por-auto.guygubaby.top"
     }
 }

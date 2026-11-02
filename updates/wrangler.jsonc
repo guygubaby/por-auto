@@ -3,6 +3,14 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "por-auto-releases" }],
-  "routes": [{ "pattern": "por-auto-u.guygubaby.top", "custom_domain": true }],
+  // 同一个域名：/ 是管理端与下载页，/api/* 是后端，/latest 给 App 检查更新。
+  "assets": {
+    "directory": "../admin/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // 浏览器直接打开 /latest、/latest.apk 时也要先过 Worker，否则 SP​A 会顶掉下载。
+    "run_worker_first": true
+  },
+  "routes": [{ "pattern": "por-auto.guygubaby.top", "custom_domain": true }],
   "observability": { "enabled": true }
 }

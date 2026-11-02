@@ -29,3 +29,10 @@ archive/deliverables/
 # 构建机上的签名配置（keystore 在仓库外）
 android/keystore.properties
 android/dist/
+
+# 管理端 Web（admin/）
+admin/node_modules/
+admin/dist/
+
+# Wrangler 本地缓存
+.wrangler/

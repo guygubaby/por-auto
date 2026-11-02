@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.por.auto.agent.a11y.AgentAccessibilityService
+import com.por.auto.agent.update.RunUploads
+import com.por.auto.agent.wecom.RunMeta
 import com.por.auto.agent.wecom.RunStore
 import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.BroadcastResult
@@ -86,7 +88,10 @@ class BroadcastService : Service() {
         val service = AgentAccessibilityService.instance
             ?: return@withContext skip(store, schedule, "无障碍服务未开启，跳过本次")
 
+        val startedAt = System.currentTimeMillis()
+        val lines = mutableListOf<String>()
         val runner = WecomBroadcastRunner(service) { line ->
+            lines += line
             updateNotification("${schedule.timeLabel} ${schedule.text}", line)
         }
         val result = runCatching {
@@ -103,8 +108,18 @@ class BroadcastService : Service() {
                 error = it.message ?: it.javaClass.simpleName,
             )
         }
-        runCatching { RunStore(this@BroadcastService).save(result) }
+        val meta = RunMeta(
+            kind = "schedule",
+            startedAt = startedAt,
+            scope = schedule.scope,
+            text = schedule.text,
+            log = lines.toList(),
+            device = RunMeta.device(this@BroadcastService),
+        )
+        val saved = runCatching { RunStore(this@BroadcastService).save(result, meta) }
             .onFailure { Log.e("BroadcastService", "Unable to save run result", it) }
+            .getOrNull()
+        saved?.let { file -> RunUploads.enqueue(file) }
 
         val finishedAt = System.currentTimeMillis()
         // Merge into the current definition; a completed run must not undo pause/delete.
@@ -132,9 +147,21 @@ class BroadcastService : Service() {
                 lastError = reason,
             )
         }
-        RunStore(this).save(
-            BroadcastResult(false, listOf(RecipientResult("—", schedule.scope, "skipped", reason)), reason),
+        val result = BroadcastResult(
+            false,
+            listOf(RecipientResult("—", schedule.scope, "skipped", reason)),
+            reason,
         )
+        val meta = RunMeta(
+            kind = "schedule",
+            startedAt = System.currentTimeMillis(),
+            scope = schedule.scope,
+            text = schedule.text,
+            log = listOf("跳过：$reason"),
+            device = RunMeta.device(this),
+        )
+        val saved = runCatching { RunStore(this).save(result, meta) }.getOrNull()
+        saved?.let { file -> RunUploads.enqueue(file) }
         notifyResult("定时 ${schedule.timeLabel} 已跳过", reason)
     }
 

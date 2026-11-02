@@ -23,8 +23,13 @@ import com.por.auto.agent.schedule.ScheduleStore
 import com.por.auto.agent.wecom.BroadcastResult
 import com.por.auto.agent.wecom.RecipientResult
 import com.por.auto.agent.wecom.RunRecord
+import com.por.auto.agent.wecom.RunMeta
 import com.por.auto.agent.wecom.RunStore
+import com.por.auto.agent.update.BackendClient
+import com.por.auto.agent.update.PasscodeStore
 import com.por.auto.agent.update.ReleaseInfo
+import com.por.auto.agent.update.RunUploads
+import com.por.auto.agent.update.sha256Hex
 import com.por.auto.agent.update.UpdateChecker
 import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.WecomScope
@@ -48,6 +53,14 @@ data class ResumeJob(
     val scope: WecomScope,
     val dryRun: Boolean,
     val remaining: List<String>,
+)
+
+/** 口令闸门：服务端设过口令且本地没通过（或服务端换了口令）时 required 为 true。 */
+data class PasscodeState(
+    val required: Boolean = false,
+    val version: Int = 0,
+    val busy: Boolean = false,
+    val error: String? = null,
 )
 
 /** 更新检查的状态：release 有值表示服务端有更新，file 有值表示已下载完。 */
@@ -84,6 +97,7 @@ data class MainUiState(
     val agentSteps: List<String> = emptyList(),
     val agentStatus: String? = null,
     val update: UpdateState = UpdateState(),
+    val passcode: PasscodeState = PasscodeState(),
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
     fun rehearsed(text: String, scope: WecomScope): Boolean =
@@ -95,7 +109,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(MainUiState())
     val state: StateFlow<MainUiState> = _state.asStateFlow()
 
+    private var aiSyncedVersion: Int? = null
+    private var retriedUploads = false
+
     fun refresh() {
+        if (!retriedUploads) {
+            retriedUploads = true
+            RunUploads.retryPending(getApplication())
+        }
+        // 每次回到前台都问一次服务端口令：管理员换了口令，这里就会重新要求输入。
+        if (!_state.value.passcode.required) checkPasscode()
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -174,9 +197,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 message = if (dryRun) "试运行中…" else "发送中…",
             )
         }
+        val startedAt = System.currentTimeMillis()
         viewModelScope.launch(Dispatchers.IO) {
             val runner = WecomBroadcastRunner(service) { line ->
-                _state.update { state -> state.copy(p1Log = (state.p1Log + line).takeLast(60)) }
+                _state.update { state -> state.copy(p1Log = (state.p1Log + line).takeLast(400)) }
             }
             val result = runCatching {
                 runner.run(text, scope, dryRun, only)
@@ -188,7 +212,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     error = it.message ?: it.javaClass.simpleName,
                 )
             }
-            runCatching { RunStore(getApplication()).save(result) }
+            val app = getApplication<Application>()
+            val meta = RunMeta(
+                kind = "broadcast",
+                startedAt = startedAt,
+                scope = scope,
+                text = text,
+                log = _state.value.p1Log,
+                device = RunMeta.device(app),
+            )
+            val saved = runCatching { RunStore(app).save(result, meta) }.getOrNull()
             val runs = RunStore(getApplication()).history()
             _state.update {
                 it.copy(
@@ -219,6 +252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     },
                 )
             }
+            saved?.let { file -> RunUploads.enqueue(file) }
             bringAppForward()
         }
     }
@@ -506,6 +540,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         CaptureNotifier(app).showReady()
         _state.update { it.copy(message = "已显示通知，去企微页面下拉通知栏") }
+    }
+
+    /** 启动时问一次服务端口令；没设口令或本地指纹一致就直接放行。 */
+    fun checkPasscode() {
+        viewModelScope.launch {
+            val remote = runCatching { BackendClient().passcode() }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull() ?: return@launch
+            val store = PasscodeStore(getApplication())
+            // 服务端只给版本号；本地记的版本对不上就重新要口令。
+            val required = store.version() != remote.version
+            _state.update {
+                it.copy(passcode = PasscodeState(required = required, version = remote.version))
+            }
+            if (!required) syncAiConfig(store.sha256(), remote.version)
+        }
+    }
+
+    fun submitPasscode(input: String) {
+        val state = _state.value.passcode
+        if (state.busy) return
+        val passcode = input.trim()
+        if (passcode.isBlank()) {
+            _state.update { it.copy(passcode = it.passcode.copy(error = "请输入口令")) }
+            return
+        }
+        _state.update { it.copy(passcode = it.passcode.copy(busy = true, error = null)) }
+        viewModelScope.launch {
+            val sha = sha256Hex(passcode)
+            // 直接用这个指纹去要配置：服务端认了才算通过，认不出就是口令不对。
+            val result = runCatching { BackendClient().aiConfig(sha) }
+                .onFailure { if (it is CancellationException) throw it }
+            val failure = result.exceptionOrNull()
+            if (failure != null) {
+                _state.update {
+                    it.copy(passcode = it.passcode.copy(busy = false, error = failure.message ?: "校验失败"))
+                }
+                return@launch
+            }
+            PasscodeStore(getApplication()).accept(sha, state.version)
+            _state.update { it.copy(passcode = PasscodeState(version = state.version)) }
+            syncAiConfig(sha, state.version)
+        }
+    }
+
+    /** 口令通过后把服务端配置拉下来，本地就不用再手填 AI。 */
+    private fun syncAiConfig(passcodeSha: String, version: Int) {
+        if (passcodeSha.isBlank() || aiSyncedVersion == version) return
+        viewModelScope.launch {
+            val config = runCatching { BackendClient().aiConfig(passcodeSha) }.getOrNull() ?: return@launch
+            if (config.baseUrl.isBlank() || config.model.isBlank()) return@launch
+            val stored = runCatching {
+                val provider = AiProvider.fromKey(config.provider)
+                val app = getApplication<Application>()
+                AiConfigStore(app).save(
+                    AiConfig(provider = provider, baseUrl = config.baseUrl, model = config.model),
+                    config.apiKey,
+                )
+                AiConfigStore(app).load()
+            }.getOrNull() ?: return@launch
+            aiSyncedVersion = version
+            _state.update { it.copy(aiConfig = stored, aiStatus = "已从服务器同步 AI 配置") }
+        }
     }
 
     fun checkUpdate() {

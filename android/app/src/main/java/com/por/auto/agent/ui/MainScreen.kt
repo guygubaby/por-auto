@@ -59,6 +59,11 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
     LaunchedEffect(Unit) { viewModel.refresh() }
     LaunchedEffect(tab) { if (tab == 3) viewModel.refresh() }
 
+    if (state.passcode.required) {
+        PasscodeScreen(state = state.passcode, onSubmit = viewModel::submitPasscode)
+        return
+    }
+
     if (showAi) {
         BackHandler { showAi = false }
         AiScreen(

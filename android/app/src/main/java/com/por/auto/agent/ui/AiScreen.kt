@@ -87,7 +87,7 @@ fun AiScreen(
         ) {
             Section(title = if (state.aiConfig.ready) "已配置" else "未配置") {
                 Text(
-                    "填好接口和模型后，群发页可以用一句话生成消息，助手页可以用一句话操作屏幕。",
+                    "配置一般由服务端下发，装好后自动同步；这里可以手动覆盖，保存后本机优先用它。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
