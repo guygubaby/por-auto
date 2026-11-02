@@ -28,13 +28,21 @@ internal object WecomLayout {
 
     fun editor(nodes: List<LayoutNode>, hint: String?): LayoutNode? =
         hinted(nodes, hint) { it.editable }
+            ?: hinted(nodes, hint) { true }
             ?: nodes.singleOrNull { it.valid && it.editable }
 
     fun list(nodes: List<LayoutNode>, hint: String?): LayoutNode? {
+        // 企微的 RecyclerView 不报 scrollable，ID 命中就够了。
         hinted(nodes, hint) { it.scrollable }?.let { return it }
+        hinted(nodes, hint) { true }?.let { return it }
         val scrollables = nodes.filter { it.valid && it.scrollable }.sortedByDescending(::area)
-        val top = scrollables.firstOrNull() ?: return null
-        val second = scrollables.getOrNull(1)
+        val candidates = scrollables.ifEmpty {
+            nodes.filter {
+                it.valid && (it.role.endsWith("RecyclerView") || it.role.endsWith("ListView"))
+            }
+        }.sortedByDescending(::area)
+        val top = candidates.firstOrNull() ?: return null
+        val second = candidates.getOrNull(1)
         // 两个差不多大的滚动区说明认不出主列表
         if (second != null && area(second) * 5 > area(top) * 4) return null
         return top
@@ -65,6 +73,20 @@ internal object WecomLayout {
         nodes.filter { it.valid && it.text == "消息" && it.bounds[1] > height * 3 / 4 }
             .singleOrNull()
             ?.let { clickableAncestor(nodes, it) }
+
+    /**
+     * 底部导航第一格。企微的导航文字是零尺寸的，认不出「消息」两个字，
+     * 但导航栏固定在屏幕最下方，左边第一格永远是消息。
+     */
+    fun firstNavSlot(nodes: List<LayoutNode>, height: Int, width: Int): LayoutNode? {
+        val bottom = height * 9 / 10
+        val bar = nodes.filter {
+            it.valid && it.bounds[1] >= bottom && it.bounds[2] - it.bounds[0] > width / 2
+        }.maxByOrNull { node -> nodes.count { it.parent == node.index } } ?: return null
+        val cells = nodes.filter { it.valid && it.parent == bar.index && it.bounds[2] > it.bounds[0] }
+        if (cells.size < 3) return null
+        return cells.minByOrNull { it.bounds[0] }
+    }
 
     /** 列表里每一行的标题：行内第一个有文字的节点；已知版本优先用 ID。 */
     fun rowTitles(nodes: List<LayoutNode>, list: LayoutNode, hint: String?): List<LayoutNode> {

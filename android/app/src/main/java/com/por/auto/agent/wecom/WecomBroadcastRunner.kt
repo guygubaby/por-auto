@@ -193,10 +193,10 @@ class WecomBroadcastRunner(
             val tree = readTree()
             try {
                 if (isHome(tree)) return
-                val tab = messageTab(tree)
-                if (tab != null) {
-                    if (!actions.click(tab.centerX, tab.centerY)) throw WecomException("点击消息导航失败")
-                } else {
+                // 聊天页底部是输入栏，不是导航栏；先返回，别按导航去点。
+                val inChat = WecomLayout.editor(tree.nodes, ids?.editor) != null
+                val tab = if (inChat) null else messageTab(tree)
+                if (tab == null || !actions.click(tab.centerX, tab.centerY)) {
                     if (!actions.back()) throw WecomException("返回消息首页失败")
                 }
             } finally {
@@ -207,13 +207,13 @@ class WecomBroadcastRunner(
         throw WecomException("未能回到企业微信消息首页")
     }
 
+    /** 首页的判据是会话列表和「全部 / 群聊」分类都在。企微的导航文字是零尺寸的，不能当判据。 */
     private fun isHome(tree: WecomTree): Boolean =
-        WecomLayout.messageTab(tree.nodes, height) != null &&
-            WecomLayout.list(tree.nodes, ids?.list) != null &&
-            tree.filterLabel() != null
+        WecomLayout.list(tree.nodes, ids?.list) != null && tree.filterLabel() != null
 
-    private fun messageTab(tree: WecomTree): WecomTree.Node? =
-        WecomLayout.messageTab(tree.nodes, height)?.let { tree.node(it.index) }
+    private fun messageTab(tree: WecomTree): LayoutNode? =
+        WecomLayout.messageTab(tree.nodes, height)
+            ?: WecomLayout.firstNavSlot(tree.nodes, height, width)
 
     /** 冻结名单。单聊先读一遍群聊分类，再从「全部」里按完整名称排除群会话。 */
     private suspend fun freezeRecipients(scope: WecomScope): List<String> {
@@ -245,16 +245,27 @@ class WecomBroadcastRunner(
             }
             delay(600)
 
-            val options = readTree()
-            try {
-                val found = options.texts(desired)
-                if (found.size != 1) throw WecomException("会话分类不唯一：$desired")
-                if (!actions.click(found.single().centerX, found.single().centerY)) {
-                    throw WecomException("选择会话分类失败")
+            // 菜单展开动画期间同一个选项会短暂出现两份，多读几次再判定。
+            var point: Pair<Int, Int>? = null
+            var seen = ""
+            for (attempt in 0 until 4) {
+                val options = readTree()
+                try {
+                    val found = options.texts(desired)
+                    if (found.size == 1) {
+                        point = found.single().centerX to found.single().centerY
+                    } else {
+                        seen = "${found.size} 个：" +
+                            found.take(3).joinToString("；") { "${it.bounds}(${it.id})" }
+                    }
+                } finally {
+                    options.close()
                 }
-            } finally {
-                options.close()
+                if (point != null) break
+                delay(300)
             }
+            val target = point ?: throw WecomException("会话分类不唯一：$desired，$seen")
+            if (!actions.click(target.first, target.second)) throw WecomException("选择会话分类失败")
             delay(700)
         }
         throw WecomException("未能切换到会话分类：$desired")

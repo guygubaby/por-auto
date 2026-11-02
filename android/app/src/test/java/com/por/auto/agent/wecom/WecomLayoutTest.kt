@@ -88,6 +88,35 @@ class WecomLayoutTest {
     }
 
     @Test
+    fun listFallsBackToTheWecomRecyclerViewWithoutScrollable() {
+        val nodes = listOf<LayoutNode>(
+            node(
+                0,
+                role = "androidx.recyclerview.widget.RecyclerView",
+                id = "db5",
+                bounds = listOf(0, 200, 1000, 1900),
+            ),
+            node(1, role = "android.widget.ImageView"),
+        )
+        assertEquals(0, WecomLayout.list(nodes, hint = "db5")?.index)
+        assertEquals(0, WecomLayout.list(nodes, hint = null)?.index)
+    }
+
+    @Test
+    fun firstNavSlotIsTheLeftmostCellOfTheBottomBar() {
+        val nodes = listOf<LayoutNode>(
+            node(0, text = "消息", bounds = listOf(400, 100, 600, 150)),
+            node(1, bounds = listOf(0, 2110, 1080, 2200)),
+            node(2, parent = 1, bounds = listOf(0, 2112, 216, 2201)),
+            node(3, parent = 1, bounds = listOf(216, 2112, 432, 2201)),
+            node(4, parent = 1, bounds = listOf(432, 2112, 648, 2201)),
+            node(5, parent = 1, bounds = listOf(648, 2112, 864, 2201)),
+            node(6, parent = 1, bounds = listOf(864, 2112, 1080, 2201)),
+        )
+        assertEquals(2, WecomLayout.firstNavSlot(nodes, height = 2280, width = 1080)?.index)
+    }
+
+    @Test
     fun rowTitlesTakeTheFirstTextInsideEachRow() {
         val nodes = listOf<LayoutNode>(
             node(0, scrollable = true, bounds = listOf(0, 0, 900, 1800)),

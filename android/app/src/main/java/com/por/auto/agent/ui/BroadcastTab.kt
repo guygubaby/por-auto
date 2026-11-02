@@ -37,7 +37,7 @@ fun BroadcastTab(
     onAiGenerate: (String) -> Unit,
     onConsumeAiDraft: () -> Unit,
 ) {
-    var text by rememberSaveable { mutableStateOf("1") }
+    var text by rememberSaveable { mutableStateOf("OK") }
     var instruction by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(WecomScope.Groups) }
     var confirm by remember { mutableStateOf(false) }
