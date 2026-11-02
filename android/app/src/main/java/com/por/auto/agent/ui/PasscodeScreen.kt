@@ -8,6 +8,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -19,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.por.auto.agent.PasscodeState
 
@@ -26,6 +32,7 @@ import com.por.auto.agent.PasscodeState
 @Composable
 fun PasscodeScreen(state: PasscodeState, onSubmit: (String) -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
+    var reveal by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -46,7 +53,20 @@ fun PasscodeScreen(state: PasscodeState, onSubmit: (String) -> Unit) {
             onValueChange = { input = it },
             singleLine = true,
             label = { Text("口令") },
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (reveal) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            trailingIcon = {
+                IconButton(onClick = { reveal = !reveal }) {
+                    Icon(
+                        if (reveal) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (reveal) "隐藏口令" else "显示口令",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodyLarge,

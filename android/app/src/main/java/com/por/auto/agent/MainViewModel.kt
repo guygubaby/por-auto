@@ -18,6 +18,7 @@ import com.por.auto.agent.ai.AiProvider
 import com.por.auto.agent.assistant.AgentRunner
 import com.por.auto.agent.schedule.AlarmScheduler
 import com.por.auto.agent.schedule.BroadcastService
+import com.por.auto.agent.schedule.RepeatKind
 import com.por.auto.agent.schedule.Schedule
 import com.por.auto.agent.schedule.ScheduleStore
 import com.por.auto.agent.wecom.BroadcastResult
@@ -198,8 +199,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         val startedAt = System.currentTimeMillis()
+        service.showRunStatus(if (dryRun) "正在试运行…" else "正在发送…")
         viewModelScope.launch(Dispatchers.IO) {
             val runner = WecomBroadcastRunner(service) { line ->
+                service.updateRunStatus(line)
                 _state.update { state -> state.copy(p1Log = (state.p1Log + line).takeLast(400)) }
             }
             val result = runCatching {
@@ -253,6 +256,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             saved?.let { file -> RunUploads.enqueue(file) }
+            service.hideRunStatus()
             bringAppForward()
         }
     }
@@ -297,6 +301,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 message = null,
             )
         }
+        service.showRunStatus("助手执行中…")
         agentJob = viewModelScope.launch(Dispatchers.IO) {
             val store = AiConfigStore(getApplication())
             val config = store.load()
@@ -306,10 +311,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 config = config,
                 key = store.keyFor(config.provider, config.baseUrl, ""),
                 log = { line ->
+                    service.updateRunStatus(line)
                     _state.update { state -> state.copy(agentSteps = (state.agentSteps + line).takeLast(40)) }
                 },
             )
             val result = runCatching { runner.run(goal) }
+            service.hideRunStatus()
             _state.update { state ->
                 state.copy(
                     agentRunning = false,
@@ -327,6 +334,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopAgent() {
         agentJob?.cancel()
         agentJob = null
+        AgentAccessibilityService.instance?.hideRunStatus()
         _state.update { it.copy(agentRunning = false, agentStatus = "已停止") }
     }
 
@@ -336,7 +344,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runBroadcast(job.dryRun, job.text, job.scope, job.remaining)
     }
 
-    fun addSchedule(text: String, hour: Int, minute: Int, scope: WecomScope) {
+    fun addSchedule(
+        text: String,
+        repeat: RepeatKind,
+        hour: Int,
+        minute: Int,
+        intervalMinutes: Int,
+        scope: WecomScope,
+    ) {
         val validation = runCatching { WecomBroadcastRunner.validateText(text) }
         if (validation.isFailure) {
             _state.update { it.copy(message = validation.exceptionOrNull()?.message) }
@@ -346,8 +361,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = "时间无效，小时 0-23、分钟 0-59") }
             return
         }
+        if (intervalMinutes !in 5..1440) {
+            _state.update { it.copy(message = "间隔应在 5 分钟到 24 小时之间") }
+            return
+        }
         changeSchedules { store, scheduler ->
-            val schedule = Schedule.create(text, hour, minute, scope)
+            val schedule = Schedule.create(text, hour, minute, scope, repeat, intervalMinutes)
             store.upsert(schedule)
             scheduler.schedule(schedule)
         }

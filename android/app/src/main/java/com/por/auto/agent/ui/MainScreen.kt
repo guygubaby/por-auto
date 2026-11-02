@@ -53,7 +53,6 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var showAi by rememberSaveable { mutableStateOf(false) }
     val tabState = rememberSaveableStateHolder()
 
     LaunchedEffect(Unit) { viewModel.refresh() }
@@ -61,17 +60,6 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
 
     if (state.passcode.required) {
         PasscodeScreen(state = state.passcode, onSubmit = viewModel::submitPasscode)
-        return
-    }
-
-    if (showAi) {
-        BackHandler { showAi = false }
-        AiScreen(
-            state = state,
-            onBack = { showAi = false },
-            onFetchModels = viewModel::fetchAiModels,
-            onSaveAi = viewModel::saveAi,
-        )
         return
     }
 
@@ -133,7 +121,6 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                     3 -> LogsTab(state, viewModel::refresh)
                     else -> SettingsTab(
                         state = state,
-                        onOpenAi = { showAi = true },
                         onToggleOverlay = viewModel::toggleOverlay,
                         onNotify = onNotify,
                         onCapture = viewModel::captureNow,

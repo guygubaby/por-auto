@@ -8,10 +8,10 @@ export interface ReleaseInfo {
 }
 
 export interface RunDevice {
-  model: string
-  android: string
-  appVersion: string
-  wecomVersion: string
+  model?: string
+  android?: string
+  appVersion?: string
+  wecomVersion?: string
 }
 
 export interface RunSummary {
@@ -21,7 +21,7 @@ export interface RunSummary {
   dryRun: boolean
   scope: string
   text: string
-  device: RunDevice
+  device?: RunDevice
   error: string | null
   total: number
   sent: number

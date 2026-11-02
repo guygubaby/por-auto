@@ -1,7 +1,7 @@
 import { KeyRound, LogOut } from 'lucide-react'
 import { type FormEvent, type ReactNode, useState } from 'react'
 import { clearAdminToken, readAdminToken, writeAdminToken } from '../lib/auth'
-import { buttonClass, inputClass } from './ui'
+import { SecretInput, buttonClass } from './ui'
 
 interface AdminGateProps {
   children: (token: string, signOut: () => void) => ReactNode
@@ -43,16 +43,12 @@ export function AdminGate({ children }: AdminGateProps) {
           <label htmlFor="admin-token" className="block text-[13px] font-medium">
             口令
           </label>
-          <input
+          <SecretInput
             id="admin-token"
-            type="password"
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            autoFocus
-            className={inputClass}
+            onChange={setDraft}
             placeholder="访问口令"
+            autoFocus
           />
           {error && <p className="text-[13px] text-danger">{error}</p>}
           <button type="submit" className={`${buttonClass} w-full justify-center`}>

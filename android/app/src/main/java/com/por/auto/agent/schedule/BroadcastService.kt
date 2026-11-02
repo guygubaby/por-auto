@@ -90,8 +90,10 @@ class BroadcastService : Service() {
 
         val startedAt = System.currentTimeMillis()
         val lines = mutableListOf<String>()
+        service.showRunStatus("定时发送中…")
         val runner = WecomBroadcastRunner(service) { line ->
             lines += line
+            service.updateRunStatus(line)
             updateNotification("${schedule.timeLabel} ${schedule.text}", line)
         }
         val result = runCatching {
@@ -116,6 +118,7 @@ class BroadcastService : Service() {
             log = lines.toList(),
             device = RunMeta.device(this@BroadcastService),
         )
+        service.hideRunStatus()
         val saved = runCatching { RunStore(this@BroadcastService).save(result, meta) }
             .onFailure { Log.e("BroadcastService", "Unable to save run result", it) }
             .getOrNull()

@@ -13,7 +13,14 @@ function RootLayout() {
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-line">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-4 sm:px-8">
-          <Link to="/" className="inline-flex items-baseline gap-2">
+          <Link to="/" className="inline-flex items-center gap-2.5">
+            <img
+              src="/logo.png"
+              alt=""
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-[8px] object-cover"
+            />
             <span className="font-serif text-xl tracking-tight">PorAuto</span>
             <span className="text-[10px] uppercase tracking-[0.22em] text-muted">管理台</span>
           </Link>

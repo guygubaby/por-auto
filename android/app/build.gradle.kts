@@ -19,8 +19,8 @@ android {
         applicationId = "com.por.auto.agent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
 
         // 日志上传的入网令牌放在仓库外（local.properties），构建机没有就留空。
         val ingestKey = Properties().apply {
@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
+    implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
     implementation(libs.kotlinx.coroutines.android)

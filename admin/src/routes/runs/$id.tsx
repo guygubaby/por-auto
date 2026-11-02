@@ -107,10 +107,10 @@ function RunDetailView({ run, id }: { run: RunDetail; id: string }) {
         <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
           <Meta label="范围">{scopeLabel(run.scope)}</Meta>
           <Meta label="设备">
-            {run.device.model || '—'} · Android {run.device.android || '—'}
+            {run.device?.model || '—'} · Android {run.device?.android || '—'}
           </Meta>
           <Meta label="App / 企微">
-            {run.device.appVersion || '—'} / {run.device.wecomVersion || '—'}
+            {run.device?.appVersion || '—'} / {run.device?.wecomVersion || '—'}
           </Meta>
           <Meta label="消息内容">{run.text || '—'}</Meta>
         </dl>

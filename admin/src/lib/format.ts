@@ -26,7 +26,7 @@ const SCOPE_LABELS: Record<string, string> = {
 }
 
 function labelFor(labels: Record<string, string>, value: string): string {
-  return labels[value] ?? value
+  return labels[value] ?? (value || '—')
 }
 
 export const kindLabel = (value: string): string => labelFor(KIND_LABELS, value)

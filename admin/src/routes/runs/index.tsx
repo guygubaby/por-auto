@@ -144,9 +144,9 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
                       <RunCounts run={run} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted">
-                      {run.device.model || '—'}
+                      {run.device?.model || '—'}
                       <span className="block text-[11px] text-muted/80">
-                        Android {run.device.android || '—'}
+                        Android {run.device?.android || '—'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -186,7 +186,7 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
                   <span className="text-muted">·</span>
                   <span className="text-muted">{scopeLabel(run.scope)}</span>
                   <span className="text-muted">·</span>
-                  <span className="text-muted">{run.device.model || '—'}</span>
+                  <span className="text-muted">{run.device?.model || '—'}</span>
                 </div>
                 <RunCounts run={run} className="mt-3" />
                 {run.error && (

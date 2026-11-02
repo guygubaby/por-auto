@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { AdminGate } from '../components/admin-gate'
-import { Card, RequestError, buttonClass, inputClass } from '../components/ui'
+import { Card, RequestError, SecretInput, buttonClass, inputClass } from '../components/ui'
 import { fetchAiConfig, saveAiConfig, savePasscode } from '../lib/api'
 import type { AiConfig, Provider } from '../lib/types'
 
@@ -182,17 +182,10 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
               </Field>
 
               <Field label="API Key" htmlFor="apiKey" className="sm:col-span-2">
-                <input
+                <SecretInput
                   id="apiKey"
-                  type="password"
                   value={form.apiKey}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, apiKey: event.target.value }))
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                  required
-                  className={inputClass}
+                  onChange={(value) => setForm((current) => ({ ...current, apiKey: value }))}
                   placeholder="sk-…"
                 />
                 <p className="mt-2 rounded-md bg-amber/10 px-2.5 py-2 text-[12px] leading-5 text-ink/80">
@@ -262,14 +255,10 @@ function PasscodeCard({ token, signOut }: { token: string; signOut: () => void }
       </p>
       <form onSubmit={(event) => void handleSubmit(event)} className="mt-4">
         <Field label="新口令" htmlFor="passcode">
-          <input
+          <SecretInput
             id="passcode"
-            type="password"
             value={value}
-            onChange={(event) => setValue(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            className={inputClass}
+            onChange={setValue}
             placeholder="至少几位，别用 1234"
           />
         </Field>

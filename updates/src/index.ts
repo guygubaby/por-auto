@@ -182,12 +182,12 @@ function summarize(run: Record<string, unknown>, id: string) {
   const count = (status: string) => results.filter((item) => item.status === status).length
   return {
     id,
-    startedAt: run.startedAt,
-    kind: run.kind,
+    startedAt: run.startedAt ?? 0,
+    kind: run.kind ?? '',
     dryRun: run.dryRun,
     scope: run.scope,
     text: run.text,
-    device: run.device,
+    device: run.device ?? {},
     error: run.error,
     total: results.length,
     sent: count('sent'),

@@ -1,4 +1,5 @@
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Eye, EyeOff } from 'lucide-react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { isApiError } from '../lib/api'
 
@@ -95,5 +96,46 @@ export function RequestError({ error, onRetry, onSignOut }: RequestErrorProps) {
         )}
       </div>
     </Card>
+  )
+}
+
+/** 密码类输入：右侧一个眼睛按钮，点一下在明文和掩码之间切换。 */
+export function SecretInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+  autoFocus = false,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  autoFocus?: boolean
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={shown ? 'text' : 'password'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="off"
+        spellCheck={false}
+        autoFocus={autoFocus}
+        className={`${inputClass} pr-11`}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        onClick={() => setShown((current) => !current)}
+        aria-label={shown ? '隐藏' : '显示'}
+        title={shown ? '隐藏' : '显示'}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted transition hover:text-ink"
+      >
+        {shown ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+      </button>
+    </div>
   )
 }

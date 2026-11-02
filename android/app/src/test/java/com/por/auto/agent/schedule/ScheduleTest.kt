@@ -55,4 +55,35 @@ class ScheduleTest {
         assertTrue(Schedule.nextOccurrence(0, 0, now) > now)
         assertTrue(Schedule.nextOccurrence(23, 59, now) > now)
     }
+
+    private fun atInstant(ms: Long): LocalDateTime =
+        LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), zone)
+
+    @Test
+    fun hourlyKeepsTheMinuteAndRollsForward() {
+        val now = at(2026, 11, 1, 10, 20)
+        assertEquals(
+            LocalDateTime.of(2026, 11, 1, 11, 5),
+            atInstant(Schedule.nextHourly(5, now, zone)),
+        )
+        val earlier = at(2026, 11, 1, 10, 50)
+        assertEquals(
+            LocalDateTime.of(2026, 11, 1, 10, 55),
+            atInstant(Schedule.nextHourly(55, earlier, zone)),
+        )
+    }
+
+    @Test
+    fun intervalAddsItsOwnLength() {
+        val schedule = Schedule.create(
+            text = "OK",
+            hour = 9,
+            minute = 0,
+            repeat = RepeatKind.Interval,
+            intervalMinutes = 30,
+        )
+        val now = at(2026, 11, 1, 10, 0)
+        assertEquals(now + 30 * 60_000L, schedule.nextAfter(now, zone))
+        assertEquals("每 30 分钟", schedule.timeLabel)
+    }
 }

@@ -36,7 +36,6 @@ import com.por.auto.agent.MainUiState
 @Composable
 fun SettingsTab(
     state: MainUiState,
-    onOpenAi: () -> Unit,
     onToggleOverlay: () -> Unit,
     onNotify: () -> Unit,
     onCapture: () -> Unit,
@@ -101,10 +100,12 @@ fun SettingsTab(
         Section(title = "智能") {
             SettingRow(
                 title = "AI 配置",
-                subtitle = if (state.aiConfig.ready) "已配置" else "还没配置，群发和助手用不了 AI",
+                subtitle = if (state.aiConfig.ready) {
+                    "已配置 · ${state.aiConfig.provider.label}"
+                } else {
+                    "还没配置，群发和助手用不了 AI"
+                },
                 status = state.aiConfig.ready,
-                chevron = true,
-                onClick = onOpenAi,
             )
         }
 
