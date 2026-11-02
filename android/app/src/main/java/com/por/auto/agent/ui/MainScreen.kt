@@ -127,6 +127,7 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                         onCheckUpdate = viewModel::checkUpdate,
                         onDownloadUpdate = viewModel::downloadUpdate,
                         onDismissUpdate = viewModel::dismissUpdate,
+                        onTheme = viewModel::setTheme,
                     )
                 }
             }

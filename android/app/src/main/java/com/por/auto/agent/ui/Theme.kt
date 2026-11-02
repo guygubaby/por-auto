@@ -102,10 +102,27 @@ object Space {
     val xxl = 32.dp
 }
 
+/** 主题偏好：跟随系统 / 浅色 / 深色。 */
+enum class ThemeMode(val label: String) {
+    System("跟随系统"),
+    Light("浅色"),
+    Dark("深色"),
+    ;
+
+    companion object {
+        fun fromKey(key: String?): ThemeMode = entries.firstOrNull { it.name == key } ?: System
+    }
+}
+
 @Composable
-fun PorAutoTheme(content: @Composable () -> Unit) {
+fun PorAutoTheme(mode: ThemeMode = ThemeMode.System, content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors,
+        colorScheme = if (dark) DarkColors else LightColors,
         shapes = AppShapes,
         typography = AppTypography,
         content = content,

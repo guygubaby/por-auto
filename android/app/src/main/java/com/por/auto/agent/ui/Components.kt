@@ -249,6 +249,33 @@ fun ScopePicker(
     }
 }
 
+/** 一排互斥选项里的一颗胶囊。 */
+@Composable
+fun ChoicePill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent,
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onTertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(horizontal = Space.lg, vertical = Space.sm),
+        )
+    }
+}
+
 /** 空状态：一句说明，不留大片空白。 */
 @Composable
 fun EmptyState(title: String, subtitle: String? = null) {

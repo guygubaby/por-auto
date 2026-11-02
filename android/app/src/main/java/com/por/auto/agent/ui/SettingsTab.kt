@@ -42,6 +42,7 @@ fun SettingsTab(
     onCheckUpdate: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
+    onTheme: (ThemeMode) -> Unit,
 ) {
     val context = LocalContext.current
     var showJson by remember { mutableStateOf(false) }
@@ -95,6 +96,19 @@ fun SettingsTab(
                     }
                 },
             )
+        }
+
+        Section(title = "外观") {
+            SettingRow(title = "主题", subtitle = "当前：${state.theme.label}")
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                ThemeMode.entries.forEach { mode ->
+                    ChoicePill(
+                        label = mode.label,
+                        selected = state.theme == mode,
+                        onClick = { onTheme(mode) },
+                    )
+                }
+            }
         }
 
         Section(title = "智能") {

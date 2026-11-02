@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ fun PasscodeScreen(state: PasscodeState, onSubmit: (String) -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
     var reveal by rememberSaveable { mutableStateOf(false) }
 
+    Surface(color = MaterialTheme.colorScheme.background) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,5 +90,6 @@ fun PasscodeScreen(state: PasscodeState, onSubmit: (String) -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
     }
 }

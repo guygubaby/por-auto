@@ -28,6 +28,8 @@ import com.por.auto.agent.wecom.RunRecord
 import com.por.auto.agent.wecom.RunMeta
 import com.por.auto.agent.wecom.RunNotifier
 import com.por.auto.agent.wecom.RunStore
+import com.por.auto.agent.ui.ThemeMode
+import com.por.auto.agent.ui.ThemeStore
 import com.por.auto.agent.update.BackendClient
 import com.por.auto.agent.update.PasscodeStore
 import com.por.auto.agent.update.ReleaseInfo
@@ -101,6 +103,7 @@ data class MainUiState(
     val agentStatus: String? = null,
     val update: UpdateState = UpdateState(),
     val passcode: PasscodeState = PasscodeState(),
+    val theme: ThemeMode = ThemeMode.System,
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
     fun rehearsed(text: String, scope: WecomScope): Boolean =
@@ -116,6 +119,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var retriedUploads = false
 
     fun refresh() {
+        val current = _state.value.theme
+        val saved = ThemeStore(getApplication()).load()
+        if (saved != current) _state.update { it.copy(theme = saved) }
         if (!retriedUploads) {
             retriedUploads = true
             RunUploads.retryPending(getApplication())
@@ -630,6 +636,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             aiSyncedVersion = version
             _state.update { it.copy(aiConfig = stored, aiStatus = "已从服务器同步 AI 配置") }
         }
+    }
+
+    fun setTheme(mode: ThemeMode) {
+        ThemeStore(getApplication()).save(mode)
+        _state.update { it.copy(theme = mode) }
     }
 
     fun checkUpdate() {

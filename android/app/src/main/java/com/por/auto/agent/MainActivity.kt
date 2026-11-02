@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.por.auto.agent.capture.CaptureNotifier
 import com.por.auto.agent.ui.MainScreen
 import com.por.auto.agent.ui.PorAutoTheme
@@ -26,7 +28,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            PorAutoTheme {
+            val state by viewModel.state.collectAsStateWithLifecycle()
+            PorAutoTheme(state.theme) {
                 MainScreen(viewModel, onNotify = ::showCaptureNotification)
             }
         }

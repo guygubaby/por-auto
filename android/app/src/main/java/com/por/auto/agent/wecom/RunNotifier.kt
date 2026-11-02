@@ -1,5 +1,6 @@
 package com.por.auto.agent.wecom
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -15,6 +16,7 @@ import com.por.auto.agent.MainActivity
  */
 class RunNotifier(private val context: Context) {
 
+    @SuppressLint("MissingPermission") // 没通知权限时 notify 直接失败，外面已经 runCatching。
     fun show(title: String, text: String) {
         runCatching {
             val manager = context.getSystemService(NotificationManager::class.java)
