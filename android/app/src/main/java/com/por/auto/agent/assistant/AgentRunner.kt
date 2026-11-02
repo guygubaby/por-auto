@@ -13,6 +13,7 @@ import com.por.auto.agent.a11y.UiElement
 import com.por.auto.agent.ai.AiClient
 import com.por.auto.agent.ai.AiConfig
 import com.por.auto.agent.wecom.BroadcastGate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -42,14 +43,19 @@ class AgentRunner(
         var repeats = 0
         var last = ""
         var step = 0
+        var feedback: String? = null
 
-        // 不限步数，靠「界面没变化」和「重复同一个动作」两条护栏兜底，用户随时可以停。
+        // 出问题先给模型纠正的机会，连续多次仍然没有进展才停。
         while (true) {
             currentCoroutineContext().ensureActive()
+            if (step >= MAX_STEPS) {
+                throw AgentException("已经走了 $MAX_STEPS 步还没有完成，先停下；可以把目标拆小一点再试")
+            }
+
             val snapshot = ScreenReader.read(service)
             if (snapshot.protected) throw AgentException("当前屏幕有密码输入框，已停止")
 
-            val action = AgentActionParser.parse(client.act(config, key, prompt(goal, snapshot, history)))
+            val action = askModel(goal, snapshot, history, feedback)
             when (action) {
                 is AgentAction.Done -> {
                     log("完成：${action.summary}")
@@ -62,30 +68,91 @@ class AgentRunner(
             val label = action.label()
             repeats = if (label == last) repeats + 1 else 0
             last = label
-            if (repeats >= 3) throw AgentException("同一个动作重复 4 次没有进展，已停止")
+            if (repeats >= 3) {
+                throw AgentException("同一个动作「$label」做了 3 次画面都没变，已停止")
+            }
 
             AgentGuard.blocked(targetName(snapshot, action), goal)?.let { throw AgentException(it) }
             step++
             log("$step. $label")
-            perform(snapshot, action)
-            history += label
-            delay(action.delayAfter())
 
+            val failure = runCatching { perform(snapshot, action) }.exceptionOrNull()
+            if (failure != null) {
+                if (failure is CancellationException) throw failure
+                // 动作没做成不是终点：把原因告诉模型，让它换个做法。
+                log("   失败：${failure.message}")
+                feedback = "刚才的「$label」没有执行成功：${failure.message}。换一种做法，不要原样重试。"
+                history += "$label → 失败：${failure.message}"
+                delay(600)
+                continue
+            }
+            history += label
+
+            delay(action.delayAfter())
             val after = ScreenReader.read(service)
-            stale = if (after.hash == snapshot.hash) stale + 1 else 0
-            if (stale >= 2) throw AgentException("界面连续两步没有变化，已停止")
+            if (after.hash != snapshot.hash) {
+                stale = 0
+                feedback = null
+                continue
+            }
+            // 动画和加载会误判，再等一会儿重读一次才算「没变化」。
+            delay(800)
+            if (ScreenReader.read(service).hash != snapshot.hash) {
+                stale = 0
+                feedback = null
+                continue
+            }
+            stale++
+            log("   画面没有变化")
+            feedback = if (stale >= 2) {
+                "最近 $stale 步都没有让画面变化。不要再重复同样的操作：换目标（滚动、返回、点别的入口），" +
+                    "或者确认确实做不到后用 stop 说明。"
+            } else {
+                "刚才那一步没有让画面变化。确认点的是不是正确的目标，必要时先滚动或返回再试。"
+            }
+            if (stale >= MAX_STALE) {
+                throw AgentException("连续 $MAX_STALE 步没有任何进展，已停止；最后停在：$label")
+            }
         }
     }
 
-    private fun prompt(goal: String, snapshot: ScreenSnapshot, history: List<String>): String =
-        buildString {
-            append("目标：").append(goal).append("\n\n当前屏幕：\n")
-            append(ScreenDigest.format(snapshot))
-            if (history.isNotEmpty()) {
-                append("\n已执行：\n")
-                history.takeLast(6).forEach { append("- ").append(it).append('\n') }
+    /** 模型回的不是动作就带着错误再问一次，最多三次。 */
+    private suspend fun askModel(
+        goal: String,
+        snapshot: ScreenSnapshot,
+        history: List<String>,
+        feedback: String?,
+    ): AgentAction {
+        var correction = ""
+        repeat(3) { attempt ->
+            if (attempt > 0) delay(300)
+            val reply = client.act(config, key, prompt(goal, snapshot, history, feedback, correction))
+            val action = runCatching { AgentActionParser.parse(reply) }.getOrElse { error ->
+                correction = "你上一次的回复不是可执行的动作（${error.message}）。只输出一个 JSON 动作。" +
+                    "回复原文：${reply.take(200)}"
+                null
             }
+            if (action != null) return action
         }
+        throw AgentException("模型连续三次没有给出可执行的动作：$correction")
+    }
+
+    private fun prompt(
+        goal: String,
+        snapshot: ScreenSnapshot,
+        history: List<String>,
+        feedback: String?,
+        correction: String,
+    ): String = buildString {
+        append("目标：").append(goal).append("\n\n当前屏幕：\n")
+        append(ScreenDigest.format(snapshot))
+        if (history.isNotEmpty()) {
+            append("\n已执行：\n")
+            history.takeLast(8).forEach { append("- ").append(it).append('\n') }
+        }
+        feedback?.let { append("\n注意：").append(it).append('\n') }
+        if (correction.isNotBlank()) append("\n纠正：").append(correction).append('\n')
+    }
 
     private fun targetName(snapshot: ScreenSnapshot, action: AgentAction): String =
         if (action is AgentAction.Tap) {
@@ -208,5 +275,7 @@ class AgentRunner(
 
     private companion object {
         const val MAX_DEPTH = 40
+        const val MAX_STEPS = 60
+        const val MAX_STALE = 4
     }
 }

@@ -348,6 +348,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSchedule(
+        id: String,
+        text: String,
+        repeat: RepeatKind,
+        hour: Int,
+        minute: Int,
+        intervalMinutes: Int,
+        scope: WecomScope,
+    ) {
+        val validation = runCatching { WecomBroadcastRunner.validateText(text) }
+        if (validation.isFailure) {
+            _state.update { it.copy(message = validation.exceptionOrNull()?.message) }
+            return
+        }
+        changeSchedules { store, scheduler ->
+            val updated = store.update(id) { current ->
+                val draft = current.copy(
+                    text = text,
+                    scope = scope,
+                    repeat = repeat,
+                    hour = hour,
+                    minute = minute,
+                    intervalMinutes = intervalMinutes,
+                )
+                draft.copy(nextAtMs = draft.nextAfter(System.currentTimeMillis()))
+            }
+            updated?.let(scheduler::schedule)
+        }
+    }
+
     fun toggleSchedule(id: String, enabled: Boolean) {
         changeSchedules { store, scheduler ->
             val updated = store.update(id) { schedule ->

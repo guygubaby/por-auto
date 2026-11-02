@@ -50,6 +50,7 @@ fun ScheduleTab(
     onToggle: (String, Boolean) -> Unit,
     onDelete: (String) -> Unit,
     onRunNow: (String) -> Unit,
+    onUpdate: (String, String, RepeatKind, Int, Int, Int, WecomScope) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("OK") }
     var repeat by rememberSaveable { mutableStateOf(RepeatKind.Daily) }
@@ -59,6 +60,7 @@ fun ScheduleTab(
     var scope by rememberSaveable { mutableStateOf(WecomScope.Groups) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var showTime by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Schedule?>(null) }
 
     Column(
         modifier = Modifier
@@ -144,10 +146,115 @@ fun ScheduleTab(
             }
             state.schedules.forEachIndexed { index, schedule ->
                 if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ScheduleRow(schedule, onToggle, onDelete, onRunNow)
+                ScheduleRow(schedule, onToggle, onDelete, onRunNow, onEdit = { editing = schedule })
             }
         }
     }
+
+    editing?.let { schedule ->
+        EditScheduleDialog(
+            schedule = schedule,
+            onDismiss = { editing = null },
+            onSave = { text, repeat, hour, minute, interval, scope ->
+                onUpdate(schedule.id, text, repeat, hour, minute, interval, scope)
+                editing = null
+            },
+        )
+    }
+
+    if (showTime) {
+        TimePickerDialog(
+            initialHour = hour,
+            initialMinute = minute,
+            onDismiss = { showTime = false },
+            onConfirm = { h, m ->
+                hour = h
+                minute = m
+                showTime = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditScheduleDialog(
+    schedule: Schedule,
+    onDismiss: () -> Unit,
+    onSave: (String, RepeatKind, Int, Int, Int, WecomScope) -> Unit,
+) {
+    var text by remember { mutableStateOf(schedule.text) }
+    var scope by remember { mutableStateOf(schedule.scope) }
+    var repeat by remember { mutableStateOf(schedule.repeat) }
+    var hour by remember { mutableIntStateOf(schedule.hour) }
+    var minute by remember { mutableIntStateOf(schedule.minute) }
+    var interval by remember { mutableIntStateOf(schedule.intervalMinutes) }
+    var showTime by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑任务") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Space.sm),
+            ) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                )
+                ScopePicker(scope = scope, onScope = { scope = it })
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    RepeatKind.entries.forEach { option ->
+                        ChoicePill(
+                            label = option.label,
+                            selected = repeat == option,
+                            onClick = { repeat = option },
+                        )
+                    }
+                }
+                when (repeat) {
+                    RepeatKind.Daily -> CompactButton(
+                        text = "每天 %02d:%02d 发送".format(hour, minute),
+                        onClick = { showTime = true },
+                        filled = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    RepeatKind.Hourly -> {
+                        Text("每小时的第 $minute 分钟发送", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.tertiary,
+                                activeTrackColor = MaterialTheme.colorScheme.tertiary,
+                            ),
+                            value = minute.toFloat(),
+                            onValueChange = { minute = it.roundToInt() },
+                            valueRange = 0f..59f,
+                        )
+                    }
+                    RepeatKind.Interval -> {
+                        Text("每 $interval 分钟发送一次", style = MaterialTheme.typography.bodySmall)
+                        Slider(
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.tertiary,
+                                activeTrackColor = MaterialTheme.colorScheme.tertiary,
+                            ),
+                            value = interval.toFloat(),
+                            onValueChange = { interval = ((it / 5).roundToInt() * 5).coerceIn(5, 240) },
+                            valueRange = 5f..240f,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text, repeat, hour, minute, interval, scope) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 
     if (showTime) {
         TimePickerDialog(
@@ -219,6 +326,7 @@ private fun ScheduleRow(
     onToggle: (String, Boolean) -> Unit,
     onDelete: (String) -> Unit,
     onRunNow: (String) -> Unit,
+    onEdit: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Row(

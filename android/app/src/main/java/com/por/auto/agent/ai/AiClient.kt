@@ -1,6 +1,7 @@
 package com.por.auto.agent.ai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,11 +42,30 @@ class AiClient {
         instruction: String,
         system: String,
     ): String = withContext(Dispatchers.IO) {
-        when (config.provider) {
-            AiProvider.OpenAiCompatible, AiProvider.OpenCodeGo ->
-                openAiChat(config, apiKey, instruction, system)
-            AiProvider.Anthropic -> anthropicChat(config, apiKey, instruction, system)
+        var attempt = 0
+        while (true) {
+            try {
+                return@withContext when (config.provider) {
+                    AiProvider.OpenAiCompatible, AiProvider.OpenCodeGo ->
+                        openAiChat(config, apiKey, instruction, system)
+                    AiProvider.Anthropic -> anthropicChat(config, apiKey, instruction, system)
+                }
+            } catch (e: AiException) {
+                // 只有限流、服务端出错、网络断了值得再试；Key 错、额度用完、模型名不对再试也一样。
+                if (attempt >= MAX_RETRIES || !transient(e)) throw e
+                delay(1_000L shl attempt)
+                attempt++
+            }
         }
+        @Suppress("UNREACHABLE_CODE")
+        ""
+    }
+
+    private fun transient(e: AiException): Boolean {
+        val message = e.message.orEmpty()
+        return message.contains("网络错误") ||
+            message.contains("HTTP 429") ||
+            Regex("HTTP 5\\d\\d").containsMatchIn(message)
     }
 
     private fun openAiChat(config: AiConfig, apiKey: String, instruction: String, system: String): String {
@@ -128,6 +148,7 @@ class AiClient {
 
     private companion object {
         const val USER_AGENT = "PorAuto-Agent/0.1.0"
+        const val MAX_RETRIES = 3
 
         const val SYSTEM_PROMPT =
             "你在帮用户写一条发到企业微信群的短消息。只输出消息正文，不要解释、不要引号、不要 Markdown。"

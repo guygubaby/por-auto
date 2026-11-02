@@ -109,6 +109,7 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
                         onToggle = viewModel::toggleSchedule,
                         onDelete = viewModel::deleteSchedule,
                         onRunNow = viewModel::runScheduleNow,
+                        onUpdate = viewModel::updateSchedule,
                     )
                     2 -> AssistantTab(
                         state = state,
