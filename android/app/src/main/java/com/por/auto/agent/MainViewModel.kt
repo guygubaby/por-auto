@@ -1,5 +1,6 @@
 package com.por.auto.agent
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
@@ -25,6 +26,7 @@ import com.por.auto.agent.wecom.BroadcastResult
 import com.por.auto.agent.wecom.RecipientResult
 import com.por.auto.agent.wecom.RunRecord
 import com.por.auto.agent.wecom.RunMeta
+import com.por.auto.agent.wecom.RunNotifier
 import com.por.auto.agent.wecom.RunStore
 import com.por.auto.agent.update.BackendClient
 import com.por.auto.agent.update.PasscodeStore
@@ -185,10 +187,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = "无障碍服务未开启") }
             return
         }
-        if (!dryRun && !_state.value.rehearsed(text, scope)) {
-            _state.update { it.copy(message = "消息或范围已变化，请先试运行") }
-            return
-        }
         _state.update {
             it.copy(
                 p1Running = true,
@@ -257,6 +255,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             saved?.let { file -> RunUploads.enqueue(file) }
             service.hideRunStatus()
+            runCatching {
+                RunNotifier(app).show(
+                    if (dryRun) "试运行完成" else "发送完成",
+                    "${result.completed} 个会话 · 点这里回到 PorAuto",
+                )
+            }
             bringAppForward()
         }
     }
@@ -264,6 +268,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** 群发跑完把界面带回前台，别把人留在企微里。 */
     private fun bringAppForward() {
         val app = getApplication<Application>()
+        // 先从最近任务里把自己的任务提到最前：国产 ROM 对后台 startActivity 卡得严，这条更容易被放行。
+        runCatching {
+            app.getSystemService(ActivityManager::class.java)?.appTasks?.firstOrNull()?.moveToFront()
+        }
         runCatching {
             app.startActivity(
                 Intent(app, MainActivity::class.java).addFlags(

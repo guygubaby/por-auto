@@ -43,7 +43,7 @@ fun BroadcastTab(
     var confirm by remember { mutableStateOf(false) }
     var confirmResume by remember { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
-    val canSend = !state.p1Running && state.rehearsed(text, scope) && text.isNotBlank()
+    val canSend = !state.p1Running && text.isNotBlank()
 
     androidx.compose.runtime.LaunchedEffect(state.aiDraft) {
         state.aiDraft?.let {
@@ -106,7 +106,7 @@ fun BroadcastTab(
             }
             ScopePicker(scope = scope, onScope = { scope = it }, enabled = !state.p1Running)
             Text(
-                "范围：${scope.label}。正式发送前必须先试运行。",
+                "范围：${scope.label}。可以直接发送；试运行只是先写一遍草稿再清理。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
