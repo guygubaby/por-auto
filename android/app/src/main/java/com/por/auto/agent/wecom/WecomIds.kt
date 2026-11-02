@@ -3,7 +3,7 @@ package com.por.auto.agent.wecom
 /**
  * 企业微信控件 ID 的版本映射。
  * 左边是内部稳定名（和 desktop/mobile 的 wecom-ids.js 一致），右边是该版本的真实资源 ID。
- * 未收录的版本直接拒绝运行，避免在错误控件上点击。
+ * 只当提示用：收录的版本走 ID 精确命中，未收录的版本由 [WecomLayout] 按结构定位。
  */
 class WecomIds private constructor(private val ids: Map<String, String>) {
 
@@ -42,12 +42,8 @@ class WecomIds private constructor(private val ids: Map<String, String>) {
             ),
         )
 
-        fun forVersion(versionName: String?): WecomIds {
-            val ids = VERSIONS[versionName] ?: throw WecomException(
-                "未收录的企业微信版本：${versionName ?: "未知"}，请先补充 wecom-ids 映射",
-            )
-            return WecomIds(ids)
-        }
+        fun forVersion(versionName: String?): WecomIds? =
+            VERSIONS[versionName]?.let(::WecomIds)
 
         val supportedVersions: Set<String> get() = VERSIONS.keys
     }

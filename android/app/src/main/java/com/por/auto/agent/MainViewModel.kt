@@ -15,6 +15,7 @@ import com.por.auto.agent.ai.AiClient
 import com.por.auto.agent.ai.AiConfig
 import com.por.auto.agent.ai.AiConfigStore
 import com.por.auto.agent.ai.AiProvider
+import com.por.auto.agent.assistant.AgentRunner
 import com.por.auto.agent.schedule.AlarmScheduler
 import com.por.auto.agent.schedule.BroadcastService
 import com.por.auto.agent.schedule.Schedule
@@ -27,6 +28,7 @@ import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.WecomScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +69,9 @@ data class MainUiState(
     val aiStatus: String? = null,
     val aiDraft: String? = null,
     val aiDraftScope: WecomScope? = null,
+    val agentRunning: Boolean = false,
+    val agentSteps: List<String> = emptyList(),
+    val agentStatus: String? = null,
 ) {
     /** 正式发送只认「同样的正文 + 同样的范围」跑过的试运行。 */
     fun rehearsed(text: String, scope: WecomScope): Boolean =
@@ -203,6 +208,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    private var agentJob: Job? = null
+
+    /** 通用助手：把一句话交给模型，按屏幕一步步操作。随时可停。 */
+    fun startAgent(goal: String) {
+        if (_state.value.agentRunning) return
+        val service = AgentAccessibilityService.instance
+        if (service == null) {
+            _state.update { it.copy(message = "无障碍服务未开启") }
+            return
+        }
+        if (goal.isBlank()) {
+            _state.update { it.copy(message = "先说一句要做什么") }
+            return
+        }
+        if (!_state.value.aiConfig.ready) {
+            _state.update { it.copy(message = "请先在设置里配置 AI") }
+            return
+        }
+        _state.update {
+            it.copy(
+                agentRunning = true,
+                agentSteps = emptyList(),
+                agentStatus = "执行中…",
+                message = null,
+            )
+        }
+        agentJob = viewModelScope.launch(Dispatchers.IO) {
+            val store = AiConfigStore(getApplication())
+            val config = store.load()
+            val runner = AgentRunner(
+                service = service,
+                client = AiClient(),
+                config = config,
+                key = store.keyFor(config.provider, config.baseUrl, ""),
+                log = { line ->
+                    _state.update { state -> state.copy(agentSteps = (state.agentSteps + line).takeLast(40)) }
+                },
+            )
+            val result = runCatching { runner.run(goal) }
+            _state.update { state ->
+                state.copy(
+                    agentRunning = false,
+                    agentStatus = result.fold(
+                        onSuccess = { "完成：$it" },
+                        onFailure = { error ->
+                            if (error is CancellationException) "已停止" else "停止：${error.message}"
+                        },
+                    ),
+                )
+            }
+        }
+    }
+
+    fun stopAgent() {
+        agentJob?.cancel()
+        agentJob = null
+        _state.update { it.copy(agentRunning = false, agentStatus = "已停止") }
     }
 
     /** 只补发上次没成功的会话，正文和范围沿用原任务。 */

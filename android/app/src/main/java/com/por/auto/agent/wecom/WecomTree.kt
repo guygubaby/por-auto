@@ -20,28 +20,31 @@ class WecomTree private constructor(
 ) : AutoCloseable {
 
     data class Node(
-        val index: Int,
+        override val index: Int,
         val native: AccessibilityNodeInfo,
-        val parent: Int,
-        val id: String,
-        val text: String,
-        val hint: Boolean,
-        val bounds: List<Int>,
-        val visible: Boolean,
-        val enabled: Boolean,
-        val editable: Boolean,
+        override val parent: Int,
+        override val id: String,
+        override val text: String,
+        override val role: String,
+        override val hint: Boolean,
+        override val bounds: List<Int>,
+        override val visible: Boolean,
+        override val enabled: Boolean,
+        override val editable: Boolean,
         val password: Boolean,
-        val clickable: Boolean,
-        val scrollable: Boolean,
-        val position: Int?,
-    ) {
-        val valid: Boolean
+        override val clickable: Boolean,
+        override val scrollable: Boolean,
+        override val position: Int?,
+    ) : LayoutNode {
+        override val valid: Boolean
             get() = visible && enabled && bounds.size == 4 &&
                 bounds[2] > bounds[0] && bounds[3] > bounds[1]
 
-        val centerX: Int get() = (bounds[0] + bounds[2]) / 2
-        val centerY: Int get() = (bounds[1] + bounds[3]) / 2
+        override val centerX: Int get() = (bounds[0] + bounds[2]) / 2
+        override val centerY: Int get() = (bounds[1] + bounds[3]) / 2
     }
+
+    fun node(index: Int): Node = nodes.getOrElse(index) { throw WecomException("控件已变化") }
 
     fun one(id: String): Node {
         val found = nodes.filter { it.id == id && it.valid }
@@ -127,6 +130,7 @@ class WecomTree private constructor(
                     parent = parent,
                     id = node.viewIdResourceName?.removePrefix("$PACKAGE:id/").orEmpty(),
                     text = node.text?.toString().orEmpty(),
+                    role = node.className?.toString().orEmpty(),
                     hint = node.isShowingHintText,
                     bounds = listOf(rect.left, rect.top, rect.right, rect.bottom),
                     visible = node.isVisibleToUser,

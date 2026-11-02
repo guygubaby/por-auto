@@ -846,6 +846,22 @@ P3 AI：`ai/` 下的 `AiConfigStore`（Keystore AES-GCM 加密 Key）、`AiClien
 
 真机（vivo X21 / 企微 5.0.12）验证：群聊范围续跑与单聊/全部范围待重跑。
 
+## 10. 通用助手与跨版本定位（2026-11-02）
+
+**结构定位，不再锁版本。** `WecomLayout` 只用界面结构找控件：列表取最大的可滚动区、输入框取
+唯一可编辑控件、会话标题取顶部区域最靠上的文字、行标题取行内第一个非纯数字文字、头像取右半边
+的图片节点。资源 ID 只在已收录版本上作为提示（命中就用，没命中就退回结构）。`WecomIds.forVersion`
+对未知版本返回 null，群发照常运行并在日志里写明「未收录版本，按界面结构定位」。所有 finder
+要求唯一，两个候选分不清就停下，不猜。
+
+**通用助手。** 新增「助手」标签：一句话目标 → 读当前屏 → 模型给一个 JSON 动作 → 执行 → 再看一眼。
+动作只有 `tap / input / back / scroll / wait / open / done / stop` 八种；Index 来自屏幕清单，
+清单不包含密码框。护栏：删除/退出/支付这类目标里没提到的操作直接拦下；界面连续两步没变化停；
+同一个动作重复 4 次停；有密码输入框停；用户随时可以点停止。**不设步数上限**，靠上面这些护栏兜底。
+
+**参考。** phongent（`mylea1/phongent`，Mika 的多设备版本）证明同一件事：agent 不该依赖固定资源 ID，
+而是每一步读实时控件清单再决定动作；它的知识库是自然语言的 App 说明，不是版本映射表。
+
 ## 附录 A：Mika 工具清单
 
 **通用**：`wait`、`view_past_screens`、`view_user_screen`、`ask_user`、`request_confirmation`、`hand_to_user`、`handle_obstacle`、`end_not_done`、`knowledge_search`、`knowledge_read`、`skill_search`、`skill_read`、`skill_save`、`memory_search`、`memory_save`、`profile_edit`、`schedule_task`、`spawn_agent`。

@@ -1,7 +1,6 @@
 package com.por.auto.agent.wecom
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,7 +8,7 @@ class WecomIdsTest {
 
     @Test
     fun knownVersionMapsControlIds() {
-        val ids = WecomIds.forVersion("5.0.12")
+        val ids = requireNotNull(WecomIds.forVersion("5.0.12"))
         assertEquals("o6j", ids.messageTab)
         assertEquals("db5", ids.list)
         assertEquals("ibi", ids.rowTitle)
@@ -21,9 +20,9 @@ class WecomIdsTest {
     }
 
     @Test
-    fun unknownVersionIsRejected() {
-        assertThrows(WecomException::class.java) { WecomIds.forVersion("5.0.99") }
-        assertThrows(WecomException::class.java) { WecomIds.forVersion(null) }
+    fun unknownVersionFallsBackToStructure() {
+        assertEquals(null, WecomIds.forVersion("5.0.99"))
+        assertEquals(null, WecomIds.forVersion(null))
     }
 
     @Test

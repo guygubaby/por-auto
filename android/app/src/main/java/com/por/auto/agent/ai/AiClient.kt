@@ -30,6 +30,10 @@ class AiClient {
     suspend fun plan(config: AiConfig, apiKey: String, instruction: String): AiPlan =
         AiParsing.plan(complete(config, apiKey, instruction, PLAN_PROMPT))
 
+    /** 助手：根据目标和当前屏幕给出下一步动作。 */
+    suspend fun act(config: AiConfig, apiKey: String, instruction: String): String =
+        complete(config, apiKey, instruction, AGENT_PROMPT)
+
     private suspend fun complete(
         config: AiConfig,
         apiKey: String,
@@ -121,5 +125,19 @@ class AiClient {
                 "格式：{\"message\":\"要发送的正文\",\"scope\":\"groups|direct|both\"}。" +
                 "scope 取值：groups=全部群聊，direct=全部单聊，both=全部会话。" +
                 "用户没说范围时用 groups。message 必须是可直接发送的正文。"
+
+        const val AGENT_PROMPT =
+            "你在手机上帮用户操作界面。每一步只输出一个 JSON 动作，不要解释、不要 Markdown。\n" +
+                "动作：\n" +
+                "{\"action\":\"tap\",\"index\":3} 点击第 3 个控件\n" +
+                "{\"action\":\"input\",\"index\":5,\"text\":\"你好\"} 在第 5 个控件输入文字，index 可省略（默认当前焦点）\n" +
+                "{\"action\":\"back\"} 返回\n" +
+                "{\"action\":\"scroll\",\"direction\":\"down\"} 滚动\n" +
+                "{\"action\":\"wait\",\"ms\":1000} 等待\n" +
+                "{\"action\":\"open\",\"package\":\"com.tencent.wework\"} 打开应用\n" +
+                "{\"action\":\"done\",\"summary\":\"结果\"} 目标完成\n" +
+                "{\"action\":\"stop\",\"reason\":\"原因\"} 做不到或不该继续\n" +
+                "规则：index 只能来自当前屏幕列表；不要点删除、退出、支付、转账、注销这类操作；" +
+                "不要重复已经做过且没效果的动作；完成或无法继续时用 done / stop 结束。"
     }
 }

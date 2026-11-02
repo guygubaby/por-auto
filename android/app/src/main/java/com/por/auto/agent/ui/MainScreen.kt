@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,6 +38,7 @@ private data class Tab(val label: String, val icon: ImageVector)
 private val TABS = listOf(
     Tab("群发", Icons.AutoMirrored.Filled.Send),
     Tab("定时", Icons.Filled.DateRange),
+    Tab("助手", Icons.Filled.Face),
     Tab("日志", Icons.AutoMirrored.Filled.List),
     Tab("设置", Icons.Filled.Settings),
 )
@@ -50,7 +52,7 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
     val tabState = rememberSaveableStateHolder()
 
     LaunchedEffect(Unit) { viewModel.refresh() }
-    LaunchedEffect(tab) { if (tab == 2) viewModel.refresh() }
+    LaunchedEffect(tab) { if (tab == 3) viewModel.refresh() }
 
     Scaffold(
         topBar = {
@@ -96,7 +98,15 @@ fun MainScreen(viewModel: MainViewModel, onNotify: () -> Unit) {
                         onDelete = viewModel::deleteSchedule,
                         onRunNow = viewModel::runScheduleNow,
                     )
-                    2 -> LogsTab(state, viewModel::refresh)
+                    2 -> AssistantTab(
+                        state = state,
+                        onStart = viewModel::startAgent,
+                        onStop = viewModel::stopAgent,
+                        onOpenAccessibility = {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                    )
+                    3 -> LogsTab(state, viewModel::refresh)
                     else -> SettingsTab(
                         state = state,
                         onToggleOverlay = viewModel::toggleOverlay,

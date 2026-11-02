@@ -1,5 +1,6 @@
 package com.por.auto.agent.wecom
 
+import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import com.por.auto.agent.a11y.AgentAccessibilityService
 import kotlinx.coroutines.CancellationException
@@ -47,7 +48,56 @@ class WecomBroadcastRunner(
     private val log: (String) -> Unit,
 ) {
     private val actions = WecomActions(service)
-    private lateinit var ids: WecomIds
+
+    /** 已知版本用 ID 精确命中；未知版本为 null，全部按界面结构定位。 */
+    private var ids: WecomIds? = null
+    private val height: Int get() = service.resources.displayMetrics.heightPixels
+    private val width: Int get() = service.resources.displayMetrics.widthPixels
+
+    private fun WecomTree.listNode(): WecomTree.Node =
+        WecomLayout.list(nodes, ids?.list)?.let { node(it.index) }
+            ?: throw WecomException("找不到会话列表")
+
+    private fun WecomTree.editorNode(): WecomTree.Node =
+        WecomLayout.editor(nodes, ids?.editor)?.let { node(it.index) }
+            ?: throw WecomException("找不到输入框")
+
+    private fun WecomTree.filterLabel(): WecomTree.Node? =
+        WecomLayout.label(nodes, "群聊", "全部")?.let { node(it.index) }
+
+    /** 会话页顶部的会话名；列表页没有这个标题。 */
+    private fun WecomTree.chatTitleNode(): WecomTree.Node =
+        WecomLayout.chatTitle(nodes, height)?.let { node(it.index) }
+            ?: throw WecomException("读不到会话标题")
+
+    /** 写入前重新核对会话标题和已有草稿，绝不覆盖别人写了一半的内容。 */
+    private fun write(title: String, expected: String, text: String): Boolean {
+        val tree = WecomTree.read(service)
+        return tree.use {
+            if (!WecomTitle.same(it.chatTitleNode().text, title)) {
+                throw WecomException("写入前会话已变化")
+            }
+            val node = it.editorNode().native
+            if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled ||
+                !node.isEditable || node.isPassword
+            ) {
+                throw WecomException("当前不是可核对的聊天输入框")
+            }
+            val current = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+            if (current != expected) throw WecomException("草稿已变化，未覆盖或清理")
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            actions.requireForeground()
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        }
+    }
+
+    private fun WecomTree.rowTitleNodes(list: WecomTree.Node): List<WecomTree.Node> =
+        WecomLayout.rowTitles(nodes, node(list.index), ids?.rowTitle).map { node(it.index) }
+
+    private fun clickableAncestor(tree: WecomTree, node: WecomTree.Node): WecomTree.Node? =
+        WecomLayout.clickableAncestor(tree.nodes, node)?.let { tree.node(it.index) }
 
     suspend fun run(
         text: String,
@@ -66,7 +116,10 @@ class WecomBroadcastRunner(
         val results = mutableListOf<RecipientResult>()
         try {
             ids = WecomIds.forVersion(packageVersion())
-            log("企业微信 ${packageVersion()}，启动")
+            log(
+                "企业微信 ${packageVersion()}，启动" +
+                    if (ids == null) "（未收录版本，按界面结构定位）" else "",
+            )
             if (!actions.launchWecom()) throw WecomException("无法启动企业微信")
             waitForPackage(15_000)
             log("回到消息首页")
@@ -155,28 +208,12 @@ class WecomBroadcastRunner(
     }
 
     private fun isHome(tree: WecomTree): Boolean =
-        tree.all(ids.messageTab).any { it.text == "消息" } &&
-            tree.all(ids.list).isNotEmpty() &&
-            tree.all(ids.filterText).isNotEmpty()
+        WecomLayout.messageTab(tree.nodes, height) != null &&
+            WecomLayout.list(tree.nodes, ids?.list) != null &&
+            tree.filterLabel() != null
 
-    private fun messageTab(tree: WecomTree): WecomTree.Node? {
-        val height = service.resources.displayMetrics.heightPixels
-        val text = tree.nodes.firstOrNull {
-            it.text == "消息" && it.valid && it.bounds[1] > height * 0.75
-        } ?: return null
-        val tab = clickableAncestor(tree, text) ?: return null
-        return tab.takeIf { it.bounds[1] > height * 0.75 }
-    }
-
-    private fun clickableAncestor(tree: WecomTree, node: WecomTree.Node): WecomTree.Node? {
-        var current: WecomTree.Node? = node
-        repeat(5) {
-            val candidate = current ?: return null
-            if (candidate.clickable && candidate.valid) return candidate
-            current = candidate.parent.takeIf { it >= 0 }?.let { tree.nodes[it] }
-        }
-        return null
-    }
+    private fun messageTab(tree: WecomTree): WecomTree.Node? =
+        WecomLayout.messageTab(tree.nodes, height)?.let { tree.node(it.index) }
 
     /** 冻结名单。单聊先读一遍群聊分类，再从「全部」里按完整名称排除群会话。 */
     private suspend fun freezeRecipients(scope: WecomScope): List<String> {
@@ -198,9 +235,10 @@ class WecomBroadcastRunner(
         repeat(6) {
             val tree = readTree()
             try {
-                val filter = tree.one(ids.filterText)
+                val filter = tree.filterLabel() ?: throw WecomException("读不到会话分类")
                 if (filter.text == desired) return
-                val button = tree.one(ids.filterButton)
+                val button = clickableAncestor(tree, filter)
+                    ?: throw WecomException("找不到会话分类按钮")
                 if (!actions.click(button.centerX, button.centerY)) throw WecomException("打开会话分类失败")
             } finally {
                 tree.close()
@@ -228,8 +266,8 @@ class WecomBroadcastRunner(
         repeat(60) {
             val tree = readTree()
             try {
-                val list = tree.one(ids.list)
-                if (tree.one(ids.filterText).text != scope.page) {
+                val list = tree.listNode()
+                if (tree.filterLabel()?.text != scope.page) {
                     throw WecomException("会话分类已变化")
                 }
                 collected.addPage(
@@ -246,8 +284,8 @@ class WecomBroadcastRunner(
     }
 
     private fun rows(tree: WecomTree, scope: WecomScope, exclude: Set<String>): List<RecipientRow> {
-        val list = tree.one(ids.list)
-        val titles = tree.nodes.filter { it.id == ids.rowTitle && it.valid && tree.under(it, list) }
+        val list = tree.listNode()
+        val titles = tree.rowTitleNodes(list)
         val result = mutableListOf<RecipientRow>()
         val seen = mutableSetOf<String>()
         for (title in titles) {
@@ -268,7 +306,7 @@ class WecomBroadcastRunner(
     private suspend fun scrollList(forward: Boolean): Boolean {
         val tree = readTree()
         return try {
-            val list = tree.one(ids.list)
+            val list = tree.listNode()
             if (!list.native.refresh()) throw StaleTreeException()
             val action = if (forward) {
                 AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
@@ -292,7 +330,7 @@ class WecomBroadcastRunner(
         repeat(6) {
             val tree = readTree()
             try {
-                val filter = tree.all(ids.filterText).firstOrNull()
+                val filter = tree.filterLabel()
                 if (filter != null && filter.text == listPage) return
             } finally {
                 tree.close()
@@ -317,10 +355,8 @@ class WecomBroadcastRunner(
             repeat(MAX_SEARCH_SCROLLS) {
                 val tree = readTree()
                 try {
-                    val list = tree.one(ids.list)
-                    val titleNode = tree.nodes.firstOrNull {
-                        it.id == ids.rowTitle && it.text == title && it.valid && tree.under(it, list)
-                    }
+                    val list = tree.listNode()
+                    val titleNode = tree.rowTitleNodes(list).firstOrNull { it.text == title }
                     if (titleNode != null) {
                         val row = tree.rowOf(titleNode, list)
                             ?: throw WecomException("会话行不可点击：$title")
@@ -363,10 +399,9 @@ class WecomBroadcastRunner(
         repeat(attempts) {
             val tree = readTree()
             try {
-                val editor = tree.all(ids.editor).singleOrNull()?.takeIf { it.editable }
+                val editor = WecomLayout.editor(tree.nodes, ids?.editor)
                 if (editor != null) {
-                    val titleNode = tree.all(ids.messageTab).singleOrNull()
-                        ?: throw WecomException("聊天标题读不到")
+                    val titleNode = tree.chatTitleNode()
                     if (!WecomTitle.same(titleNode.text, title)) {
                         throw WecomException("打开的会话与目标不一致：${titleNode.text} ≠ $title")
                     }
@@ -384,7 +419,7 @@ class WecomBroadcastRunner(
         val expected = scope.page
         val tree = readTree()
         return try {
-            tree.all(ids.filterText).any { it.text == expected }
+            tree.filterLabel()?.text == expected
         } catch (e: WecomException) {
             false
         } finally {
@@ -396,10 +431,8 @@ class WecomBroadcastRunner(
     private suspend fun clickRow(title: String): Boolean {
         val tree = readTree()
         return try {
-            val list = tree.one(ids.list)
-            val titleNode = tree.nodes.firstOrNull {
-                it.id == ids.rowTitle && it.text == title && it.valid && tree.under(it, list)
-            } ?: return false
+            val list = tree.listNode()
+            val titleNode = tree.rowTitleNodes(list).firstOrNull { it.text == title } ?: return false
             val row = tree.rowOf(titleNode, list) ?: return false
             if (!row.clickable) return false
             val point = visibleRowCenter(row.bounds, list.bounds) ?: return false
@@ -410,7 +443,7 @@ class WecomBroadcastRunner(
     }
 
     private suspend fun sendText(title: String, text: String, dryRun: Boolean, onAttempt: () -> Unit) {
-        if (!actions.setText(ids, title, expected = "", text = text)) throw WecomException("写入文字失败")
+        if (!write(title, expected = "", text = text)) throw WecomException("写入文字失败")
 
         waitDraft(title, text)
         log("草稿已核对：$title")
@@ -431,8 +464,8 @@ class WecomBroadcastRunner(
         repeat(20) {
             val tree = readTree()
             try {
-                val editor = tree.all(ids.editor).singleOrNull()?.takeIf { it.editable }
-                val titleNode = tree.all(ids.messageTab).singleOrNull()
+                val editor = WecomLayout.editor(tree.nodes, ids?.editor)
+                val titleNode = WecomLayout.chatTitle(tree.nodes, height)
                 if (editor != null && titleNode != null && WecomTitle.same(titleNode.text, title)) {
                     val current = if (editor.hint) "" else editor.text
                     if (current == text) return
@@ -447,15 +480,15 @@ class WecomBroadcastRunner(
     }
 
     private suspend fun clearDraft(title: String, text: String) {
-        if (!actions.setText(ids, title, expected = text, text = "")) {
+        if (!write(title, expected = text, text = "")) {
             throw WecomException("清理草稿失败")
         }
 
         repeat(20) {
             val tree = readTree()
             try {
-                val editor = tree.one(ids.editor)
-                if (!WecomTitle.same(tree.one(ids.messageTab).text, title)) {
+                val editor = tree.editorNode()
+                if (!WecomTitle.same(tree.chatTitleNode().text, title)) {
                     throw WecomException("清理后会话已变化")
                 }
                 val current = if (editor.hint) "" else editor.text
@@ -472,9 +505,8 @@ class WecomBroadcastRunner(
         repeat(15) {
             val tree = readTree()
             try {
-                val editor = tree.one(ids.editor).takeIf { it.editable }
-                    ?: throw WecomException("发送前找不到输入框")
-                val titleNode = tree.one(ids.messageTab)
+                val editor = tree.editorNode()
+                val titleNode = tree.chatTitleNode()
                 if (!WecomTitle.same(titleNode.text, title)) {
                     throw WecomException("发送前会话已变化")
                 }
@@ -507,7 +539,7 @@ class WecomBroadcastRunner(
     private suspend fun outgoing(title: String, text: String): Outgoing {
         val tree = readTree()
         return try {
-            if (!WecomTitle.same(tree.one(ids.messageTab).text, title)) {
+            if (!WecomTitle.same(tree.chatTitleNode().text, title)) {
                 throw WecomException("发送前会话已变化")
             }
             outgoing(tree, text)
@@ -517,13 +549,17 @@ class WecomBroadcastRunner(
     }
 
     private fun outgoing(tree: WecomTree, text: String): Outgoing {
-        val width = service.resources.displayMetrics.widthPixels
+        val bodyHint = ids?.messageBody
+        val avatarHint = ids?.avatar
         val rows = mutableListOf<WecomTree.Node>()
-        for (body in tree.nodes.filter { it.id == ids.messageBody && it.valid && it.text == text }) {
+        for (body in tree.nodes.filter {
+            it.valid && it.text == text && (bodyHint == null || it.id == bodyHint)
+        }) {
             var current: WecomTree.Node? = body
             while (current != null) {
                 val avatars = tree.nodes.filter {
-                    it.id == ids.avatar && it.valid && tree.under(it, current)
+                    it.valid && it.centerX > width / 2 && tree.under(it, current) &&
+                        (avatarHint?.let { id -> it.id == id } ?: it.role.endsWith("ImageView"))
                 }
                 if (avatars.size == 1) {
                     val avatar = avatars.single()
@@ -557,8 +593,8 @@ class WecomBroadcastRunner(
         repeat(12) {
             val tree = readTree()
             try {
-                val editor = tree.all(ids.editor).singleOrNull()?.takeIf { it.editable }
-                val titleNode = tree.all(ids.messageTab).singleOrNull()
+                val editor = WecomLayout.editor(tree.nodes, ids?.editor)
+                val titleNode = WecomLayout.chatTitle(tree.nodes, height)
                 if (editor != null && titleNode != null && WecomTitle.same(titleNode.text, title)) {
                     val current = if (editor.hint) "" else editor.text
                     val after = outgoing(tree, text)

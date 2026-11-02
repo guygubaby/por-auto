@@ -33,26 +33,6 @@ class WecomActions(private val service: AgentAccessibilityService) {
         if (!dispatched && cont.isActive) cont.resume(false)
     }
 
-    fun setText(ids: WecomIds, title: String, expected: String, text: String): Boolean =
-        WecomTree.read(service).use { tree ->
-            if (!WecomTitle.same(tree.one(ids.messageTab).text, title)) {
-                throw WecomException("写入前会话已变化")
-            }
-            val node = tree.one(ids.editor).native
-            if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled ||
-                !node.isEditable || node.isPassword
-            ) {
-                throw WecomException("当前不是可核对的聊天输入框")
-            }
-            val current = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-            if (current != expected) throw WecomException("草稿已变化，未覆盖或清理")
-            val args = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            requireForeground()
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        }
-
     fun back(): Boolean {
         requireForeground()
         return service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
