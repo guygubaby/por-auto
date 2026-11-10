@@ -2,8 +2,11 @@ package com.por.auto.agent.wecom
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Path
+import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -32,6 +35,47 @@ class WecomActions(private val service: AgentAccessibilityService) {
         val dispatched = service.dispatchGesture(gesture, callback, null)
         if (!dispatched && cont.isActive) cont.resume(false)
     }
+
+    /** 第二条点击通道：手势被系统吞掉时，改走控件的 ACTION_CLICK。 */
+    fun clickNode(node: AccessibilityNodeInfo): Boolean {
+        requireForeground()
+        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    /** 把文字放进剪贴板并保留原内容；写入失败时 ok=false，调用方不得继续粘贴。 */
+    fun setClipboard(text: String): ClipboardBackup {
+        val clipboard = service.getSystemService(ClipboardManager::class.java)
+            ?: return ClipboardBackup(null, false)
+        val previous = runCatching { clipboard.primaryClip }.getOrNull()
+        val ok = runCatching {
+            clipboard.setPrimaryClip(ClipData.newPlainText("por-auto", text))
+        }.isSuccess
+        return ClipboardBackup(previous, ok)
+    }
+
+    fun restoreClipboard(backup: ClipboardBackup) {
+        val clipboard = service.getSystemService(ClipboardManager::class.java) ?: return
+        runCatching {
+            if (backup.clip != null) {
+                clipboard.setPrimaryClip(backup.clip)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                clipboard.clearPrimaryClip()
+            } else {
+                // API 26–27 没有 clearPrimaryClip：至少把消息正文从剪贴板换掉。
+                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
+        }
+    }
+
+    /** 粘贴到输入框；ACTION_PASTE 不保证成功，调用方必须回读草稿。 */
+    fun paste(node: AccessibilityNodeInfo): Boolean {
+        requireForeground()
+        if (!node.refresh() || !node.isEditable) return false
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        return node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+    }
+
+    data class ClipboardBackup(val clip: ClipData?, val ok: Boolean)
 
     fun back(): Boolean {
         requireForeground()

@@ -235,7 +235,15 @@ class AgentRunner(
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
+        // 有的输入框会接受动作但没写进去；读得回来就核对，把差异交给模型换做法。
+        if (node.refresh()) {
+            val current = node.text?.toString()
+            if (current != null && current != text) {
+                throw AgentException("输入框里的内容没有变成「$text」，现在是「$current」")
+            }
+        }
+        return true
     }
 
     private fun open(packageName: String): Boolean {

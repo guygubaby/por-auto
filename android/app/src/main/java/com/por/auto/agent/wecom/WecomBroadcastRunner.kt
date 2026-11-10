@@ -20,6 +20,15 @@ enum class WecomScope(val label: String, val key: String) {
     }
 }
 
+/** 写入后的草稿状态；已有别人的内容时绝不覆盖。 */
+internal enum class DraftState { Ready, Empty, Changed, WrongChat, Unreadable }
+
+internal fun draftStateOf(current: String, expected: String): DraftState = when {
+    current == expected -> DraftState.Ready
+    current.isEmpty() -> DraftState.Empty
+    else -> DraftState.Changed
+}
+
 data class RecipientResult(
     val title: String,
     val scope: WecomScope,
@@ -189,6 +198,7 @@ class WecomBroadcastRunner(
     }
 
     private suspend fun home() {
+        var viaNode = false
         repeat(8) {
             val tree = readTree()
             try {
@@ -196,15 +206,26 @@ class WecomBroadcastRunner(
                 // 聊天页底部是输入栏，不是导航栏；先返回，别按导航去点。
                 val inChat = WecomLayout.editor(tree.nodes, ids?.editor) != null
                 val tab = if (inChat) null else messageTab(tree)
-                if (tab == null || !actions.click(tab.centerX, tab.centerY)) {
+                if (tab == null || !click(tree, tab, viaNode)) {
                     if (!actions.back()) throw WecomException("返回消息首页失败")
                 }
             } finally {
                 tree.close()
             }
+            viaNode = !viaNode
             delay(700)
         }
         throw WecomException("未能回到企业微信消息首页")
+    }
+
+    /** 手势被系统吞掉时，下一轮改走节点点击；节点点不动再退回手势。 */
+    private suspend fun click(tree: WecomTree, node: LayoutNode, viaNode: Boolean): Boolean {
+        val native = tree.node(node.index).native
+        return if (viaNode && native.isClickable) {
+            actions.clickNode(native) || actions.click(node.centerX, node.centerY)
+        } else {
+            actions.click(node.centerX, node.centerY)
+        }
     }
 
     /** 首页的判据是会话列表和「全部 / 群聊」分类都在。企微的导航文字是零尺寸的，不能当判据。 */
@@ -232,6 +253,7 @@ class WecomBroadcastRunner(
 
     private suspend fun recipientPage(scope: WecomScope) {
         val desired = scope.page
+        var viaNode = false
         repeat(6) {
             val tree = readTree()
             try {
@@ -239,7 +261,9 @@ class WecomBroadcastRunner(
                 if (filter.text == desired) return
                 val button = clickableAncestor(tree, filter)
                     ?: throw WecomException("找不到会话分类按钮")
-                if (!actions.click(button.centerX, button.centerY)) throw WecomException("打开会话分类失败")
+                val changed = click(tree, button, viaNode)
+                viaNode = !viaNode
+                if (!changed) throw WecomException("打开会话分类失败")
             } finally {
                 tree.close()
             }
@@ -380,9 +404,9 @@ class WecomBroadcastRunner(
                         log("已点击会话行：$title")
                         delay(700)
                         if (waitChat(title, attempts = 12)) return
-                        // 列表还在动时首次点击可能被吞掉：仍在列表页就再点一次。
-                        if (isOnList(scope) && clickRow(title)) {
-                            log("再次点击：$title")
+                        // 首次手势点击可能被系统吞掉：仍在列表页就换节点点击再试一次。
+                        if (isOnList(scope) && clickRow(title, viaNode = true)) {
+                            log("再次点击（节点通道）：$title")
                             if (waitChat(title, attempts = 12)) return
                         }
                         throw WecomException("没有进入目标会话：$title")
@@ -438,8 +462,8 @@ class WecomBroadcastRunner(
         }
     }
 
-    /** 在当前屏点一次目标行；找不到返回 false。 */
-    private suspend fun clickRow(title: String): Boolean {
+    /** 在当前屏点一次目标行；找不到返回 false。viaNode 为真时改走节点点击。 */
+    private suspend fun clickRow(title: String, viaNode: Boolean = false): Boolean {
         val tree = readTree()
         return try {
             val list = tree.listNode()
@@ -447,16 +471,19 @@ class WecomBroadcastRunner(
             val row = tree.rowOf(titleNode, list) ?: return false
             if (!row.clickable) return false
             val point = visibleRowCenter(row.bounds, list.bounds) ?: return false
-            actions.click(point.first, point.second)
+            click(tree, row, viaNode)
         } finally {
             tree.close()
         }
     }
 
     private suspend fun sendText(title: String, text: String, dryRun: Boolean, onAttempt: () -> Unit) {
-        if (!write(title, expected = "", text = text)) throw WecomException("写入文字失败")
-
-        waitDraft(title, text)
+        if (write(title, expected = "", text = text)) {
+            ensureDraft(title, text)
+        } else {
+            // SET_TEXT 直接报失败也换粘贴；粘贴前会再次核对草稿为空。
+            pasteDraft(title, text)
+        }
         log("草稿已核对：$title")
 
         if (dryRun) {
@@ -469,6 +496,69 @@ class WecomBroadcastRunner(
         findAndClickSend(title, text, onAttempt)
         log("已点击发送：$title")
         waitSent(title, text, before)
+    }
+
+    /**
+     * SET_TEXT 在自绘或隐藏输入框上可能静默失效。先等它一会儿；仍为空就换剪贴板粘贴，
+     * 已有别的内容时绝不覆盖，直接停下。
+     */
+    private suspend fun ensureDraft(title: String, text: String) {
+        repeat(DRAFT_PROBES) {
+            when (draftState(title, text)) {
+                DraftState.Ready -> return
+                DraftState.WrongChat -> throw WecomException("写入前会话已变化")
+                DraftState.Changed -> throw WecomException("草稿内容已变化，未发送")
+                DraftState.Empty, DraftState.Unreadable -> Unit
+            }
+            delay(300)
+        }
+        when (draftState(title, text)) {
+            DraftState.Ready -> return
+            DraftState.WrongChat -> throw WecomException("粘贴前会话已变化")
+            DraftState.Changed -> throw WecomException("草稿内容已变化，未发送")
+            DraftState.Empty, DraftState.Unreadable -> Unit
+        }
+        pasteDraft(title, text)
+    }
+
+    private suspend fun draftState(title: String, text: String): DraftState {
+        val tree = readTree()
+        return try {
+            val editor = WecomLayout.editor(tree.nodes, ids?.editor) ?: return DraftState.Unreadable
+            val titleNode = WecomLayout.chatTitle(tree.nodes, height) ?: return DraftState.Unreadable
+            if (!WecomTitle.same(titleNode.text, title)) return DraftState.WrongChat
+            draftStateOf(if (editor.hint) "" else editor.text, text)
+        } finally {
+            tree.close()
+        }
+    }
+
+    private suspend fun pasteDraft(title: String, text: String) {
+        val backup = actions.setClipboard(text)
+        if (!backup.ok) throw WecomException("无法写入剪贴板，输入失败")
+        try {
+            val tree = readTree()
+            try {
+                if (!WecomTitle.same(tree.chatTitleNode().text, title)) {
+                    throw WecomException("粘贴前会话已变化")
+                }
+                val node = tree.editorNode().native
+                if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled ||
+                    !node.isEditable || node.isPassword
+                ) {
+                    throw WecomException("当前不是可核对的聊天输入框")
+                }
+                val current = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+                if (current.isNotEmpty()) throw WecomException("草稿已变化，未覆盖或清理")
+                if (!actions.paste(node)) throw WecomException("粘贴输入没有完成")
+            } finally {
+                tree.close()
+            }
+            waitDraft(title, text)
+            log("输入方式：粘贴")
+        } finally {
+            actions.restoreClipboard(backup)
+        }
     }
 
     private suspend fun waitDraft(title: String, text: String) {
@@ -637,6 +727,7 @@ class WecomBroadcastRunner(
         }
 
         private const val MAX_SEARCH_SCROLLS = 80
+        private const val DRAFT_PROBES = 6
 
         /**
          * 续跑时只处理上一次失败/跳过的会话。名单里已经找不到的会话直接停，
