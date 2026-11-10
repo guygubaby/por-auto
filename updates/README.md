@@ -22,18 +22,7 @@
 
 ## 部署
 
-站点由 Cloudflare Workers Builds 从 GitHub 构建：推送到 `main` 且改动 `admin/` 或 `updates/` 时自动部署。
-
-已连接 Cloudflare Workers Builds。重新连接或换账号时：Cloudflare Dashboard → Workers & Pages → `por-auto-updates` → Settings → Builds → Connect，选择 `guygubaby/por-auto`、生产分支 `main`，然后填：
-
-- Root directory：`updates`
-- Build command：`cd ../admin && pnpm install --frozen-lockfile && pnpm build`
-- Deploy command：`npx wrangler deploy --config wrangler.jsonc`
-- Include paths：`admin/**`、`updates/**`
-
-Worker 名称必须和 `updates/wrangler.jsonc` 里的 `name` 一致（`por-auto-updates`）。
-
-本地应急仍可手动部署：
+站点手动部署：
 
 ```sh
 cd admin && pnpm install && pnpm build     # 先出静态资源，Worker 从 ../admin/dist 读
