@@ -11,6 +11,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Old Android WebViews (< Chrome 93) lack these; ky 2 uses all three. -->
+    <script>
+      if (!Object.hasOwn) {
+        Object.hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k) }
+      }
+      if (!Array.prototype.at) {
+        Array.prototype.at = function (i) { return this[i < 0 ? this.length + i : i] }
+      }
+      if (!String.prototype.at) {
+        String.prototype.at = function (i) { return this[i < 0 ? this.length + i : i] }
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
