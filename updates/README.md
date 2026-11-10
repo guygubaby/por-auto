@@ -24,7 +24,7 @@
 
 站点由 Cloudflare Workers Builds 从 GitHub 构建：推送到 `main` 且改动 `admin/` 或 `updates/` 时自动部署。
 
-首次连接（只需一次）：Cloudflare Dashboard → Workers & Pages → `por-auto-updates` → Settings → Builds → Connect，选择 `guygubaby/por-auto`、生产分支 `main`，然后填：
+已连接 Cloudflare Workers Builds。重新连接或换账号时：Cloudflare Dashboard → Workers & Pages → `por-auto-updates` → Settings → Builds → Connect，选择 `guygubaby/por-auto`、生产分支 `main`，然后填：
 
 - Root directory：`updates`
 - Build command：`cd ../admin && pnpm install --frozen-lockfile && pnpm build`
