@@ -28,7 +28,7 @@
 
 - Root directory：`updates`
 - Build command：`cd ../admin && pnpm install --frozen-lockfile && pnpm build`
-- Deploy command：`npx wrangler deploy`
+- Deploy command：`npx wrangler deploy --config wrangler.jsonc`
 - Include paths：`admin/**`、`updates/**`
 
 Worker 名称必须和 `updates/wrangler.jsonc` 里的 `name` 一致（`por-auto-updates`）。
