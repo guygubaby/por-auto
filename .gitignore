@@ -34,5 +34,6 @@ android/dist/
 admin/node_modules/
 admin/dist/
 
-# Wrangler 本地缓存
+# Wrangler / cf CLI 本地缓存
 .wrangler/
+.cloudflare/

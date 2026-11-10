@@ -22,6 +22,19 @@
 
 ## 部署
 
+站点由 Cloudflare Workers Builds 从 GitHub 构建：推送到 `main` 且改动 `admin/` 或 `updates/` 时自动部署。
+
+首次连接（只需一次）：Cloudflare Dashboard → Workers & Pages → `por-auto-updates` → Settings → Builds → Connect，选择 `guygubaby/por-auto`、生产分支 `main`，然后填：
+
+- Root directory：`updates`
+- Build command：`cd ../admin && pnpm install --frozen-lockfile && pnpm build`
+- Deploy command：`npx wrangler deploy`
+- Include paths：`admin/**`、`updates/**`
+
+Worker 名称必须和 `updates/wrangler.jsonc` 里的 `name` 一致（`por-auto-updates`）。
+
+本地应急仍可手动部署：
+
 ```sh
 cd admin && pnpm install && pnpm build     # 先出静态资源，Worker 从 ../admin/dist 读
 cd ../updates && pnpm dlx wrangler@latest deploy
@@ -29,12 +42,19 @@ cd ../updates && pnpm dlx wrangler@latest deploy
 
 ## 发版
 
+推 `v*` tag 会触发 GitHub Actions：构建、签名、校验，并上传 `latest.apk` / `latest.json` 到 R2。
+
 ```sh
-cd updates
-./publish.sh ../android/dist/PorAuto-0.1.3-release.apk 0.1.3 4 "更新说明"
+git tag -a v0.2.6 -m "更新说明"
+git push origin v0.2.6
 ```
 
-版本号要和 `android/app/build.gradle.kts` 里的一致，否则 App 的更新判断会错。
+版本号要和 `android/app/build.gradle.kts` 里的一致，否则 App 的更新判断会错。本地应急仍可用：
+
+```sh
+cd updates
+./publish.sh ../android/dist/PorAuto-Agent-0.2.6-release.apk 0.2.6 17 "更新说明"
+```
 
 ## 密钥
 
