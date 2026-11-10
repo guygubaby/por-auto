@@ -11,7 +11,8 @@ NOTES=${4:-}
 
 [ -f "$APK" ] || { echo "找不到 $APK"; exit 1; }
 
-AAPT=$(ls "$HOME"/Library/Android/sdk/build-tools/*/aapt2 2>/dev/null | tail -1 || true)
+SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}
+AAPT=$(ls "$SDK"/build-tools/*/aapt2 2>/dev/null | tail -1 || true)
 if [ -n "$AAPT" ]; then
   BADGING=$("$AAPT" dump badging "$APK")
   APK_CODE=$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
@@ -21,7 +22,11 @@ if [ -n "$AAPT" ]; then
 fi
 
 SIZE=$(wc -c < "$APK" | tr -d ' ')
-SHA=$(shasum -a 256 "$APK" | awk '{print $1}')
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA=$(sha256sum "$APK" | awk '{print $1}')
+else
+  SHA=$(shasum -a 256 "$APK" | awk '{print $1}')
+fi
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 

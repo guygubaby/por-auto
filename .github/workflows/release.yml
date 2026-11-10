@@ -1,0 +1,164 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v0.2.5）'
+        required: true
+      notes:
+        description: '更新说明（留空则用 tag 说明，再退回提交标题）'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-apk
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          case "$TAG" in
+            v*) ;;
+            *) echo "tag 必须以 v 开头：$TAG" >&2; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+
+      - name: Write signing config and ingest key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          INGEST_KEY: ${{ secrets.POR_INGEST_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KS="$RUNNER_TEMP/por-auto-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KS"
+          cat > android/keystore.properties <<EOF
+          storeFile=$KS
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          printf 'ingestKey=%s\n' "$INGEST_KEY" > android/local.properties
+
+      - name: Build, test and sign
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew :app:testDebugUnitTest :app:assembleRelease --console=plain
+
+      - name: Verify APK
+        id: apk
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?ANDROID_HOME is not set}}"
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          BADGING=$("$SDK/build-tools/35.0.0/aapt2" dump badging "$APK")
+          CODE=$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          NAME=$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+          [ -n "$CODE" ] || { echo "读不到 versionCode" >&2; exit 1; }
+          [ "$NAME" = "$VERSION" ] || { echo "tag 是 $TAG，APK 是 $NAME" >&2; exit 1; }
+          CERTS=$("$SDK/build-tools/35.0.0/apksigner" verify --print-certs "$APK")
+          printf '%s\n' "$CERTS"
+          printf '%s' "$CERTS" | grep -qi '922f3b9f3b2403ccfc81de42d43e404602ad99cd3ccdbfbbfb8dc7c143167ca5' \
+            || { echo "APK 签名证书不是 PorAuto Agent 的发布证书" >&2; exit 1; }
+          mkdir -p android/dist
+          cp "$APK" "android/dist/PorAuto-Agent-$VERSION-release.apk"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "path=android/dist/PorAuto-Agent-$VERSION-release.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to downgrade
+        env:
+          CODE: ${{ steps.apk.outputs.code }}
+        run: |
+          set -euo pipefail
+          LATEST=$(curl -fsS https://por-auto.guygubaby.top/latest || true)
+          if [ -n "$LATEST" ]; then
+            CURRENT=$(printf '%s' "$LATEST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["versionCode"])')
+            if [ "$CODE" -lt "$CURRENT" ]; then
+              echo "APK versionCode $CODE 低于线上 $CURRENT，拒绝发布" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Publish to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          VERSION: ${{ steps.apk.outputs.name }}
+          CODE: ${{ steps.apk.outputs.code }}
+          INPUT_NOTES: ${{ github.event.inputs.notes }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NOTES="${INPUT_NOTES:-}"
+          if [ -z "$NOTES" ]; then
+            NOTES=$(git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN PGP SIGNATURE-----/,$d' | sed '/^$/d')
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES=$(git log -1 --pretty=%s)
+          fi
+          cd updates
+          ./publish.sh "../$APK_PATH" "$VERSION" "$CODE" "$NOTES"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: por-auto-${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
