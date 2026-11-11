@@ -30,6 +30,10 @@ const server = createServer((req, res) => {
     } else if (req.url === '/fail/models') {
       res.statusCode = 401
       res.end(JSON.stringify({ error: { message: 'bad key' } }))
+    } else if (req.url === '/blocked/models') {
+      // Cloudflare 对非标准端口的出站拦截。
+      res.statusCode = 403
+      res.end('error code: 1003')
     } else {
       res.statusCode = 404
       res.end(JSON.stringify({ error: 'nope' }))
@@ -86,6 +90,7 @@ let response = await call('/api/config/models', { provider: 'openai', baseUrl: `
 assert.equal(response.status, 200)
 assert.deepEqual((await response.json()).models, ['a-model', 'b-model'])
 assert.equal(seen.at(-1).headers.authorization, 'Bearer stored-key')
+assert.equal(seen.at(-1).headers['user-agent'], 'PorAuto-Agent/0.1.0')
 
 // 2. 测试：走 chat/completions，解析回复和耗时。
 response = await call('/api/config/test', {
@@ -134,6 +139,15 @@ response = await call('/api/config/models', {
 })
 assert.equal(response.status, 502)
 assert.match((await response.json()).error, /bad key/)
+
+// 7. Cloudflare 的 1003 换成明确提示，别再让人去查 Key。
+response = await call('/api/config/models', {
+  provider: 'openai',
+  baseUrl: `${origin}/blocked`,
+  apiKey: 'bad-key',
+})
+assert.equal(response.status, 502)
+assert.match((await response.json()).error, /443 的 HTTPS 域名/)
 
 server.close()
 console.log('worker selftest: ok')

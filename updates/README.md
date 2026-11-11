@@ -24,6 +24,8 @@
 - `config/ai.json`：AI 配置
 - `config/passcode.json`：口令的 sha256 与版本号，明文不落库
 
+管理端「获取模型」「测试连接」由 Worker 代为请求服务商，Base URL 必须是 Worker 能出站的地址：Cloudflare 会拦截裸 IP 和非标准端口（返回 `error code: 1003`），请求到不了网关；换成 443 的 HTTPS 域名即可。
+
 ## 部署
 
 站点手动部署：

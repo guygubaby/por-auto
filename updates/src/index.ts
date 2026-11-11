@@ -288,17 +288,18 @@ async function readProbe(request: Request, env: Env, needModel: boolean): Promis
 }
 
 function aiHeaders(probe: Probe): Record<string, string> {
+  const base = { 'user-agent': 'PorAuto-Agent/0.1.0' }
   switch (probe.provider) {
     case 'anthropic':
-      return { 'x-api-key': probe.apiKey, 'anthropic-version': '2023-06-01' }
+      return { ...base, 'x-api-key': probe.apiKey, 'anthropic-version': '2023-06-01' }
     case 'opencode':
       return {
+        ...base,
         authorization: `Bearer ${probe.apiKey}`,
-        'user-agent': 'PorAuto-Agent/0.1.0',
         'x-opencode-session': crypto.randomUUID(),
       }
     default:
-      return { authorization: `Bearer ${probe.apiKey}` }
+      return { ...base, authorization: `Bearer ${probe.apiKey}` }
   }
 }
 
@@ -338,6 +339,10 @@ function replyText(provider: Provider, body: unknown): string {
 
 async function upstreamMessage(response: Response): Promise<string> {
   const text = await response.text().catch(() => '')
+  // 这个是 Cloudflare 自己拦的，请求没到网关；直说原因，别让人去查 API Key。
+  if (response.status === 403 && /error code:\s*1003/i.test(text)) {
+    return 'Cloudflare 拦截了 Worker 到非标准端口的请求（error 1003）：Base URL 请改用 443 的 HTTPS 域名'
+  }
   let detail = text.trim().slice(0, 300)
   try {
     const body: unknown = JSON.parse(text)
