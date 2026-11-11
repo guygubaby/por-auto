@@ -44,6 +44,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 文档
 
+- [部署与发版（devops）](devops.md)
 - [Mika 原理与复刻方案](docs/2026-11-01-mika-apk-replication-plan.md)
 
 ## 旧栈

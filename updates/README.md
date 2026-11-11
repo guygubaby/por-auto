@@ -1,5 +1,7 @@
 # PorAuto 后端（Cloudflare Worker）
 
+> 部署、发版与密钥的完整清单见 [../devops.md](../devops.md)。
+
 一个 Worker、一个域名 `https://por-auto.guygubaby.top`，同时干四件事：
 
 | 路径 | 用途 | 鉴权 |

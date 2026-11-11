@@ -1,5 +1,7 @@
 # PorAuto Agent（Android APK）
 
+> 部署与发版总览见 [../devops.md](../devops.md)。
+
 企业微信自动化，单个 APK，装完即用。当前是客户交付主线。
 
 ## 界面
