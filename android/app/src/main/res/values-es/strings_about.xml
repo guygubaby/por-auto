@@ -2,16 +2,16 @@
 <resources>
     <string name="about_tagline">Tu asistente personal en el teléfono, que hace las cosas por ti</string>
     <string name="about_check">Buscar actualizaciones</string>
-    <string name="about_check_sub">Obtén nuevas versiones desde GitHub Releases</string>
+    <string name="about_check_sub">Obtén nuevas versiones desde PorAuto</string>
     <string name="about_check_sub_new">Hay una versión nueva</string>
     <string name="about_up_to_date">Al día</string>
     <string name="about_up_to_date_toast">Tienes la última versión</string>
-    <string name="about_offline">No se puede acceder a GitHub</string>
-    <string name="about_offline_toast">Ahora mismo no se puede acceder a GitHub. Inténtalo más tarde.</string>
+    <string name="about_offline">No se puede acceder a PorAuto</string>
+    <string name="about_offline_toast">Ahora mismo no se puede acceder a PorAuto. Inténtalo más tarde.</string>
     <string name="about_changelog">Notas de la versión</string>
     <string name="about_changelog_sub">Qué cambió en cada versión</string>
     <string name="about_changelog_empty">Aún no hay notas de la versión. Conéctate a internet y toca “Buscar actualizaciones”.</string>
-    <string name="about_changelog_all">Ver todo en GitHub</string>
+    <string name="about_changelog_all">Ver todo en PorAuto</string>
     <string name="about_feedback">Enviar comentarios</string>
     <string name="about_feedback_sub">Abrir una incidencia en GitHub · Copiar diagnóstico</string>
     <string name="about_feedback_sheet_sub">¿Encontraste un problema o tienes una idea? Cuéntaselo al autor por donde te venga mejor.</string>
@@ -21,11 +21,11 @@
     <string name="about_repo_sub">%1$s · las estrellas son bienvenidas</string>
     <string name="about_guide">Guía y cómo contribuir</string>
     <string name="about_guide_sub">Primeros pasos; añade conocimiento de apps aunque no programes</string>
-    <string name="about_data_note">Lo que le envías a PorAuto (mensajes, contenido de la pantalla y capturas) va solo al proveedor de modelos que configuraste. PorAuto no tiene servidores propios y no recoge ninguno de tus datos; al buscar actualizaciones solo se conecta con GitHub.</string>
+    <string name="about_data_note">Los mensajes, el contenido de la pantalla y las capturas se envían al proveedor de modelos que configuraste. Las consultas de actualización y, si activas los informes, los objetivos, pasos y resultados de las tareas se envían al servidor de PorAuto. Puedes desactivar los informes en Ajustes › Avanzado y otros › Servidor.</string>
     <string name="about_license_link">Licencia Apache-2.0</string>
     <string name="about_author">Hecho por Wang Zan · © 2026</string>
     <string name="about_license_title">Licencia Apache-2.0</string>
-    <string name="about_update_download">Descargar desde GitHub</string>
+    <string name="about_update_download">Descargar desde PorAuto</string>
     <string name="about_update_download_in_app">Descargar actualización</string>
     <string name="about_update_downloading">Descargando…</string>
     <string name="about_update_progress">Descargando %1$d%%</string>

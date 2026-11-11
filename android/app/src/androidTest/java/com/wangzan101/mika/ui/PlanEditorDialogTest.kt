@@ -148,4 +148,13 @@ class PlanEditorDialogTest {
         compose.onNodeWithContentDescription("新建定时任务").performClick()
         compose.onNodeWithTag("plan-editor-content").assertIsDisplayed()
     }
+
+    @Test fun fullPageEditorShowsSaveFailures() {
+        compose.setContent {
+            MikaTheme(dark = false, reduceMotion = true) {
+                PlanEditorDialog(null, "new-thread", onDismiss = {}, onSave = {}, saveError = "保存失败")
+            }
+        }
+        compose.onNodeWithTag("plan-editor-save-error").performScrollTo().assertIsDisplayed()
+    }
 }

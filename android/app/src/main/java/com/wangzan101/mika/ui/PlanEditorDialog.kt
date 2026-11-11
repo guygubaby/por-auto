@@ -60,6 +60,7 @@ fun PlanEditorDialog(
     newThreadId: String,
     onDismiss: () -> Unit,
     onSave: (TriggerDefinition) -> Unit,
+    saveError: String? = null,
 ) {
     val newId = remember(original?.id) { original?.id ?: UUID.randomUUID().toString() }
     var draft by remember(original?.id) {
@@ -212,6 +213,9 @@ fun PlanEditorDialog(
                         )
                     }
                 Spacer(Modifier.height(16.dp))
+                saveError?.let {
+                    Text(it, Modifier.testTag("plan-editor-save-error"), style = MikaType.Caption, color = MikaTheme.colors.bad)
+                }
                 MikaButton(
                     tr(R.string.save),
                     {

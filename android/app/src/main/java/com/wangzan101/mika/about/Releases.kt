@@ -27,6 +27,9 @@ data class ReleaseInfo(
 ) {
     /** 「从 GitHub 下载」打开的地址:有 APK 直链就下 APK,没有就打开发布页。 */
     val downloadUrl: String get() = apkUrl ?: pageUrl
+
+    /** 后端的 APK 地址固定；版本和摘要一起标识下载与暂不安装的那一份。 */
+    val downloadId: String get() = listOf(apkUrl, versionCode, version, apkSize, apkDigest).joinToString("|")
 }
 
 /**

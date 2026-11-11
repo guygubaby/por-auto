@@ -59,7 +59,7 @@ class A11yOnDisplayTest {
         private fun rebindAccessibility() {
             if (ScreenAccessibility.instance.value != null) return
             val key = "enabled_accessibility_services"
-            val mika = "com.wangzan101.mika/${PorAutoAccessibilityService::class.java.name}"
+            val mika = "${InstrumentationRegistry.getInstrumentation().targetContext.packageName}/${MikaAccessibilityService::class.java.name}"
             val enabled = shellCommand("settings get secure $key").trim().split(':')
             if (mika !in enabled) return
             try {
@@ -79,11 +79,11 @@ class A11yOnDisplayTest {
             return ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader().use { it.readText() }
         }
 
-        private fun awaitShell(): IPorAutoShell =
+        private fun awaitShell(): IMikaShell =
             DeviceSupport.awaitShell(connection)
     }
 
-    private val shell: IPorAutoShell get() = awaitShell()
+    private val shell: IMikaShell get() = awaitShell()
     private var display: AgentDisplay? = null
 
     @After

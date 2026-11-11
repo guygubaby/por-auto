@@ -600,7 +600,7 @@ private fun MikaRoot(
                 resetKey = nav.resetSerial,
             ) { openDrawer ->
                 Box(Modifier.fillMaxSize()) {
-                    val readyRelease = readyUpdate?.takeIf { autoUpdate && it.apkUrl == updateState.update?.apkUrl }
+                    val readyRelease = readyUpdate?.takeIf { autoUpdate && it.downloadId == updateState.update?.downloadId }
                     val updateBackdrop = if (readyRelease != null) rememberGlassBackdrop() else null
                     Box(Modifier.fillMaxSize().glassSource(updateBackdrop)) {
                         if (nav.current == Route.Personal) PersonalAgentScreen(

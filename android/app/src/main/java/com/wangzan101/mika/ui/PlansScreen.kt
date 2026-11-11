@@ -88,12 +88,13 @@ fun PlansScreen(context: Context, onBack: () -> Unit, onOpenConversation: (Strin
         PlanEditorDialog(
             original = editingPlan,
             newThreadId = creatingThreadId ?: editingPlan!!.threadId,
-            onDismiss = { creating = null; editing = null },
+            onDismiss = { creating = null; editing = null; error = null },
             onSave = { plan ->
                 val saved = if (editingPlan == null) act { TriggerRuntime.schedule(context, plan) }
                     else act { TriggerRuntime.schedule(context, plan, replaceExisting = true) }
                 if (saved) { creating = null; editing = null }
             },
+            saveError = error,
         )
         return
     }

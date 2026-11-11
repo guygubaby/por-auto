@@ -26,7 +26,7 @@ internal class AutomaticUpdates(context: Context, private val updater: ApkUpdate
     val enabled = _enabled.asStateFlow()
     private val _ready = MutableStateFlow<ReleaseInfo?>(null)
     val ready = _ready.asStateFlow()
-    private var dismissedUrl: String? = null
+    private var dismissedRelease: String? = null
 
     fun setEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("enabled", enabled).apply()
@@ -35,16 +35,16 @@ internal class AutomaticUpdates(context: Context, private val updater: ApkUpdate
     }
 
     fun dismiss(release: ReleaseInfo) {
-        dismissedUrl = release.apkUrl
-        if (_ready.value?.apkUrl == dismissedUrl) _ready.value = null
+        dismissedRelease = release.downloadId
+        if (_ready.value?.downloadId == dismissedRelease) _ready.value = null
     }
 
     suspend fun watch(updates: StateFlow<UpdateState>) {
         combine(enabled, updates, wifiNetworks()) { on, state, wifi ->
             state.update?.takeIf { on && it.apkUrl != null } to wifi
         }.distinctUntilChanged().collectLatest { (release, wifi) ->
-            if (_ready.value?.apkUrl != release?.apkUrl) _ready.value = null
-            if (release == null || release.apkUrl == dismissedUrl) return@collectLatest
+            if (_ready.value?.downloadId != release?.downloadId) _ready.value = null
+            if (release == null || release.downloadId == dismissedRelease) return@collectLatest
             try {
                 if (wifi != null) {
                     withContext(Dispatchers.IO) { updater.download(release, wifi) }
@@ -52,7 +52,7 @@ internal class AutomaticUpdates(context: Context, private val updater: ApkUpdate
                 while (true) {
                     when (withContext(Dispatchers.IO) { updater.state(release).phase }) {
                         DownloadPhase.Ready -> {
-                            if (enabled.value && release.apkUrl != dismissedUrl) _ready.value = release
+                            if (enabled.value && release.downloadId != dismissedRelease) _ready.value = release
                             break
                         }
                         DownloadPhase.Downloading, DownloadPhase.Paused -> delay(1000)

@@ -17,6 +17,9 @@ object PorAutoReleases {
     fun fromBackend(text: String): ReleaseInfo? = runCatching {
         val o = json.parseToJsonElement(text).jsonObject
         val version = o.str("versionName")?.takeIf { it.isNotBlank() } ?: error("no versionName")
+        val code = o.strOrNumber("versionCode")?.toLongOrNull()?.takeIf { it > 0 } ?: error("no versionCode")
+        val size = o.strOrNumber("size")?.toLongOrNull()?.takeIf { it > 0 } ?: error("no size")
+        val digest = o.str("sha256")?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) } ?: error("no sha256")
         ReleaseInfo(
             version = AppVersion.normalize(version),
             name = AppVersion.normalize(version),
@@ -24,9 +27,9 @@ object PorAutoReleases {
             date = o.str("publishedAt")?.take(10)?.takeIf { it.length == 10 },
             pageUrl = PorAutoBackend.DOWNLOAD_PAGE,
             apkUrl = PorAutoBackend.APK_URL,
-            apkSize = o.strOrNumber("size")?.toLongOrNull(),
-            apkDigest = o.str("sha256")?.takeIf { it.isNotBlank() }?.let { "sha256:$it" },
-            versionCode = o.strOrNumber("versionCode")?.toLongOrNull(),
+            apkSize = size,
+            apkDigest = "sha256:$digest",
+            versionCode = code,
         )
     }.getOrNull()
 

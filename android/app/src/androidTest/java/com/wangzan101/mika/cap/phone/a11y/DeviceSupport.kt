@@ -17,7 +17,7 @@ import com.wangzan101.mika.a11y.MikaAccessibilityService
 /** 真机测试共用:shell 连接、无障碍服务、虚拟屏上的 AndroidScreen。需要内置助手在运行(已配对、无线调试开着)且 Mika 无障碍服务已开启。 */
 object DeviceSupport {
     const val SETTINGS = "com.android.settings"
-    const val TEST_PACKAGE = "com.wangzan101.mika.test"
+    val TEST_PACKAGE: String get() = InstrumentationRegistry.getInstrumentation().context.packageName
     private var connection: ShellBinding? = null
     private val phone get() = PhoneServices.of(InstrumentationRegistry.getInstrumentation().targetContext)
 
@@ -70,7 +70,7 @@ object DeviceSupport {
     private fun rebindAccessibility() {
         if (ScreenAccessibility.instance.value != null) return
         val key = "enabled_accessibility_services"
-        val mika = "${InstrumentationRegistry.getInstrumentation().targetContext.packageName}/${PorAutoAccessibilityService::class.java.name}"
+        val mika = "${InstrumentationRegistry.getInstrumentation().targetContext.packageName}/${MikaAccessibilityService::class.java.name}"
         val enabled = sh("settings get secure $key").trim().split(':')
         if (mika !in enabled) return
         try {
@@ -98,7 +98,7 @@ object DeviceSupport {
      * 主屏状态:系统的最上层焦点屏、0 号屏的焦点窗口与焦点 Activity、主屏最上面的任务。
      * Agent 在虚拟屏上做任何事,这些都不应该变。
      */
-    fun mainScreenState(shell: IPorAutoShell): String {
+    fun mainScreenState(shell: IMikaShell): String {
         val topDisplay = sh("dumpsys window").lines().map { it.trim() }
             .firstOrNull { it.startsWith("mTopFocusedDisplayId=") }
         checkNotNull(topDisplay) { "mTopFocusedDisplayId not found in dumpsys window" }

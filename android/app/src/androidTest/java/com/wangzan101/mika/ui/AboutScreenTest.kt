@@ -78,7 +78,7 @@ class AboutScreenTest {
         compose.onNodeWithText("版本 0.1.0").assertIsDisplayed()
         compose.onNodeWithText("Beta").assertIsDisplayed()
         compose.onNodeWithText("· 构建 abc1234").assertIsDisplayed()
-        for (t in listOf("检查更新", "更新记录", "反馈问题", "开源仓库", "使用说明与参与方式", AboutCopy.DATA_NOTE, AboutCopy.AUTHOR)) {
+        for (t in listOf("检查更新", "更新记录", AboutCopy.DATA_NOTE, AboutCopy.AUTHOR)) {
             scrollTo(t)
             compose.onNodeWithText(t).assertIsDisplayed()
         }
@@ -87,13 +87,12 @@ class AboutScreenTest {
     }
 
     @Test
-    fun externalRowsOpenLinks() {
+    fun removedRowsDoNotExposeExternalLinks() {
         val calls = about()
-        for (t in listOf("开源仓库", "使用说明与参与方式")) {
-            scrollTo(t)
-            compose.onNodeWithText(t).performClick()
+        for (t in listOf("反馈问题", "开源仓库", "使用说明与参与方式")) {
+            compose.onNodeWithText(t).assertDoesNotExist()
         }
-        assertEquals(listOf(MikaLinks.REPO, MikaLinks.README), calls.urls)
+        assertTrue(calls.urls.isEmpty())
     }
 
     @Test
@@ -105,8 +104,12 @@ class AboutScreenTest {
 
     @Test
     fun feedbackSheetHasGitHubAndDiagnostics() {
-        val calls = about()
-        compose.onNodeWithText("反馈问题").performClick()
+        val calls = Calls()
+        compose.setContent {
+            MikaTheme {
+                FeedbackSheet(onGitHub = { calls.urls += "issue://prefilled" }, onDiagnostics = {}, onDismiss = {})
+            }
+        }
         compose.awaitOne(AboutCopy.FEEDBACK_SHEET_SUB)
         compose.onAllNodesWithTag("feedback-option").assertCountEquals(2)
         compose.onNodeWithText("复制诊断信息").assertIsDisplayed()
@@ -118,9 +121,9 @@ class AboutScreenTest {
     /** 「复制诊断信息」先打开预览:整段文字看得见,点「复制」才进剪贴板。 */
     @Test
     fun feedbackDiagnosticsPreviewsThenCopies() {
-        about()
-        compose.onNodeWithText("反馈问题").performClick()
-        compose.awaitOne("复制诊断信息").performClick()
+        compose.setContent {
+            MikaTheme { DiagnosticsSheet({ sampleDiagnostics }, onDismiss = {}) }
+        }
         compose.awaitOne("不包含 API Key、聊天内容和屏幕内容")
         compose.waitUntil(5_000) { compose.onAllNodesWithText(sampleDiagnostics).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("diagnostics-text").assertIsDisplayed()
@@ -176,7 +179,7 @@ class AboutScreenTest {
         val r = r020.copy(apkUrl = null)
         val calls = about(UpdateState(latest = r, update = r))
         compose.onNodeWithText("检查更新").performClick()
-        compose.awaitOne("从 GitHub 下载").performClick()
+        compose.awaitOne("从服务器下载").performClick()
         assertEquals(listOf(r.pageUrl), calls.urls)
     }
 

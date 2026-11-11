@@ -9,12 +9,14 @@
 |---|---|
 | 包名 / 应用名 | `com.por.auto.agent` / PorAuto（代码命名空间仍是 `com.wangzan101.mika`） |
 | 模型服务商 | 新增「PorAuto 网关」预设：`http://120.48.165.190:3425/v1`，OpenAI 兼容，Key 在 App 内填写 |
+| 旧版升级 | 从 0.4 的本地配置导入协议、地址、模型和加密 Key；已有新版服务商配置时不覆盖 |
 | 检查更新 | 从 GitHub Releases 改为 por-auto 后端 `/latest` + `/latest.apk`，按 `versionCode` 比较，下载后校验大小、SHA-256、包名、版本号和签名 |
 | 运行日志上报 | `porauto/PorAutoReport.kt`：任务结束时上报目标和步骤到 `/api/runs`；可在设置里关闭，失败下次启动补传 |
 | 构建 | 读取 `local.properties` 的 `ingestKey` 注入 `BuildConfig.INGEST_KEY`；release 用 `keystore.properties` 签名 |
 | 管理台 | `/runs` 能显示 `kind=assistant` 的执行步骤和完成/失败计数 |
 
-其余功能、文案和目录结构保持上游原样，便于之后合并 Mika 的更新。
+应用图标、文案和系统提示词使用 PorAuto 品牌；定时任务编辑为完整页面，关于页保留更新和许可入口。
+其余功能和目录结构沿用上游，便于之后合并 Mika 的更新。
 
 ## 构建
 
@@ -37,8 +39,10 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 
 产物：
 
-- `app/build/outputs/apk/release/app-universal-release.apk`（全架构，发版用）
-- `app/build/outputs/apk/release/app-arm64-v8a-release.apk`（仅 arm64，体积更小）
+```text
+app/build/outputs/apk/release/app-universal-release.apk   # 全架构，发版用
+app/build/outputs/apk/release/app-arm64-v8a-release.apk   # 仅 arm64，体积更小
+```
 
 沙箱运行时只带 arm64 原生库；x86_64 模拟器上 App 可用，但「文件与计算环境」会显示不支持。
 
@@ -49,7 +53,8 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 ```
 
 新增逻辑的单测在 `app/src/test/java/com/wangzan101/mika/porauto/`：
-`PorAutoReleasesTest` 校验后端版本解析，`PorAutoReportTest` 校验上报 JSON 的步骤和状态。
+`PorAutoReleasesTest` 校验后端版本和完整性元数据，`PorAutoReportTest` 校验上报内容与凭据脱敏，
+`LegacyProviderTest` 校验旧配置导入、持久化和已有配置保护。
 
 ## 配置
 

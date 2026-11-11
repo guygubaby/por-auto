@@ -66,13 +66,13 @@ internal fun BoxScope.UpdateReadyCapsule(
     modifier: Modifier = Modifier,
 ) {
     val reduceMotion = MikaTheme.reduceMotion
-    val reveal = remember(release.apkUrl) { Animatable(if (reduceMotion) 1f else 0f) }
+    val reveal = remember(release.downloadId) { Animatable(if (reduceMotion) 1f else 0f) }
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
     var focused by remember { mutableStateOf(false) }
     var resumed by remember { mutableStateOf(false) }
-    var confirmDisable by remember(release.apkUrl) { mutableStateOf(false) }
+    var confirmDisable by remember(release.downloadId) { mutableStateOf(false) }
     LifecycleResumeEffect(Unit) {
         resumed = true
         onPauseOrDispose { resumed = false }

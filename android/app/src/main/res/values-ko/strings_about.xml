@@ -2,16 +2,16 @@
 <resources>
     <string name="about_tagline">내 휴대전화 속 개인 비서, 일을 대신 해 줘요</string>
     <string name="about_check">업데이트 확인</string>
-    <string name="about_check_sub">GitHub Releases에서 새 버전 받기</string>
+    <string name="about_check_sub">PorAuto에서 새 버전 받기</string>
     <string name="about_check_sub_new">새 버전이 있어요</string>
     <string name="about_up_to_date">최신 버전</string>
     <string name="about_up_to_date_toast">최신 버전을 사용 중이에요</string>
-    <string name="about_offline">GitHub에 연결할 수 없어요</string>
-    <string name="about_offline_toast">지금은 GitHub에 연결할 수 없어요. 나중에 다시 시도하세요.</string>
+    <string name="about_offline">PorAuto에 연결할 수 없어요</string>
+    <string name="about_offline_toast">지금은 PorAuto에 연결할 수 없어요. 나중에 다시 시도하세요.</string>
     <string name="about_changelog">릴리스 노트</string>
     <string name="about_changelog_sub">버전별 변경 내용</string>
     <string name="about_changelog_empty">아직 릴리스 노트가 없어요. 온라인 상태에서 “업데이트 확인”을 누르세요.</string>
-    <string name="about_changelog_all">GitHub에서 모두 보기</string>
+    <string name="about_changelog_all">PorAuto에서 모두 보기</string>
     <string name="about_feedback">의견 보내기</string>
     <string name="about_feedback_sub">GitHub 이슈 열기 · 진단 정보 복사</string>
     <string name="about_feedback_sheet_sub">문제를 발견했거나 아이디어가 있나요? 편한 방법으로 개발자에게 알려 주세요.</string>
@@ -21,11 +21,11 @@
     <string name="about_repo_sub">%1$s · 별은 언제나 환영이에요</string>
     <string name="about_guide">가이드 및 기여 방법</string>
     <string name="about_guide_sub">시작하기, 코딩을 몰라도 앱 지식을 추가할 수 있어요</string>
-    <string name="about_data_note">PorAuto에 보내는 내용(메시지, 화면 내용, 스크린샷)은 직접 설정한 모델 제공업체에게만 전달돼요. PorAuto는 자체 서버가 없고 데이터를 수집하지 않아요. 업데이트 확인은 GitHub에만 연결해요.</string>
+    <string name="about_data_note">메시지, 화면 내용과 스크린샷은 설정한 모델 제공업체로 전송됩니다. 업데이트 확인과 보고가 켜져 있을 때의 작업 목표, 단계, 결과는 PorAuto 서버로 전송됩니다. 설정 › 고급 및 기타 › 서버에서 실행 로그 보고를 끌 수 있습니다.</string>
     <string name="about_license_link">Apache-2.0 라이선스</string>
     <string name="about_author">Wang Zan 제작 · © 2026</string>
     <string name="about_license_title">Apache-2.0 라이선스</string>
-    <string name="about_update_download">GitHub에서 다운로드</string>
+    <string name="about_update_download">PorAuto에서 다운로드</string>
     <string name="about_update_download_in_app">업데이트 다운로드</string>
     <string name="about_update_downloading">다운로드 중…</string>
     <string name="about_update_progress">다운로드 중 %1$d%%</string>

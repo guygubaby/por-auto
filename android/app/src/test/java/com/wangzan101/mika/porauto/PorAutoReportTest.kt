@@ -7,9 +7,23 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PorAutoReportTest {
+    @Test
+    fun redactsCredentialsBeforeQueuingOrUploading() {
+        val token = "sk-" + "a".repeat(24)
+        val report = RunReport(
+            "run-1", "use $token", "failed", "Bearer abcdefghijklmnop", 0, 1,
+            listOf(ReportStep(0, 1, "tap", token, token, token, true)),
+        )
+        val payload = PorAutoReport.payload(report, buildJsonObject {}).toString()
+        assertFalse(payload.contains(token))
+        assertFalse(payload.contains("abcdefghijklmnop"))
+        assertTrue(payload.contains("***"))
+    }
+
     @Test
     fun payloadKeepsStepsAndCounts() {
         val report = RunReport(

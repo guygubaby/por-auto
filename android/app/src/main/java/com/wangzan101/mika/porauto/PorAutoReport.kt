@@ -7,10 +7,13 @@ import com.wangzan101.mika.BuildConfig
 import com.wangzan101.mika.core.agent.TaskState
 import com.wangzan101.mika.core.net.NetProxy
 import com.wangzan101.mika.core.record.RunEvent
+import com.wangzan101.mika.core.record.Redactor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -18,6 +21,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -64,6 +68,8 @@ object PorAutoReport {
     private const val MAX_RETRY = 20
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val uploads = Mutex()
+    private var activeCall: Call? = null
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     private val client: OkHttpClient by lazy {
@@ -79,8 +85,10 @@ object PorAutoReport {
     fun enabled(context: Context): Boolean =
         PorAutoBackend.enabled && context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true)
 
+    @Synchronized
     fun setEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        if (!enabled) activeCall?.cancel()
     }
 
     /** 任务收尾时调；[end] 是终态，[activities] 是这次实际做过的动作。 */
@@ -118,18 +126,25 @@ object PorAutoReport {
             },
         )
         val payload = payload(report, device()).toString()
-        scope.launch { runCatching { enqueue(context, payload) }.onFailure { Log.w(TAG, "could not queue run report", it) } }
+        scope.launch {
+            uploads.withLock {
+                if (enabled(context)) runCatching { enqueue(context, payload) }
+                    .onFailure { Log.w(TAG, "could not queue run report", it) }
+            }
+        }
     }
 
     /** 启动时补传上次没传成功的记录。 */
     fun retryPending(context: Context) {
         if (!enabled(context)) return
         scope.launch {
-            val dir = File(context.filesDir, DIR)
-            dir.listFiles { f -> f.name.startsWith("run-") && f.name.endsWith(".json") }
-                ?.sortedBy { it.lastModified() }
-                ?.take(MAX_RETRY)
-                ?.forEach { runCatching { upload(it) }.onFailure { e -> Log.w(TAG, "could not upload ${it.name}", e) } }
+            uploads.withLock {
+                val dir = File(context.filesDir, DIR)
+                dir.listFiles { f -> f.name.startsWith("run-") && f.name.endsWith(".json") }
+                    ?.sortedBy { it.lastModified() }
+                    ?.take(MAX_RETRY)
+                    ?.forEach { runCatching { upload(context, it) }.onFailure { e -> Log.w(TAG, "could not upload ${it.name}", e) } }
+            }
         }
     }
 
@@ -141,18 +156,24 @@ object PorAutoReport {
             ?.sortedByDescending { it.lastModified() }
             ?.drop(MAX_PENDING)
             ?.forEach { it.delete() }
-        upload(file)
+        upload(context, file)
     }
 
-    private fun upload(file: File) {
-        if (!PorAutoBackend.enabled) return
-        val request = Request.Builder()
-            .url(PorAutoBackend.RUNS_URL)
-            .header("x-ingest-key", PorAutoBackend.ingestKey)
-            .post(file.readText().toRequestBody(jsonType))
-            .build()
-        val ok = client.newCall(request).execute().use { it.isSuccessful }
-        if (ok) file.delete()
+    private fun upload(context: Context, file: File) {
+        val call = synchronized(this) {
+            if (!enabled(context)) return
+            val request = Request.Builder()
+                .url(PorAutoBackend.RUNS_URL)
+                .header("x-ingest-key", PorAutoBackend.ingestKey)
+                .post(Redactor.text(file.readText()).toRequestBody(jsonType))
+                .build()
+            client.newCall(request).also { activeCall = it }
+        }
+        try {
+            if (call.execute().use { it.isSuccessful }) file.delete()
+        } finally {
+            synchronized(this) { activeCall = null }
+        }
     }
 
     private fun device(): JsonObject = buildJsonObject {
@@ -173,22 +194,22 @@ object PorAutoReport {
             put("finishedAt", report.finishedAtMs)
             put("kind", "assistant")
             put("scope", "phone")
-            put("text", report.goal)
+            put("text", Redactor.text(report.goal))
             put("dryRun", false)
             report.runId?.let { put("runId", it) }
-            report.error?.let { put("error", it) }
+            report.error?.let { put("error", Redactor.text(it)) }
             put("device", device)
             putJsonArray("results") {
                 report.steps.forEach { step ->
                     add(
                         buildJsonObject {
                             val target = step.target?.takeIf { it.isNotBlank() }
-                            put("title", buildString {
+                            put("title", Redactor.text(buildString {
                                 append("第").append(step.step).append("步 ").append(step.label)
                                 if (target != null) append(" · ").append(target)
-                            })
+                            }))
                             put("status", if (step.failed) "failed" else "done")
-                            if (step.failed) put("error", step.effect ?: "没有效果")
+                            if (step.failed) put("error", Redactor.text(step.effect ?: "没有效果"))
                         },
                     )
                 }
@@ -196,20 +217,20 @@ object PorAutoReport {
             putJsonArray("log") {
                 report.steps.forEach { step ->
                     add(JsonPrimitive(
-                        buildString {
+                        Redactor.text(buildString {
                             append(clock(step.atMs)).append(' ')
                             append("第").append(step.step).append("步 ")
                             append(step.kind).append(' ').append(step.label)
                             step.target?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                             step.effect?.takeIf { it.isNotBlank() }?.let { append(" → ").append(it) }
-                        },
+                        }),
                     ))
                 }
                 add(JsonPrimitive(
-                    buildString {
+                    Redactor.text(buildString {
                         append(clock(report.finishedAtMs)).append(" 结束：").append(report.outcome)
                         report.error?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
-                    },
+                    }),
                 ))
             }
         }

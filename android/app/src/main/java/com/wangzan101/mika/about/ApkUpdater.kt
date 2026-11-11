@@ -42,7 +42,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
 
     @Synchronized
     fun state(release: ReleaseInfo): ApkDownloadState =
-        if (prefs.getString("url", null) != release.apkUrl) ApkDownloadState() else recorded()
+        if (prefs.getString("release", null) != release.downloadId) ApkDownloadState() else recorded()
 
     /** 记下的那个下载任务现在的状态;系统里查不到这个任务算失败。 */
     private fun recorded(): ApkDownloadState {
@@ -71,7 +71,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
         val proxy = net.proxyFor(Uri.parse(url).host.orEmpty())
         // OkHttp creates SOCKS sockets outside the configured Wi-Fi socket factory.
         if (wifi != null && proxy?.socks == true) return
-        if (prefs.getString("url", null) == url && state(release).phase in
+        if (state(release).phase in
             listOf(DownloadPhase.Downloading, DownloadPhase.Paused, DownloadPhase.Ready)) return
         cancel()
         val folder = directory
@@ -81,7 +81,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
         // remove 的后台清理可能晚于下一次下载,不能复用旧任务的文件名。
         val target = File(folder, "update-${UUID.randomUUID()}.apk")
         if (wifi != null || proxy != null) {
-            check(prefs.edit().putBoolean("viaApp", true).putString("url", url).putString("file", target.name).commit()) { "could not save download" }
+            check(prefs.edit().putBoolean("viaApp", true).putString("release", release.downloadId).putString("file", target.name).commit()) { "could not save download" }
             proxied.start(url, target, wifi, proxy?.javaProxy() ?: Proxy.NO_PROXY)
             return
         }
@@ -92,7 +92,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
             .setDestinationUri(Uri.fromFile(target))
         val id = manager.enqueue(request)
-        if (!prefs.edit().putLong("id", id).putString("url", url).putString("file", target.name).commit()) {
+        if (!prefs.edit().putLong("id", id).putString("release", release.downloadId).putString("file", target.name).commit()) {
             manager.remove(id)
             error("could not save download")
         }
@@ -133,6 +133,10 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
             val installed = installedInfo(SIGNING_FLAGS)
             if (archive.packageName != context.packageName || archive.longVersionCode <= installed.longVersionCode) {
                 throw ApkRejected(ApkRejected.Reason.NotNewer)
+            }
+            if ((release.versionCode != null && archive.longVersionCode != release.versionCode) ||
+                AppVersion.normalize(archive.versionName.orEmpty()) != release.version) {
+                throw ApkRejected(ApkRejected.Reason.Corrupt)
             }
             ApkIntegrity.requireSameSigner(installed.signers(), archive.signers(), archive.signerHistory())
         } catch (e: ApkRejected) {

@@ -548,7 +548,7 @@ class LiveRunTest {
         skills.list().forEach { appendLine("skill ${it.name} status=${it.status} outcomes=${it.outcomes}\n${it.markdown}\n") }
         skills.drafts().forEach { (id, s) -> appendLine("skill-draft $id ${s.name}\n${s.markdown}\n") }
         memory.appKnowledge().all().forEach { appendLine("app ${it.appName} stage=${it.stage} lesson=${it.lesson} revises=${it.revises} trials=${it.trialOutcomes}\n${it.markdown}\n") }
-        appendLine("routes=${(context.applicationContext as PorAutoApp).routes.count()}")
+        appendLine("routes=${(context.applicationContext as MikaApp).routes.count()}")
     }
 
     /** Mika 当前通知的标题、正文和按钮(从 dumpsys notification 里摘)。 */
