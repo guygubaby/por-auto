@@ -4,7 +4,6 @@ import com.por.auto.agent.a11y.ScreenSnapshot
 import com.por.auto.agent.a11y.UiElement
 import com.por.auto.agent.ai.AiException
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -16,12 +15,26 @@ class AssistantProtocolTest {
     @Test
     fun parsesEveryAction() {
         assertEquals(AgentAction.Tap(3), parse("""{"action":"tap","index":3}"""))
+        assertEquals(AgentAction.LongPress(3), parse("""{"action":"long_press","index":3}"""))
         assertEquals(AgentAction.Input(5, "你好"), parse("""{"action":"input","index":5,"text":"你好"}"""))
         assertEquals(AgentAction.Input(null, "你好"), parse("""{"action":"input","text":"你好"}"""))
         assertEquals(AgentAction.Back, parse("""{"action":"back"}"""))
+        assertEquals(AgentAction.Home, parse("""{"action":"home"}"""))
+        assertEquals(AgentAction.Recents, parse("""{"action":"recents"}"""))
+        assertEquals(AgentAction.Notifications, parse("""{"action":"notifications"}"""))
+        assertEquals(AgentAction.Enter, parse("""{"action":"enter"}"""))
         assertEquals(AgentAction.Scroll(true), parse("""{"action":"scroll","direction":"down"}"""))
         assertEquals(AgentAction.Scroll(false), parse("""{"action":"scroll","direction":"up"}"""))
+        assertEquals(
+            AgentAction.Swipe(AgentAction.Direction.Up),
+            parse("""{"action":"swipe","direction":"up"}"""),
+        )
+        assertEquals(
+            AgentAction.Swipe(AgentAction.Direction.Left),
+            parse("""{"action":"swipe","direction":"left"}"""),
+        )
         assertEquals(AgentAction.Wait(10_000), parse("""{"action":"wait","ms":99999}"""))
+        assertEquals(AgentAction.Open("微信"), parse("""{"action":"open","app":"微信"}"""))
         assertEquals(
             AgentAction.Open("com.tencent.wework"),
             parse("""{"action":"open","package":"com.tencent.wework"}"""),
@@ -52,7 +65,7 @@ class AssistantProtocolTest {
     }
 
     @Test
-    fun digestSkipsSecretsAndKeepsScreenIndexes() {
+    fun digestKeepsPasswordFieldsWithoutTheirValues() {
         val screen = screen(
             element(name = "设置", clickable = true),
             element(name = "请输入密码", editable = true, secret = true),
@@ -61,7 +74,9 @@ class AssistantProtocolTest {
         val text = ScreenDigest.format(screen)
 
         assertTrue(text.contains("[1] 设置"))
-        assertFalse(text.contains("请输入密码"))
+        // 密码框要留给模型定位，但读屏只给出 hint，内容不会进提示词。
+        assertTrue(text.contains("[2] 请输入密码"))
+        assertTrue(text.contains("密码"))
         assertTrue(text.contains("[3] 搜索"))
         assertTrue(text.contains("可输入"))
     }

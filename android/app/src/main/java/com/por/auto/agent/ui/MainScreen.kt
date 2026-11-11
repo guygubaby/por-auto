@@ -41,9 +41,9 @@ private data class Tab(
 )
 
 private val TABS = listOf(
+    Tab("助手", "一句话交给 AI 操作手机", Icons.Filled.Face),
     Tab("群发", "给企业微信会话发送消息", Icons.AutoMirrored.Filled.Send),
     Tab("定时", "每天按点自动发送", Icons.Filled.DateRange),
-    Tab("助手", "一句话交给 AI 操作屏幕", Icons.Filled.Face),
     Tab("日志", "每次运行的结果", Icons.AutoMirrored.Filled.List),
     Tab("设置", "权限、AI 与调试", Icons.Filled.Settings),
 )
@@ -93,7 +93,15 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
         tabState.SaveableStateProvider(tab) {
             Box(content) {
                 when (tab) {
-                    0 -> BroadcastTab(
+                    0 -> AssistantTab(
+                        state = state,
+                        onStart = viewModel::startAgent,
+                        onStop = viewModel::stopAgent,
+                        onOpenAccessibility = {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                    )
+                    1 -> BroadcastTab(
                         state = state,
                         onRun = viewModel::runBroadcast,
                         onResume = viewModel::resumeBroadcast,
@@ -103,21 +111,13 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
                         onAiGenerate = viewModel::aiGenerate,
                         onConsumeAiDraft = viewModel::consumeAiDraft,
                     )
-                    1 -> ScheduleTab(
+                    2 -> ScheduleTab(
                         state = state,
                         onAdd = viewModel::addSchedule,
                         onToggle = viewModel::toggleSchedule,
                         onDelete = viewModel::deleteSchedule,
                         onRunNow = viewModel::runScheduleNow,
                         onUpdate = viewModel::updateSchedule,
-                    )
-                    2 -> AssistantTab(
-                        state = state,
-                        onStart = viewModel::startAgent,
-                        onStop = viewModel::stopAgent,
-                        onOpenAccessibility = {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        },
                     )
                     3 -> LogsTab(state, viewModel::refresh)
                     else -> SettingsTab(

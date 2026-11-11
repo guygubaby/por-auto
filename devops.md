@@ -1,6 +1,6 @@
 # 部署与发版（devops）
 
-> 最后核对：2026-11-11。当前 APK：`0.2.5` / `versionCode 16`。
+> 最后核对：2026-11-11。当前 APK：`0.3.0` / `versionCode 17`。
 > 本文件是部署与发版的入口；Android 细节见 [android/README.md](android/README.md)，后端与数据见 [updates/README.md](updates/README.md)。
 
 ## 1. 资源
@@ -60,8 +60,8 @@ printf '%s' "$INGEST" | pnpm dlx wrangler@latest secret put INGEST_KEY
 ## 3. APK 发版（推荐：tag 自动）
 
 1. 修改 `android/app/build.gradle.kts`：
-   - `versionCode` 必须比线上大（当前是 16）。
-   - `versionName` 不要带 `v`（当前是 `0.2.5`）。
+   - `versionCode` 必须比线上大（当前是 17）。
+   - `versionName` 不要带 `v`（当前是 `0.3.0`）。
 2. 提交到 `main`。
 3. 打带说明的 tag 并推送：
 

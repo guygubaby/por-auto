@@ -56,6 +56,15 @@ data class ResumeJob(
     val remaining: List<String>,
 )
 
+/** 助手的一轮对话：一句目标、执行过的步骤和最后结果。 */
+data class AgentTurn(
+    val goal: String,
+    val steps: List<String> = emptyList(),
+    val result: String? = null,
+    val running: Boolean = false,
+    val failed: Boolean = false,
+)
+
 /** 口令闸门：服务端设过口令且本地没通过（或服务端换了口令）时 required 为 true。 */
 data class PasscodeState(
     val required: Boolean = false,
@@ -92,8 +101,7 @@ data class MainUiState(
     val aiDraft: String? = null,
     val aiDraftScope: WecomScope? = null,
     val agentRunning: Boolean = false,
-    val agentSteps: List<String> = emptyList(),
-    val agentStatus: String? = null,
+    val agentTurns: List<AgentTurn> = emptyList(),
     val update: UpdateState = UpdateState(),
     val passcode: PasscodeState = PasscodeState(),
     val notificationsEnabled: Boolean = true,
@@ -269,11 +277,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = "请先在设置里配置 AI") }
             return
         }
+        val text = goal.trim()
+        // 对话只追加，所以这一轮的下标在整个执行期间不变。
+        val turnIndex = _state.value.agentTurns.size
         _state.update {
             it.copy(
                 agentRunning = true,
-                agentSteps = emptyList(),
-                agentStatus = "执行中…",
+                agentTurns = it.agentTurns + AgentTurn(goal = text, running = true),
                 message = null,
             )
         }
@@ -288,15 +298,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 key = store.keyFor(config.provider, config.baseUrl, ""),
                 log = { line ->
                     service.updateRunStatus(line)
-                    _state.update { state -> state.copy(agentSteps = (state.agentSteps + line).takeLast(40)) }
+                    updateTurn(turnIndex) { current ->
+                        current.copy(steps = (current.steps + line).takeLast(60))
+                    }
                 },
             )
-            val result = runCatching { runner.run(goal) }
+            val result = runCatching { runner.run(text) }
             service.hideRunStatus()
-            _state.update { state ->
-                state.copy(
-                    agentRunning = false,
-                    agentStatus = result.fold(
+            updateTurn(turnIndex) { current ->
+                current.copy(
+                    running = false,
+                    failed = result.isFailure,
+                    result = result.fold(
                         onSuccess = { "完成：$it" },
                         onFailure = { error ->
                             if (error is CancellationException) "已停止" else "停止：${error.message}"
@@ -304,6 +317,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
             }
+            _state.update { it.copy(agentRunning = false) }
         }
     }
 
@@ -311,7 +325,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         agentJob?.cancel()
         agentJob = null
         AgentAccessibilityService.instance?.hideRunStatus()
-        _state.update { it.copy(agentRunning = false, agentStatus = "已停止") }
+        _state.update { state ->
+            state.copy(
+                agentRunning = false,
+                agentTurns = state.agentTurns.map { turn ->
+                    if (turn.running) turn.copy(running = false, failed = true, result = "已停止") else turn
+                },
+            )
+        }
+    }
+
+    /** 对话只追加，按下标改才不会在取消后串到新的一轮。 */
+    private fun updateTurn(index: Int, change: (AgentTurn) -> AgentTurn) {
+        _state.update { state ->
+            val current = state.agentTurns.getOrNull(index) ?: return@update state
+            state.copy(
+                agentTurns = state.agentTurns.toMutableList().also { it[index] = change(current) },
+            )
+        }
     }
 
     /** 只补发上次没成功的会话，正文和范围沿用原任务。 */

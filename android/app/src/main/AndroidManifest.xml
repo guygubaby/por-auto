@@ -11,6 +11,11 @@
 
     <queries>
         <package android:name="com.tencent.wework" />
+        <!-- 助手按应用名打开别的应用 -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application

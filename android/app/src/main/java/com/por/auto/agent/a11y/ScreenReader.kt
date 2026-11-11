@@ -26,9 +26,13 @@ object ScreenReader {
             val root = runCatching { window.root }.getOrNull()
             val windowPackage = root?.packageName?.toString()
             val before = state.elements.size
+            // 自己的状态条是给用户看的：不进控件清单，否则它的文字一变，
+            // 助手就会误以为界面变了，模型也会读到「1. 点击 [3]」这种运行日志。
+            val ownOverlay = window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+                windowPackage == service.packageName
             if (root != null) {
                 try {
-                    visit(root, 0, null, null, null, index, windowPackage, state)
+                    if (!ownOverlay) visit(root, 0, null, null, null, index, windowPackage, state)
                 } finally {
                     @Suppress("DEPRECATION")
                     root.recycle()
