@@ -36,7 +36,7 @@ function RootLayout() {
       </main>
 
       <footer className="mx-auto w-full max-w-5xl px-5 pb-8 text-[11px] text-muted sm:px-8">
-        PorAuto · 企业微信群发自动化
+        PorAuto · 手机 AI 助手 · 企业微信群发
       </footer>
     </div>
   )

@@ -21,12 +21,13 @@ class AiParsingTest {
     @Test
     fun joinRejectsUnsafeOrAmbiguousEndpoints() {
         listOf(
-            "http://example.com/v1", "file:///tmp/key", "ftp://example.com",
+            "file:///tmp/key", "ftp://example.com",
             "https://user@example.com", "https://example.com/v1?token=secret",
             "https://example.com/v1#fragment", "not a url",
         ).forEach { base ->
             assertThrows(base, AiException::class.java) { AiParsing.join(base, "models") }
         }
+        assertEquals("http://example.com/v1/models", AiParsing.join("http://example.com/v1", "models"))
         assertEquals("http://127.0.0.1:3425/v1/models", AiParsing.join("http://127.0.0.1:3425/v1", "models"))
     }
 

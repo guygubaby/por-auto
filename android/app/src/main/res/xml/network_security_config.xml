@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
+    <!-- 允许任意 HTTP 接口：API Key 走明文时自行确认网络可信。 -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

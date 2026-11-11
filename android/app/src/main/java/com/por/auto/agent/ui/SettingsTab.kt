@@ -1,14 +1,10 @@
 package com.por.auto.agent.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,18 +13,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,11 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.sp
 import com.por.auto.agent.MainUiState
 import com.por.auto.agent.ai.AiProvider
 
@@ -58,7 +55,6 @@ fun SettingsTab(
     onSaveAi: (AiProvider, String, String, String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    var showJson by remember { mutableStateOf(false) }
     var provider by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiConfig.provider) }
     var baseUrl by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiConfig.baseUrl) }
     var apiKey by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiKey) }
@@ -84,7 +80,6 @@ fun SettingsTab(
                     }
                 },
             )
-            divider()
             divider()
             SettingRow(
                 title = "通知",
@@ -143,25 +138,28 @@ fun SettingsTab(
             )
             divider()
 
-            Text("服务商", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                AiProvider.entries.forEach { option ->
-                    ChoicePill(
-                        label = option.label,
-                        selected = provider == option,
-                        onClick = {
-                            provider = option
-                            if (baseUrl.isBlank() && option.defaultBaseUrl.isNotBlank()) {
-                                baseUrl = option.defaultBaseUrl
-                            }
-                        },
-                    )
-                }
-            }
+            ProviderSelect(
+                provider = provider,
+                onProvider = { option ->
+                    provider = option
+                    if (baseUrl.isBlank() && option.defaultBaseUrl.isNotBlank()) {
+                        baseUrl = option.defaultBaseUrl
+                    }
+                    // 换协议或地址后旧 Key 不能继续沿用，清掉让用户重填。
+                    if (!state.aiConfig.sameEndpoint(option, baseUrl) && apiKey == state.aiKey) {
+                        apiKey = ""
+                    }
+                },
+            )
 
             OutlinedTextField(
                 value = baseUrl,
-                onValueChange = { baseUrl = it },
+                onValueChange = { updated ->
+                    baseUrl = updated
+                    if (!state.aiConfig.sameEndpoint(provider, updated) && apiKey == state.aiKey) {
+                        apiKey = ""
+                    }
+                },
                 singleLine = true,
                 label = { Text("Base URL") },
                 placeholder = {
@@ -194,30 +192,12 @@ fun SettingsTab(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                singleLine = true,
-                label = { Text("模型") },
-                modifier = Modifier.fillMaxWidth(),
+            ModelSelect(
+                model = model,
+                options = state.aiModels,
+                enabled = !state.aiBusy,
+                onModel = { model = it },
             )
-
-            if (state.aiModels.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(Space.sm),
-                ) {
-                    state.aiModels.forEach { option ->
-                        ChoicePill(
-                            label = option,
-                            selected = model == option,
-                            onClick = { model = option },
-                        )
-                    }
-                }
-            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                 CompactButton(
@@ -298,20 +278,78 @@ fun SettingsTab(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProviderSelect(provider: AiProvider, onProvider: (AiProvider) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = provider.label,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("服务商") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AiProvider.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        onProvider(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSelect(
+    model: String,
+    options: List<String>,
+    enabled: Boolean,
+    onModel: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // 已保存的模型即使这次没拉取也要能显示出来。
+    val items = (listOf(model) + options).filter { it.isNotBlank() }.distinct()
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled && items.isNotEmpty()) expanded = it },
+    ) {
+        OutlinedTextField(
+            value = model,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            enabled = enabled,
+            label = { Text("模型") },
+            placeholder = { Text(if (items.isEmpty()) "先点「获取模型」" else "选择模型") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            items.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onModel(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
 private fun appVersion(context: Context): String = runCatching {
     context.packageManager.getPackageInfo(context.packageName, 0).versionName
 }.getOrNull() ?: "未知"
-
-private fun copy(context: Context, text: String) {
-    val clipboard = context.getSystemService(ClipboardManager::class.java)
-    clipboard?.setPrimaryClip(ClipData.newPlainText("PorAuto dump", text))
-    Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-}
-
-private fun share(context: Context, text: String) {
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, text)
-    }
-    context.startActivity(Intent.createChooser(intent, "分享节点 JSON"))
-}

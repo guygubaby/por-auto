@@ -12,6 +12,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.por.auto.agent.a11y.AgentAccessibilityService
+import com.por.auto.agent.assistant.AgentSession
+import com.por.auto.agent.task.TaskKind
+import com.por.auto.agent.task.TaskStore
 import com.por.auto.agent.update.RunUploads
 import com.por.auto.agent.wecom.RunMeta
 import com.por.auto.agent.wecom.RunStore
@@ -88,6 +91,25 @@ class BroadcastService : Service() {
         val service = AgentAccessibilityService.instance
             ?: return@withContext skip(store, schedule, "无障碍服务未开启，跳过本次")
 
+        val task = schedule.taskId?.let { TaskStore(this@BroadcastService).find(it) }
+        if (schedule.taskId != null && task == null) {
+            return@withContext skip(store, schedule, "关联的任务已删除")
+        }
+        if (task?.kind == TaskKind.Agent) {
+            val error = AgentSession.start(application, task.prompt)
+            store.update(schedule.id) {
+                it.copy(
+                    lastRunAtMs = System.currentTimeMillis(),
+                    lastStatus = if (error == null) "started" else "failed",
+                    lastError = error,
+                )
+            }
+            notifyResult("定时 ${schedule.timeLabel}", error ?: "已交给 AI 助手执行")
+            return@withContext
+        }
+
+        val text = task?.message?.takeIf { it.isNotBlank() } ?: schedule.text
+        val scope = task?.scope ?: schedule.scope
         val startedAt = System.currentTimeMillis()
         val lines = mutableListOf<String>()
         service.showRunStatus("定时发送中…")
@@ -97,14 +119,14 @@ class BroadcastService : Service() {
             updateNotification("${schedule.timeLabel} ${schedule.text}", line)
         }
         val result = runCatching {
-            runner.run(schedule.text, schedule.scope, dryRun = false)
+            runner.run(text, scope, dryRun = false)
         }.getOrElse {
             if (it is CancellationException) throw it
             BroadcastResult(
                 dryRun = false,
                 results = listOf(
                     RecipientResult(
-                        "—", schedule.scope, "failed", it.message ?: it.javaClass.simpleName,
+                        "—", scope, "failed", it.message ?: it.javaClass.simpleName,
                     ),
                 ),
                 error = it.message ?: it.javaClass.simpleName,
@@ -113,8 +135,8 @@ class BroadcastService : Service() {
         val meta = RunMeta(
             kind = "schedule",
             startedAt = startedAt,
-            scope = schedule.scope,
-            text = schedule.text,
+            scope = scope,
+            text = text,
             log = lines.toList(),
             device = RunMeta.device(this@BroadcastService),
         )

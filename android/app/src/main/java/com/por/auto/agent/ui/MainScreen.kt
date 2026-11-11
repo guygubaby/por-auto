@@ -2,7 +2,6 @@ package com.por.auto.agent.ui
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
@@ -24,7 +23,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -33,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.por.auto.agent.MainViewModel
+import com.por.auto.agent.task.TaskKind
 
 private data class Tab(
     val label: String,
@@ -42,8 +41,8 @@ private data class Tab(
 
 private val TABS = listOf(
     Tab("助手", "一句话交给 AI 操作手机", Icons.Filled.Face),
-    Tab("群发", "给企业微信会话发送消息", Icons.AutoMirrored.Filled.Send),
-    Tab("定时", "每天按点自动发送", Icons.Filled.DateRange),
+    Tab("任务", "AI 操作与企业微信群发", Icons.AutoMirrored.Filled.Send),
+    Tab("定时", "按时间自动执行任务", Icons.Filled.DateRange),
     Tab("日志", "每次运行的结果", Icons.AutoMirrored.Filled.List),
     Tab("设置", "权限、AI 与调试", Icons.Filled.Settings),
 )
@@ -92,19 +91,25 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
                         state = state,
                         onStart = viewModel::startAgent,
                         onStop = viewModel::stopAgent,
+                        onNewSession = viewModel::newAgentSession,
                         onOpenAccessibility = {
                             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },
                     )
-                    1 -> BroadcastTab(
+                    1 -> TasksTab(
                         state = state,
-                        onRun = viewModel::runBroadcast,
-                        onResume = viewModel::resumeBroadcast,
-                        onOpenAccessibility = {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        onAdd = viewModel::addTask,
+                        onTrial = { task ->
+                            viewModel.trialTask(task)
+                            // AI 任务的执行过程在助手里，跟过去看。
+                            if (task.kind == TaskKind.Agent &&
+                                state.aiConfig.ready && state.accessibilityEnabled
+                            ) {
+                                tab = 0
+                            }
                         },
-                        onAiGenerate = viewModel::aiGenerate,
-                        onConsumeAiDraft = viewModel::consumeAiDraft,
+                        onSend = viewModel::sendTask,
+                        onDelete = viewModel::deleteTask,
                     )
                     2 -> ScheduleTab(
                         state = state,

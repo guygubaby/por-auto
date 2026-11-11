@@ -171,7 +171,8 @@ class AiClient {
                 "{\"action\":\"recents\"} 打开最近任务\n" +
                 "{\"action\":\"notifications\"} 拉下通知栏\n" +
                 "{\"action\":\"scroll\",\"direction\":\"down\"} 滚动列表（up / down）\n" +
-                "{\"action\":\"swipe\",\"direction\":\"up\"} 整屏滑动（up / down / left / right）\n" +
+                "{\"action\":\"swipe\",\"direction\":\"right\",\"index\":16} 滑动 / 拖动；带 index 时从该控件中心开始，" +
+                "滑块、轮播、列表都用它（up / down / left / right）\n" +
                 "{\"action\":\"wait\",\"ms\":1000} 等待页面加载\n" +
                 "{\"action\":\"open\",\"app\":\"微信\"} 打开应用，写应用名或包名都行\n" +
                 "{\"action\":\"done\",\"summary\":\"结果\"} 目标完成\n" +

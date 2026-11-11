@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
@@ -63,10 +64,7 @@ class AgentRunner(
 
             val action = askModel(goal, snapshot, history, feedback)
             when (action) {
-                is AgentAction.Done -> {
-                    log("完成：${action.summary}")
-                    return action.summary
-                }
+                is AgentAction.Done -> return action.summary
                 is AgentAction.Stop -> throw AgentException(action.reason)
                 else -> Unit
             }
@@ -80,8 +78,21 @@ class AgentRunner(
 
             AgentGuard.blocked(targetName(snapshot, action), goal)?.let { throw AgentException(it) }
             step++
+
+            // 模型思考的这几秒里界面可能已经变了，旧坐标点下去就会点偏。
+            if (usesSnapshot(action)) {
+                val fresh = ScreenReader.read(service)
+                if (fresh.hash != snapshot.hash) {
+                    log("$step. $label（界面已变化，未执行）")
+                    feedback = "界面在你思考的时候变了，刚才的坐标已经不准。按新的屏幕重新决定下一步。"
+                    history += "$label → 界面已变化，未执行"
+                    delay(300)
+                    continue
+                }
+            }
             log("$step. $label")
 
+            val eventsBefore = service.contentEventCount
             val failure = runCatching { perform(snapshot, action) }.exceptionOrNull()
             if (failure != null) {
                 if (failure is CancellationException) throw failure
@@ -102,14 +113,16 @@ class AgentRunner(
 
             delay(action.delayAfter())
             val after = ScreenReader.read(service)
-            if (after.hash != snapshot.hash) {
+            if (after.hash != snapshot.hash || service.contentEventCount != eventsBefore) {
                 guard.changed()
                 feedback = null
                 continue
             }
             // 动画和加载会误判，多等一会儿重读一次才算「没变化」。
             delay(1_200)
-            if (ScreenReader.read(service).hash != snapshot.hash) {
+            if (ScreenReader.read(service).hash != snapshot.hash ||
+                service.contentEventCount != eventsBefore
+            ) {
                 guard.changed()
                 feedback = null
                 continue
@@ -161,13 +174,27 @@ class AgentRunner(
         if (correction.isNotBlank()) append("\n纠正：").append(correction).append('\n')
     }
 
-    /** 密码框里的内容不写进界面日志和执行记录。 */
-    private fun label(snapshot: ScreenSnapshot, action: AgentAction): String =
+    /** 密码框里的内容不写进界面日志和执行记录；点击类动作带上目标名字，方便核对有没有点对。 */
+    private fun label(snapshot: ScreenSnapshot, action: AgentAction): String {
         if (action is AgentAction.Input && secretInput(snapshot, action.index)) {
-            "输入密码（已隐藏）"
-        } else {
-            action.label()
+            return "输入密码（已隐藏）"
         }
+        val target = targetName(snapshot, action)
+        return when {
+            target.isBlank() -> action.label()
+            action is AgentAction.Tap -> "点击 [${action.index}]「$target」"
+            action is AgentAction.LongPress -> "长按 [${action.index}]「$target」"
+            action is AgentAction.Swipe -> action.label() + "「$target」"
+            else -> action.label()
+        }
+    }
+
+    private fun usesSnapshot(action: AgentAction): Boolean = when (action) {
+        is AgentAction.Tap, is AgentAction.LongPress -> true
+        is AgentAction.Input -> action.index != null
+        is AgentAction.Swipe -> action.index != null
+        else -> false
+    }
 
     private fun secretInput(snapshot: ScreenSnapshot, index: Int?): Boolean {
         if (index != null) return snapshot.elements.getOrNull(index - 1)?.secret == true
@@ -179,6 +206,7 @@ class AgentRunner(
         val index = when (action) {
             is AgentAction.Tap -> action.index
             is AgentAction.LongPress -> action.index
+            is AgentAction.Swipe -> action.index ?: return ""
             else -> return ""
         }
         return snapshot.elements.getOrNull(index - 1)?.name.orEmpty()
@@ -216,9 +244,17 @@ class AgentRunner(
                 throw AgentException("当前没有可以按回车的输入框")
             }
             is AgentAction.Scroll -> {
-                if (!scroll(action.forward)) throw AgentException("当前页面不能滚动，可以改用 swipe")
+                // 没有可滚动节点时用整屏滑动兜底，别让一步失败卡住整条路。
+                if (!scroll(action.forward) &&
+                    !swipe(if (action.forward) AgentAction.Direction.Up else AgentAction.Direction.Down)
+                ) {
+                    throw AgentException("当前页面不能滚动，也没有滑动成功")
+                }
             }
-            is AgentAction.Swipe -> if (!swipe(action.direction)) throw AgentException("滑动没有完成")
+            is AgentAction.Swipe -> {
+                val element = action.index?.let { clickable(snapshot, element(snapshot, it)) }
+                if (!swipe(action.direction, element?.boundsPx)) throw AgentException("滑动没有完成")
+            }
             is AgentAction.Open -> if (!open(action.app)) {
                 throw AgentException("打不开 ${action.app}")
             }
@@ -237,10 +273,49 @@ class AgentRunner(
     }
 
     private suspend fun tap(element: UiElement) {
+        // 能拿到节点就发 ACTION_CLICK，比按坐标点更准；拿不到再用坐标手势兜底。
+        val node = findNode(element)
+        if (node != null && clickNode(node)) return
         val bounds = element.boundsPx
         if (!click((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)) {
             throw AgentException("点击没有完成")
         }
+    }
+
+    /** 按控件类型和屏幕位置找回当前窗口里的节点。 */
+    private fun findNode(element: UiElement): AccessibilityNodeInfo? {
+        val root = service.rootInActiveWindow ?: return null
+        return findNode(root, element, 0)
+    }
+
+    private fun findNode(node: AccessibilityNodeInfo, element: UiElement, depth: Int): AccessibilityNodeInfo? {
+        if (depth > MAX_DEPTH) return null
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        val bounds = element.boundsPx
+        val sameBounds = rect.left == bounds[0] && rect.top == bounds[1] &&
+            rect.right == bounds[2] && rect.bottom == bounds[3]
+        if (sameBounds && node.className?.toString() == element.role) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            // 不回收：返回的节点可能就是这个子节点，回收后再点会报 not sealed。
+            findNode(child, element, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /** 文字节点自己不可点，往上找最近的可点击祖先。 */
+    private fun clickNode(node: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (current != null && depth < 8) {
+            val clicked = current.isClickable &&
+                runCatching { current.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)
+            if (clicked) return true
+            current = current.parent
+            depth++
+        }
+        return false
     }
 
     private suspend fun click(x: Int, y: Int): Boolean =
@@ -249,17 +324,27 @@ class AgentRunner(
     private suspend fun longPress(x: Int, y: Int): Boolean =
         gesture(x.toFloat(), y.toFloat(), x.toFloat(), y.toFloat(), 650)
 
-    private suspend fun swipe(direction: AgentAction.Direction): Boolean {
+    private suspend fun swipe(direction: AgentAction.Direction, bounds: List<Int>? = null): Boolean {
         val metrics = service.resources.displayMetrics
         val w = metrics.widthPixels.toFloat()
         val h = metrics.heightPixels.toFloat()
-        val (sx, sy, ex, ey) = when (direction) {
-            AgentAction.Direction.Up -> listOf(w / 2, h * 0.72f, w / 2, h * 0.28f)
-            AgentAction.Direction.Down -> listOf(w / 2, h * 0.28f, w / 2, h * 0.72f)
-            AgentAction.Direction.Left -> listOf(w * 0.82f, h / 2, w * 0.18f, h / 2)
-            AgentAction.Direction.Right -> listOf(w * 0.18f, h / 2, w * 0.82f, h / 2)
+        val sx = bounds?.let { (it[0] + it[2]) / 2f } ?: (w / 2)
+        val sy = bounds?.let { (it[1] + it[3]) / 2f } ?: (h / 2)
+        val dx = w * 0.35f
+        val dy = h * 0.35f
+        val (ex, ey) = when (direction) {
+            AgentAction.Direction.Up -> sx to (sy - dy)
+            AgentAction.Direction.Down -> sx to (sy + dy)
+            AgentAction.Direction.Left -> (sx - dx) to sy
+            AgentAction.Direction.Right -> (sx + dx) to sy
         }
-        return gesture(sx, sy, ex, ey, 300)
+        return gesture(
+            sx.coerceIn(0f, w),
+            sy.coerceIn(0f, h),
+            ex.coerceIn(0f, w),
+            ey.coerceIn(0f, h),
+            300,
+        )
     }
 
     private suspend fun gesture(

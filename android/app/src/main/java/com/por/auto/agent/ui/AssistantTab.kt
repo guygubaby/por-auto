@@ -28,12 +28,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.por.auto.agent.AgentTurn
 import com.por.auto.agent.MainUiState
+import com.por.auto.agent.assistant.AgentTurn
 
 private val EXAMPLES = listOf(
     "打开设置，把屏幕亮度调到最高",
-    "打开微信，给文件传输助手发一条「测试」",
+    "打开计算器，算一下 128×64",
     "打开美团，搜附近的咖啡店",
     "打开企业微信，看看今天有哪些群消息",
 )
@@ -43,6 +43,7 @@ fun AssistantTab(
     state: MainUiState,
     onStart: (String) -> Unit,
     onStop: () -> Unit,
+    onNewSession: () -> Unit,
     onOpenAccessibility: () -> Unit,
 ) {
     var goal by rememberSaveable { mutableStateOf("") }
@@ -106,10 +107,18 @@ fun AssistantTab(
                     .padding(start = Space.lg, end = Space.lg, top = Space.sm, bottom = Space.md),
                 verticalArrangement = Arrangement.spacedBy(Space.sm),
             ) {
+                if (state.agentTurns.isNotEmpty() && !state.agentRunning) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextAction("新会话", onNewSession)
+                    }
+                }
                 OutlinedTextField(
                     value = goal,
                     onValueChange = { goal = it },
-                    placeholder = { Text("例如：打开微信，给文件传输助手发一条「测试」") },
+                    placeholder = { Text("例如：打开设置，把屏幕亮度调到最高") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 72.dp),

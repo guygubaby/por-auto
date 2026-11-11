@@ -33,6 +33,10 @@ class AssistantProtocolTest {
             AgentAction.Swipe(AgentAction.Direction.Left),
             parse("""{"action":"swipe","direction":"left"}"""),
         )
+        assertEquals(
+            AgentAction.Swipe(AgentAction.Direction.Right, 16),
+            parse("""{"action":"swipe","direction":"right","index":16}"""),
+        )
         assertEquals(AgentAction.Wait(10_000), parse("""{"action":"wait","ms":99999}"""))
         assertEquals(AgentAction.Open("微信"), parse("""{"action":"open","app":"微信"}"""))
         assertEquals(

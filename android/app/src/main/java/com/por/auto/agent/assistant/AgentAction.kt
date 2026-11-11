@@ -14,7 +14,8 @@ sealed interface AgentAction {
     data object Notifications : AgentAction
     data object Enter : AgentAction
     data class Scroll(val forward: Boolean) : AgentAction
-    data class Swipe(val direction: Direction) : AgentAction
+    /** index 非空时从该控件中心开始拖，滑块、轮播和列表都用它。 */
+    data class Swipe(val direction: Direction, val index: Int? = null) : AgentAction
     data class Wait(val ms: Long) : AgentAction
     data class Open(val app: String) : AgentAction
     data class Done(val summary: String) : AgentAction
@@ -44,7 +45,7 @@ sealed interface AgentAction {
         Notifications -> "打开通知栏"
         Enter -> "按下回车"
         is Scroll -> if (forward) "向下滚动" else "向上滚动"
-        is Swipe -> "向${direction.label}滑动"
+        is Swipe -> "向${direction.label}滑动" + (index?.let { " [$it]" } ?: "")
         is Wait -> "等待 ${ms}ms"
         is Open -> "打开 $app"
         is Done -> "完成：$summary"
@@ -73,7 +74,10 @@ object AgentActionParser {
             "notifications" -> AgentAction.Notifications
             "enter" -> AgentAction.Enter
             "scroll" -> AgentAction.Scroll(forward = json.optString("direction") != "up")
-            "swipe" -> AgentAction.Swipe(AgentAction.Direction.of(json.optString("direction")))
+            "swipe" -> AgentAction.Swipe(
+                direction = AgentAction.Direction.of(json.optString("direction")),
+                index = json.optInt("index", 0).takeIf { it > 0 },
+            )
             "wait" -> AgentAction.Wait(json.optLong("ms", 800L).coerceIn(0L, 10_000L))
             "open" -> AgentAction.Open(
                 json.optString("app").trim()

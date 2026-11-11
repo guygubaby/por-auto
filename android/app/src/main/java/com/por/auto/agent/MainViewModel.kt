@@ -12,12 +12,17 @@ import com.por.auto.agent.ai.AiClient
 import com.por.auto.agent.ai.AiConfig
 import com.por.auto.agent.ai.AiConfigStore
 import com.por.auto.agent.ai.AiProvider
-import com.por.auto.agent.assistant.AgentRunner
+import com.por.auto.agent.assistant.AgentService
+import com.por.auto.agent.assistant.AgentSession
+import com.por.auto.agent.assistant.AgentTurn
 import com.por.auto.agent.schedule.AlarmScheduler
 import com.por.auto.agent.schedule.BroadcastService
 import com.por.auto.agent.schedule.RepeatKind
 import com.por.auto.agent.schedule.Schedule
 import com.por.auto.agent.schedule.ScheduleStore
+import com.por.auto.agent.task.Task
+import com.por.auto.agent.task.TaskKind
+import com.por.auto.agent.task.TaskStore
 import com.por.auto.agent.wecom.BroadcastResult
 import com.por.auto.agent.wecom.RecipientResult
 import com.por.auto.agent.wecom.RunRecord
@@ -33,7 +38,6 @@ import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.WecomScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,15 +55,6 @@ data class ResumeJob(
     val scope: WecomScope,
     val dryRun: Boolean,
     val remaining: List<String>,
-)
-
-/** 助手的一轮对话：一句目标、执行过的步骤和最后结果。 */
-data class AgentTurn(
-    val goal: String,
-    val steps: List<String> = emptyList(),
-    val result: String? = null,
-    val running: Boolean = false,
-    val failed: Boolean = false,
 )
 
 /** 更新检查的状态：release 有值表示服务端有更新，file 有值表示已下载完。 */
@@ -93,6 +88,7 @@ data class MainUiState(
     val aiDraftScope: WecomScope? = null,
     val agentRunning: Boolean = false,
     val agentTurns: List<AgentTurn> = emptyList(),
+    val tasks: List<Task> = emptyList(),
     val update: UpdateState = UpdateState(),
     val notificationsEnabled: Boolean = true,
     val theme: ThemeMode = ThemeMode.System,
@@ -108,6 +104,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<MainUiState> = _state.asStateFlow()
 
     private var retriedUploads = false
+    /** 正在跑的任务；群发结束后把结果写回任务。 */
+    private var activeTaskId: String? = null
+
+    init {
+        viewModelScope.launch {
+            AgentSession.turns.collect { turns -> _state.update { it.copy(agentTurns = turns) } }
+        }
+        viewModelScope.launch {
+            AgentSession.running.collect { running -> _state.update { it.copy(agentRunning = running) } }
+        }
+    }
 
     fun refresh() {
         val current = _state.value.theme
@@ -122,6 +129,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val lastRun = RunStore(app).latest()
                 val schedules = ScheduleStore(app).all()
+                val tasks = TaskStore(app).all()
                 val runs = RunStore(app).history()
                 val aiStore = AiConfigStore(app)
                 val aiConfig = aiStore.load()
@@ -132,6 +140,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         accessibilityEnabled = AgentAccessibilityService.isRunning,
                         p1Results = current.p1Results.ifEmpty { lastRun?.results.orEmpty() },
                         schedules = schedules,
+                        tasks = tasks,
                         exactAlarmAllowed = AlarmScheduler(app).canScheduleExact(),
                         runs = runs,
                         aiConfig = aiConfig,
@@ -165,6 +174,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val startedAt = System.currentTimeMillis()
         service.showRunStatus(if (dryRun) "正在试运行…" else "正在发送…")
+        // 群发会切到企微，挂个前台服务，别让系统在后台把进程回收。
+        val keepAliveApp = getApplication<Application>()
+        AgentService.start(keepAliveApp, "群发任务", if (dryRun) "正在试运行…" else "正在发送…")
         viewModelScope.launch(Dispatchers.IO) {
             val runner = WecomBroadcastRunner(service) { line ->
                 service.updateRunStatus(line)
@@ -221,6 +233,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             saved?.let { file -> RunUploads.enqueue(file) }
+            activeTaskId?.let { taskId ->
+                activeTaskId = null
+                val status = when {
+                    dryRun && result.error == null && result.rehearsed -> "rehearsed"
+                    !dryRun && result.error == null -> "sent"
+                    else -> "failed"
+                }
+                runCatching {
+                    TaskStore(app).update(taskId) {
+                        it.copy(
+                            lastRunAt = System.currentTimeMillis(),
+                            lastStatus = status,
+                            lastError = result.error,
+                        )
+                    }
+                }
+                refreshTasks()
+            }
             service.hideRunStatus()
             runCatching {
                 RunNotifier(app).show(
@@ -229,6 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             bringAppForward()
+            AgentService.stop(app)
         }
     }
 
@@ -250,90 +281,93 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var agentJob: Job? = null
-
-    /** 通用助手：把一句话交给模型，按屏幕一步步操作。随时可停。 */
+    /** 通用助手：把一句话交给模型，按屏幕一步步操作。跑在前台服务里，随时可停。 */
     fun startAgent(goal: String) {
         if (_state.value.agentRunning) return
-        val service = AgentAccessibilityService.instance
-        if (service == null) {
-            _state.update { it.copy(message = "无障碍服务未开启") }
-            return
-        }
-        if (goal.isBlank()) {
-            _state.update { it.copy(message = "先说一句要做什么") }
-            return
-        }
-        if (!_state.value.aiConfig.ready) {
-            _state.update { it.copy(message = "请先在设置里配置 AI") }
-            return
-        }
-        val text = goal.trim()
-        // 对话只追加，所以这一轮的下标在整个执行期间不变。
-        val turnIndex = _state.value.agentTurns.size
-        _state.update {
-            it.copy(
-                agentRunning = true,
-                agentTurns = it.agentTurns + AgentTurn(goal = text, running = true),
-                message = null,
-            )
-        }
-        service.showRunStatus("助手执行中…")
-        agentJob = viewModelScope.launch(Dispatchers.IO) {
-            val store = AiConfigStore(getApplication())
-            val config = store.load()
-            val runner = AgentRunner(
-                service = service,
-                client = AiClient(),
-                config = config,
-                key = store.keyFor(config.provider, config.baseUrl, ""),
-                log = { line ->
-                    service.updateRunStatus(line)
-                    updateTurn(turnIndex) { current ->
-                        current.copy(steps = (current.steps + line).takeLast(60))
-                    }
-                },
-            )
-            val result = runCatching { runner.run(text) }
-            service.hideRunStatus()
-            updateTurn(turnIndex) { current ->
-                current.copy(
-                    running = false,
-                    failed = result.isFailure,
-                    result = result.fold(
-                        onSuccess = { "完成：$it" },
-                        onFailure = { error ->
-                            if (error is CancellationException) "已停止" else "停止：${error.message}"
-                        },
-                    ),
-                )
-            }
-            _state.update { it.copy(agentRunning = false) }
-        }
+        val error = AgentSession.start(getApplication(), goal)
+        if (error != null) _state.update { it.copy(message = error) }
     }
 
     fun stopAgent() {
-        agentJob?.cancel()
-        agentJob = null
-        AgentAccessibilityService.instance?.hideRunStatus()
-        _state.update { state ->
-            state.copy(
-                agentRunning = false,
-                agentTurns = state.agentTurns.map { turn ->
-                    if (turn.running) turn.copy(running = false, failed = true, result = "已停止") else turn
-                },
-            )
+        AgentSession.stop(getApplication())
+    }
+
+    fun newAgentSession() {
+        AgentSession.clear()
+    }
+
+    fun addTask(title: String, kind: TaskKind, prompt: String, message: String, scope: WecomScope) {
+        val error = when (kind) {
+            TaskKind.Agent -> if (prompt.isBlank()) "任务目标不能为空" else null
+            TaskKind.Wecom -> runCatching { WecomBroadcastRunner.validateText(message) }
+                .exceptionOrNull()?.message
+        }
+        if (error != null) {
+            _state.update { it.copy(message = error) }
+            return
+        }
+        val task = Task.create(title, kind, prompt = prompt, message = message, scope = scope)
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            TaskStore(app).upsert(task)
+            refreshTasks()
+            _state.update { it.copy(message = "已添加任务「${task.title}」") }
         }
     }
 
-    /** 对话只追加，按下标改才不会在取消后串到新的一轮。 */
-    private fun updateTurn(index: Int, change: (AgentTurn) -> AgentTurn) {
-        _state.update { state ->
-            val current = state.agentTurns.getOrNull(index) ?: return@update state
-            state.copy(
-                agentTurns = state.agentTurns.toMutableList().also { it[index] = change(current) },
-            )
+    fun deleteTask(id: String) {
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            TaskStore(app).remove(id)
+            refreshTasks()
         }
+    }
+
+    /** 试运行：AI 任务直接交给助手跑一次；群发任务只写草稿再清理。 */
+    fun trialTask(task: Task) {
+        when (task.kind) {
+            TaskKind.Agent -> {
+                val error = AgentSession.start(getApplication(), task.prompt)
+                if (error != null) {
+                    _state.update { it.copy(message = error) }
+                } else {
+                    markTask(task.id, "started", null)
+                }
+            }
+            TaskKind.Wecom -> {
+                activeTaskId = task.id
+                runBroadcast(dryRun = true, text = task.message, scope = task.scope)
+            }
+        }
+    }
+
+    /** 群发任务必须先试运行成功，才允许正式发送。 */
+    fun sendTask(task: Task) {
+        if (task.kind == TaskKind.Agent) {
+            trialTask(task)
+            return
+        }
+        if (task.lastStatus != "rehearsed") {
+            _state.update { it.copy(message = "先试运行成功，再正式发送") }
+            return
+        }
+        activeTaskId = task.id
+        runBroadcast(dryRun = false, text = task.message, scope = task.scope)
+    }
+
+    private fun markTask(id: String, status: String, error: String?) {
+        val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            TaskStore(app).update(id) {
+                it.copy(lastRunAt = System.currentTimeMillis(), lastStatus = status, lastError = error)
+            }
+            refreshTasks()
+        }
+    }
+
+    private fun refreshTasks() {
+        val tasks = TaskStore(getApplication()).all()
+        _state.update { it.copy(tasks = tasks) }
     }
 
     /** 只补发上次没成功的会话，正文和范围沿用原任务。 */
@@ -342,19 +376,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         runBroadcast(job.dryRun, job.text, job.scope, job.remaining)
     }
 
-    fun addSchedule(
-        text: String,
-        repeat: RepeatKind,
-        hour: Int,
-        minute: Int,
-        intervalMinutes: Int,
-        scope: WecomScope,
-    ) {
-        val validation = runCatching { WecomBroadcastRunner.validateText(text) }
-        if (validation.isFailure) {
-            _state.update { it.copy(message = validation.exceptionOrNull()?.message) }
-            return
-        }
+    fun addSchedule(taskId: String, repeat: RepeatKind, hour: Int, minute: Int, intervalMinutes: Int) {
         if (hour !in 0..23 || minute !in 0..59) {
             _state.update { it.copy(message = "时间无效，小时 0-23、分钟 0-59") }
             return
@@ -363,32 +385,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = "间隔应在 5 分钟到 24 小时之间") }
             return
         }
+        val app = getApplication<Application>()
         changeSchedules { store, scheduler ->
-            val schedule = Schedule.create(text, hour, minute, scope, repeat, intervalMinutes)
+            val task = TaskStore(app).find(taskId)
+            if (task == null) {
+                _state.update { it.copy(message = "任务不存在，先去任务页添加") }
+                return@changeSchedules
+            }
+            val schedule = Schedule.create(
+                text = task.title,
+                hour = hour,
+                minute = minute,
+                scope = task.scope,
+                repeat = repeat,
+                intervalMinutes = intervalMinutes,
+                taskId = task.id,
+            )
             store.upsert(schedule)
             scheduler.schedule(schedule)
         }
     }
 
-    fun updateSchedule(
-        id: String,
-        text: String,
-        repeat: RepeatKind,
-        hour: Int,
-        minute: Int,
-        intervalMinutes: Int,
-        scope: WecomScope,
-    ) {
-        val validation = runCatching { WecomBroadcastRunner.validateText(text) }
-        if (validation.isFailure) {
-            _state.update { it.copy(message = validation.exceptionOrNull()?.message) }
-            return
-        }
+    fun updateSchedule(id: String, repeat: RepeatKind, hour: Int, minute: Int, intervalMinutes: Int) {
         changeSchedules { store, scheduler ->
             val updated = store.update(id) { current ->
                 val draft = current.copy(
-                    text = text,
-                    scope = scope,
                     repeat = repeat,
                     hour = hour,
                     minute = minute,
@@ -470,7 +491,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sessionId = AiConfigStore(getApplication()).sessionId(),
             )
             val result = runCatching {
-                val key = AiConfigStore(getApplication()).keyFor(provider, baseUrl, apiKey)
+                val supplied = keyForEndpoint(provider, baseUrl, apiKey)
+                val key = AiConfigStore(getApplication()).keyFor(provider, baseUrl, supplied)
                 AiClient().fetchModels(config, key)
             }.onFailure { if (it is CancellationException) throw it }
             _state.update {
@@ -496,9 +518,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val store = AiConfigStore(getApplication())
             val result = runCatching {
-                store.save(AiConfig(provider, baseUrl.trim(), model, hasKey = true), apiKey)
+                val supplied = keyForEndpoint(provider, baseUrl, apiKey)
+                store.save(AiConfig(provider, baseUrl.trim(), model, hasKey = true), supplied)
                 val config = store.load()
-                val key = apiKey.ifBlank {
+                val key = supplied.ifBlank {
                     runCatching { store.keyFor(provider, baseUrl, "") }.getOrDefault("")
                 }
                 _state.update { it.copy(aiConfig = config, aiKey = key) }
@@ -518,6 +541,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                 )
             }
+        }
+    }
+
+    /** 换协议或 Base URL 后必须重新输入 Key，不能把旧 Key 悄悄发给新地址。 */
+    private fun keyForEndpoint(provider: AiProvider, baseUrl: String, typed: String): String {
+        val current = _state.value
+        return if (current.aiConfig.sameEndpoint(provider, baseUrl)) {
+            typed
+        } else {
+            typed.takeIf { it != current.aiKey }.orEmpty()
         }
     }
 

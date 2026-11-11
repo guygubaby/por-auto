@@ -15,12 +15,11 @@ object AiParsing {
         if (trimmed.isEmpty()) throw AiException("Base URL 不能为空")
         val uri = runCatching { URI(trimmed) }.getOrNull()
             ?: throw AiException("Base URL 格式无效")
-        val local = uri.host in setOf("localhost", "127.0.0.1", "10.0.2.2")
         if (uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
             uri.rawQuery != null || uri.rawFragment != null ||
-            (uri.scheme != "https" && !(uri.scheme == "http" && local))
+            (uri.scheme != "https" && uri.scheme != "http")
         ) {
-            throw AiException("Base URL 必须使用 HTTPS，且不能包含账号、查询参数或片段")
+            throw AiException("Base URL 必须是 http(s) 地址，且不能包含账号、查询参数或片段")
         }
         return "$trimmed/$path"
     }

@@ -38,12 +38,14 @@ data class Schedule(
     val lastRunAtMs: Long? = null,
     val lastStatus: String? = null,
     val lastError: String? = null,
+    /** 关联的任务；为空的是旧版直接存正文的企微定时。 */
+    val taskId: String? = null,
 ) {
     init {
         require(id.isNotBlank()) { "任务 ID 不能为空" }
         require(hour in 0..23 && minute in 0..59) { "任务时间无效" }
         require(intervalMinutes in 5..1440) { "间隔应在 5 分钟到 24 小时之间" }
-        WecomBroadcastRunner.validateText(text)
+        if (taskId == null) WecomBroadcastRunner.validateText(text)
     }
 
     val timeLabel: String
@@ -73,6 +75,7 @@ data class Schedule(
         put("lastRunAtMs", lastRunAtMs ?: JSONObject.NULL)
         put("lastStatus", lastStatus ?: JSONObject.NULL)
         put("lastError", lastError ?: JSONObject.NULL)
+        put("taskId", taskId ?: JSONObject.NULL)
     }
 
     companion object {
@@ -89,6 +92,7 @@ data class Schedule(
             lastRunAtMs = json.optLong("lastRunAtMs").takeIf { it > 0 },
             lastStatus = json.optString("lastStatus").takeIf { it.isNotEmpty() && it != "null" },
             lastError = json.optString("lastError").takeIf { it.isNotEmpty() && it != "null" },
+            taskId = json.optString("taskId").takeIf { it.isNotEmpty() && it != "null" },
         )
 
         fun create(
@@ -98,6 +102,7 @@ data class Schedule(
             scope: WecomScope = WecomScope.Groups,
             repeat: RepeatKind = RepeatKind.Daily,
             intervalMinutes: Int = 60,
+            taskId: String? = null,
         ): Schedule {
             val now = System.currentTimeMillis()
             val draft = Schedule(
@@ -110,6 +115,7 @@ data class Schedule(
                 intervalMinutes = intervalMinutes,
                 enabled = true,
                 nextAtMs = now,
+                taskId = taskId,
             )
             return draft.copy(nextAtMs = draft.nextAfter(now))
         }

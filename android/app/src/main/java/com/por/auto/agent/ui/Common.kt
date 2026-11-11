@@ -20,6 +20,14 @@ private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd 
 fun formatTime(epochMs: Long): String =
     Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(TIME_FORMAT)
 
+fun statusLabel(status: String): String = when (status) {
+    "sent" -> "成功"
+    "failed" -> "失败"
+    "skipped" -> "跳过"
+    "started" -> "已开始"
+    else -> status
+}
+
 @Composable
 fun SectionCard(
     title: String,

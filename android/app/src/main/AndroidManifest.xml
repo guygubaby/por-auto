@@ -78,6 +78,15 @@
                 android:value="scheduled_automation" />
         </service>
 
+        <service
+            android:name=".assistant.AgentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="phone_agent" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
