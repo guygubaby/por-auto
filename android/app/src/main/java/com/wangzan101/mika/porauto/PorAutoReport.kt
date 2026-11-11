@@ -127,10 +127,14 @@ object PorAutoReport {
         )
         val payload = payload(report, device()).toString()
         scope.launch {
-            uploads.withLock {
-                if (enabled(context)) runCatching { enqueue(context, payload) }
-                    .onFailure { Log.w(TAG, "could not queue run report", it) }
-            }
+            runCatching {
+                // 先落盘，再等旧记录上传；慢网络不能让新记录只留在内存里。
+                val file = synchronized(this@PorAutoReport) {
+                    if (!enabled(context)) return@launch
+                    enqueue(File(context.filesDir, DIR), payload)
+                }
+                uploads.withLock { upload(context, file) }
+            }.onFailure { Log.w(TAG, "could not report run", it) }
         }
     }
 
@@ -148,20 +152,27 @@ object PorAutoReport {
         }
     }
 
-    private fun enqueue(context: Context, payload: String) {
-        val dir = File(context.filesDir, DIR).apply { mkdirs() }
-        val file = File.createTempFile("run-", ".json", dir)
-        file.writeText(payload)
+    @Synchronized
+    internal fun enqueue(dir: File, payload: String): File {
+        check(dir.mkdirs() || dir.isDirectory)
+        val partial = File.createTempFile("run-", ".tmp", dir)
+        val file = File(dir, partial.name.removeSuffix(".tmp") + ".json")
+        try {
+            partial.writeText(payload)
+            check(partial.renameTo(file))
+        } finally {
+            partial.delete()
+        }
         dir.listFiles { f -> f.name.startsWith("run-") && f.name.endsWith(".json") }
             ?.sortedByDescending { it.lastModified() }
             ?.drop(MAX_PENDING)
             ?.forEach { it.delete() }
-        upload(context, file)
+        return file
     }
 
     private fun upload(context: Context, file: File) {
         val call = synchronized(this) {
-            if (!enabled(context)) return
+            if (!enabled(context) || !file.isFile) return
             val request = Request.Builder()
                 .url(PorAutoBackend.RUNS_URL)
                 .header("x-ingest-key", PorAutoBackend.ingestKey)

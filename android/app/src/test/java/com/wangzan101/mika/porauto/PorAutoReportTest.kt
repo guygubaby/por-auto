@@ -9,8 +9,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 
 class PorAutoReportTest {
+    @get:Rule val temp = TemporaryFolder()
+
+    @Test
+    fun queueIsDurableWithoutUploadingAndRetainsTheNewestFiftyReports() {
+        val first = PorAutoReport.enqueue(temp.root, """{"text":"first"}""")
+        first.setLastModified(1)
+        repeat(49) { index ->
+            PorAutoReport.enqueue(temp.root, """{"text":"$index"}""").setLastModified(index + 2L)
+        }
+        val newest = PorAutoReport.enqueue(temp.root, """{"text":"newest"}""")
+        assertEquals("""{"text":"newest"}""", newest.readText())
+        assertFalse(first.exists())
+        val pending = temp.root.listFiles()!!
+        assertEquals(50, pending.size)
+        assertTrue(pending.all { it.extension == "json" && it.readText().startsWith("{") })
+    }
+
     @Test
     fun redactsCredentialsBeforeQueuingOrUploading() {
         val token = "sk-" + "a".repeat(24)

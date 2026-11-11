@@ -95,7 +95,12 @@ jobs:
         run: |
           set -euo pipefail
           cd android
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --console=plain
+          ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" \
+            -Pkotlin.compiler.execution.strategy=in-process --console=plain
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" \
+            -Pkotlin.compiler.execution.strategy=in-process --console=plain
 
       - name: Verify APK
         id: apk
