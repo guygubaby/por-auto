@@ -26,11 +26,13 @@ export interface RunSummary {
   total: number
   sent: number
   rehearsed: number
+  /** 助手任务执行完的步骤数；群发记录里是 0。 */
+  done: number
   failed: number
   skipped: number
 }
 
-export type ResultStatus = 'sent' | 'failed' | 'skipped' | 'uncertain'
+export type ResultStatus = 'sent' | 'rehearsed' | 'done' | 'failed' | 'skipped' | 'uncertain'
 
 export interface RunResult {
   title: string

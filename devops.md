@@ -1,6 +1,6 @@
 # 部署与发版（devops）
 
-> 最后核对：2026-11-11。当前 APK：`0.4.0` / `versionCode 18`。
+> 最后核对：2026-11-11。当前 APK：`0.5.0` / `versionCode 19`（Mika 底座）。
 > 本文件是部署与发版的入口；Android 细节见 [android/README.md](android/README.md)，后端与数据见 [updates/README.md](updates/README.md)。
 
 ## 1. 资源
@@ -13,7 +13,7 @@
 | R2 桶 | `por-auto-releases` |
 | GitHub | `guygubaby/por-auto`，默认分支 `main` |
 | 管理台 | `admin/`（React SPA，构建到 `admin/dist`） |
-| App | `android/`（单个 APK） |
+| App | `android/`（Mika 底座，单个 APK） |
 
 Cloudflare 账号先用 `pnpm dlx wrangler@latest whoami` 确认，再执行部署或发版。
 
@@ -60,8 +60,8 @@ printf '%s' "$INGEST" | pnpm dlx wrangler@latest secret put INGEST_KEY
 ## 3. APK 发版（推荐：tag 自动）
 
 1. 修改 `android/app/build.gradle.kts`：
-   - `versionCode` 必须比线上大（当前是 18）。
-   - `versionName` 不要带 `v`（当前是 `0.4.0`）。
+   - `versionCode` 必须比线上大（当前是 19）。
+   - `versionName` 不要带 `v`（当前是 `0.5.0`）。
 2. 提交到 `main`。
 3. 打带说明的 tag 并推送：
 
@@ -102,7 +102,7 @@ GitHub Secrets（只记录名字，值不进仓库）：
 ```sh
 cd android
 ANDROID_HOME=$HOME/Library/Android/sdk ./gradlew :app:testDebugUnitTest :app:assembleRelease
-cp app/build/outputs/apk/release/app-release.apk dist/PorAuto-Agent-0.2.6-release.apk
+cp app/build/outputs/apk/release/app-universal-release.apk dist/PorAuto-Agent-0.2.6-release.apk
 $HOME/Library/Android/sdk/build-tools/35.0.0/apksigner verify --print-certs dist/PorAuto-Agent-0.2.6-release.apk
 
 cd ../updates
@@ -143,11 +143,14 @@ cf workers deployments create --worker por-auto-updates --strategy percentage \
 ```
 
 - 站点部署依赖 `updates/wrangler.jsonc` 的 `name`、`assets.directory`、`run_worker_first` 和 `routes`；不要随意改 Worker 名称或自定义域。
-- 锁屏时定时任务会跳过；APK 只做前台无障碍，不建虚拟屏、不需要无线调试。
-- 发送成功只代表界面出现新消息，不代表对方已收到。
+- 手机操作需要先按「手机操作」向导配对一次无线调试（或在电脑上跑 `android/` 里的 `usb-start.sh`）；操作在后台虚拟屏上进行，锁屏或完全退出时任务会停。
+- 沙箱运行时只有 arm64 版本；x86_64 模拟器上 App 可用，但「文件与计算环境」显示不支持。
+- 日志上报默认开启，用户可在 设置 › 高级与其他 › 服务端 关闭；关闭后不再上传运行记录。
+- 发送成功只代表界面出现新消息，不代表对方已收到（微信/企微渠道）。
 
 ## 7. 相关文档
 
-- [android/README.md](android/README.md)：Android 构建、签名、测试和已知限制。
+- [android/README.md](android/README.md)：Mika 底座、构建、签名、测试和已知限制。
+- [Mika 上游](https://github.com/wangzan101/Mika)：Apache-2.0；本仓库的改动与许可说明见 [README.md](README.md)。
 - [updates/README.md](updates/README.md)：Worker 路由、R2 数据和密钥。
 - [README.md](README.md)：项目总览。

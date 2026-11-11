@@ -69,7 +69,7 @@ jobs:
           fi
           [ -x "$SDKMANAGER" ] || { echo "找不到 sdkmanager" >&2; exit 1; }
           yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          "$SDKMANAGER" --sdk_root="$SDK" "platforms;android-36" "build-tools;36.0.0" "platforms;android-35" "build-tools;35.0.0" >/dev/null
 
       - name: Write signing config and ingest key
         env:
@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?ANDROID_HOME is not set}}"
-          APK=android/app/build/outputs/apk/release/app-release.apk
+          APK=android/app/build/outputs/apk/release/app-universal-release.apk
           BADGING=$("$SDK/build-tools/35.0.0/aapt2" dump badging "$APK")
           CODE=$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
           NAME=$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)

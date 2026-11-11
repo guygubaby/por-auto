@@ -93,7 +93,7 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
       {state.status === 'ready' && state.runs.length === 0 && (
         <Card className="mt-6 px-6 py-12 text-center">
           <p className="font-serif text-xl">暂无运行记录</p>
-          <p className="mt-2 text-[13px] text-muted">App 完成一次群发后，运行日志会出现在这里。</p>
+          <p className="mt-2 text-[13px] text-muted">App 完成一次任务后，运行日志会出现在这里。</p>
         </Card>
       )}
 
@@ -138,7 +138,11 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
                       {scopeLabel(run.scope)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <DryRunChip dryRun={run.dryRun} />
+                      {run.kind === 'assistant' ? (
+                        <span className="text-muted">—</span>
+                      ) : (
+                        <DryRunChip dryRun={run.dryRun} />
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <RunCounts run={run} />
@@ -179,7 +183,7 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
                   <span className="text-[12px] tabular-nums text-muted">
                     {formatDateTime(run.startedAt)}
                   </span>
-                  <DryRunChip dryRun={run.dryRun} />
+                  {run.kind === 'assistant' ? null : <DryRunChip dryRun={run.dryRun} />}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
                   <span className="font-medium">{kindLabel(run.kind)}</span>
@@ -202,6 +206,7 @@ function RunsPage({ token, signOut }: { token: string; signOut: () => void }) {
 }
 
 function RunCounts({ run, className = '' }: { run: RunSummary; className?: string }) {
+  const assistant = run.kind === 'assistant'
   return (
     <div
       className={`flex flex-wrap gap-x-3 gap-y-1 text-[12px] tabular-nums text-muted ${className}`}
@@ -209,12 +214,20 @@ function RunCounts({ run, className = '' }: { run: RunSummary; className?: strin
       <span>
         总 <span className="text-ink">{run.total}</span>
       </span>
-      <span>
-        已发 <span className="text-ink">{run.sent}</span>
-      </span>
-      <span>
-        演练 <span className="text-ink">{run.rehearsed}</span>
-      </span>
+      {assistant ? (
+        <span>
+          完成 <span className="text-ink">{run.done ?? 0}</span>
+        </span>
+      ) : (
+        <>
+          <span>
+            已发 <span className="text-ink">{run.sent}</span>
+          </span>
+          <span>
+            演练 <span className="text-ink">{run.rehearsed}</span>
+          </span>
+        </>
+      )}
       <span>
         失败 <span className={run.failed > 0 ? 'text-danger' : 'text-ink'}>{run.failed}</span>
       </span>

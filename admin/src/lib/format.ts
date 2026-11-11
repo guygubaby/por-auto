@@ -19,10 +19,12 @@ const KIND_LABELS: Record<string, string> = {
   broadcast: '群发',
   schedule: '定时',
   agent: '智能体',
+  assistant: '助手',
 }
 
 const SCOPE_LABELS: Record<string, string> = {
   groups: '群聊',
+  phone: '手机',
 }
 
 function labelFor(labels: Record<string, string>, value: string): string {

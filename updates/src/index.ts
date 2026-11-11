@@ -127,6 +127,7 @@ function summarize(run: Record<string, unknown>, id: string) {
     total: results.length,
     sent: count('sent'),
     rehearsed: count('rehearsed'),
+    done: count('done'),
     failed: count('failed'),
     skipped: count('skipped'),
   }

@@ -8,7 +8,7 @@
 |---|---|---|
 | `/` | 管理端 + 下载页（`admin/` 构建产物） | 无（管理操作要令牌） |
 | `/latest`、`/latest.apk` | App 检查更新、下安装包 | 无 |
-| `POST /api/runs` | App 上报一次完整运行日志 | `x-ingest-key` |
+| `POST /api/runs` | App 上报一次运行日志（群发或助手任务） | `x-ingest-key` |
 | `GET /api/runs`、`/api/runs/<id>` | 管理端查看日志 | `Authorization: Bearer <ADMIN_TOKEN>` |
 
 AI 配置只存在 App 本地，由 App 设置页填写和测试，服务端不保存。
@@ -17,6 +17,9 @@ AI 配置只存在 App 本地，由 App 设置页填写和测试，服务端不�
 
 - `latest.json`、`latest.apk`：最新版本
 - `runs/<时间>-<随机>.json`：运行日志（保留全部，管理端取最近 50 条）
+
+助手任务的日志 `kind` 是 `assistant`，`results[]` 里每一步的状态是 `done` / `failed`，
+`log[]` 是带时间的执行步骤；群发日志仍是 `sent` / `rehearsed` / `failed` / `skipped`。
 
 ## 部署
 
@@ -32,15 +35,15 @@ cd ../updates && pnpm dlx wrangler@latest deploy
 推 `v*` tag 会触发 GitHub Actions：构建、签名、校验，并上传 `latest.apk` / `latest.json` 到 R2。
 
 ```sh
-git tag -a v0.2.6 -m "更新说明"
-git push origin v0.2.6
+git tag -a v0.5.0 -m "更新说明"
+git push origin v0.5.0
 ```
 
 版本号要和 `android/app/build.gradle.kts` 里的一致，否则 App 的更新判断会错。本地应急仍可用：
 
 ```sh
 cd updates
-./publish.sh ../android/dist/PorAuto-Agent-0.2.6-release.apk 0.2.6 17 "更新说明"
+./publish.sh ../android/dist/PorAuto-Agent-0.5.0-release.apk 0.5.0 19 "更新说明"
 ```
 
 ## 密钥

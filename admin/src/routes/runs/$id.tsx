@@ -82,6 +82,7 @@ function RunDetailPage({ token, signOut }: { token: string; signOut: () => void 
 }
 
 function RunDetailView({ run, id }: { run: RunDetail; id: string }) {
+  const assistant = run.kind === 'assistant'
   return (
     <div>
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
@@ -93,7 +94,7 @@ function RunDetailView({ run, id }: { run: RunDetail; id: string }) {
             日志 ID：<span className="break-all font-mono">{id}</span>
           </p>
         </div>
-        <DryRunChip dryRun={run.dryRun} />
+        {assistant ? null : <DryRunChip dryRun={run.dryRun} />}
       </div>
 
       {run.error && (
@@ -109,16 +110,27 @@ function RunDetailView({ run, id }: { run: RunDetail; id: string }) {
           <Meta label="设备">
             {run.device?.model || '—'} · Android {run.device?.android || '—'}
           </Meta>
-          <Meta label="App / 企微">
-            {run.device?.appVersion || '—'} / {run.device?.wecomVersion || '—'}
+          <Meta label={assistant ? 'App' : 'App / 企微'}>
+            {run.device?.appVersion || '—'}
+            {assistant ? '' : ` / ${run.device?.wecomVersion || '—'}`}
           </Meta>
           <Meta label="消息内容">{run.text || '—'}</Meta>
         </dl>
 
-        <div className="mt-6 grid grid-cols-5 divide-x divide-line border-t border-line pt-5">
+        <div
+          className={`mt-6 grid divide-x divide-line border-t border-line pt-5 ${
+            assistant ? 'grid-cols-4' : 'grid-cols-5'
+          }`}
+        >
           <Stat label="总计" value={run.total} />
-          <Stat label="已发送" value={run.sent} tone="sent" />
-          <Stat label="已演练" value={run.rehearsed} tone="sent" />
+          {assistant ? (
+            <Stat label="完成" value={run.done ?? 0} tone="sent" />
+          ) : (
+            <>
+              <Stat label="已发送" value={run.sent} tone="sent" />
+              <Stat label="已演练" value={run.rehearsed} tone="sent" />
+            </>
+          )}
           <Stat label="失败" value={run.failed} tone="danger" />
           <Stat label="跳过" value={run.skipped} tone="muted" />
         </div>
@@ -126,11 +138,13 @@ function RunDetailView({ run, id }: { run: RunDetail; id: string }) {
 
       <section className="mt-8">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="font-serif text-lg">发送结果</h2>
-          <span className="text-[12px] tabular-nums text-muted">{run.results.length} 个群</span>
+          <h2 className="font-serif text-lg">{assistant ? '执行步骤' : '发送结果'}</h2>
+          <span className="text-[12px] tabular-nums text-muted">
+            {run.results.length} {assistant ? '步' : '个群'}
+          </span>
         </div>
         {run.results.length === 0 ? (
-          <p className="mt-3 text-[13px] text-muted">没有逐群结果。</p>
+          <p className="mt-3 text-[13px] text-muted">{assistant ? '没有执行步骤。' : '没有逐群结果。'}</p>
         ) : (
           <div className={`${cardClass} mt-3 divide-y divide-line`}>
             {run.results.map((result, index) => (

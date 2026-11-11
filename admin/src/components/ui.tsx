@@ -21,6 +21,7 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
 const STATUS_LABELS: Record<string, string> = {
   sent: '已发送',
   rehearsed: '已演练',
+  done: '完成',
   failed: '失败',
   uncertain: '结果不明',
   skipped: '已跳过',
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_STYLES: Record<string, string> = {
   sent: 'border-sent/30 text-sent',
   rehearsed: 'border-sent/30 text-sent',
+  done: 'border-sent/30 text-sent',
   failed: 'border-danger/30 text-danger',
   uncertain: 'border-danger/30 text-danger',
   skipped: 'border-line text-muted',

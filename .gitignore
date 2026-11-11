@@ -37,3 +37,7 @@ admin/dist/
 # Wrangler / cf CLI 本地缓存
 .wrangler/
 .cloudflare/
+
+# Python 工具缓存
+__pycache__/
+*.py[cod]
