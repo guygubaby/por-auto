@@ -1,5 +1,5 @@
 import ky, { HTTPError } from 'ky'
-import type { AiConfig, ReleaseInfo, RunDetail, RunSummary } from './types'
+import type { AiConfig, Provider, ReleaseInfo, RunDetail, RunSummary } from './types'
 
 /**
  * 同源部署时留空；以后要指向别的域名，只改这一处。
@@ -89,6 +89,51 @@ export async function fetchAiConfig(token: string): Promise<AiConfig | null> {
 export async function saveAiConfig(token: string, config: AiConfig): Promise<void> {
   try {
     await http.put(apiUrl('/api/config'), { headers: bearer(token), json: config })
+  } catch (error) {
+    return fail(error)
+  }
+}
+
+export interface AiProbe {
+  provider: Provider
+  baseUrl: string
+  /** 留空则由服务端沿用已保存配置里的 Key。 */
+  apiKey: string
+  model?: string
+}
+
+export interface AiTestResult {
+  reply: string
+  model: string
+  latencyMs: number
+}
+
+/** 让服务端按当前参数请求 /models，避开浏览器 CORS。 */
+export async function fetchAiModels(token: string, probe: AiProbe): Promise<string[]> {
+  try {
+    const body = await http
+      .post(apiUrl('/api/config/models'), {
+        headers: bearer(token),
+        json: probe,
+        timeout: 25_000,
+      })
+      .json<{ models: string[] }>()
+    return body.models
+  } catch (error) {
+    return fail(error)
+  }
+}
+
+/** 发一次最小聊天请求，验证 Key、地址和模型名真的能用。 */
+export async function testAiConfig(token: string, probe: AiProbe): Promise<AiTestResult> {
+  try {
+    return await http
+      .post(apiUrl('/api/config/test'), {
+        headers: bearer(token),
+        json: probe,
+        timeout: 45_000,
+      })
+      .json<AiTestResult>()
   } catch (error) {
     return fail(error)
   }

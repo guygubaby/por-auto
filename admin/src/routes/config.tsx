@@ -2,8 +2,15 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { AdminGate } from '../components/admin-gate'
-import { Card, RequestError, SecretInput, buttonClass, inputClass } from '../components/ui'
-import { fetchAiConfig, saveAiConfig, savePasscode } from '../lib/api'
+import {
+  Card,
+  RequestError,
+  SecretInput,
+  buttonClass,
+  inputClass,
+  secondaryButtonClass,
+} from '../components/ui'
+import { fetchAiConfig, fetchAiModels, saveAiConfig, savePasscode, testAiConfig } from '../lib/api'
 import type { AiConfig, Provider } from '../lib/types'
 
 export const Route = createFileRoute('/config')({
@@ -39,6 +46,78 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<unknown>(null)
   const [saved, setSaved] = useState(false)
+  const [models, setModels] = useState<string[]>([])
+  const [probeBusy, setProbeBusy] = useState<'models' | 'test' | null>(null)
+  const [probeError, setProbeError] = useState<unknown>(null)
+  const [probeNote, setProbeNote] = useState<string | null>(null)
+  const [testReply, setTestReply] = useState<string | null>(null)
+
+  /** 改任何字段都清掉上一次探测结果，免得旧的“连接成功”骗人。 */
+  function edit(patch: Partial<AiConfig>) {
+    setForm((current) => ({ ...current, ...patch }))
+    if (patch.provider !== undefined || patch.baseUrl !== undefined) setModels([])
+    setProbeError(null)
+    setProbeNote(null)
+    setTestReply(null)
+  }
+
+  async function handleFetchModels() {
+    const baseUrl = form.baseUrl.trim()
+    if (!baseUrl) {
+      setProbeError(new Error('先填 Base URL'))
+      return
+    }
+    setProbeBusy('models')
+    setProbeError(null)
+    setProbeNote(null)
+    setTestReply(null)
+    try {
+      const list = await fetchAiModels(token, {
+        provider: form.provider,
+        baseUrl,
+        apiKey: form.apiKey.trim(),
+      })
+      setModels(list)
+      setProbeNote(`接口返回 ${list.length} 个模型，可以在「模型」里选`)
+      setForm((current) =>
+        current.model.trim() || list.length === 0 ? current : { ...current, model: list[0] },
+      )
+    } catch (error) {
+      setProbeError(error)
+    } finally {
+      setProbeBusy(null)
+    }
+  }
+
+  async function handleTest() {
+    const baseUrl = form.baseUrl.trim()
+    const model = form.model.trim()
+    if (!baseUrl) {
+      setProbeError(new Error('先填 Base URL'))
+      return
+    }
+    if (!model) {
+      setProbeError(new Error('先填模型名'))
+      return
+    }
+    setProbeBusy('test')
+    setProbeError(null)
+    setProbeNote(null)
+    setTestReply(null)
+    try {
+      const result = await testAiConfig(token, {
+        provider: form.provider,
+        baseUrl,
+        model,
+        apiKey: form.apiKey.trim(),
+      })
+      setTestReply(`${result.latencyMs} ms · 模型回复：${result.reply}`)
+    } catch (error) {
+      setProbeError(error)
+    } finally {
+      setProbeBusy(null)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -139,7 +218,7 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
                   value={form.provider}
                   onChange={(event) => {
                     const provider = PROVIDERS.find((item) => item === event.target.value)
-                    if (provider) setForm((current) => ({ ...current, provider: provider }))
+                    if (provider) edit({ provider })
                   }}
                   className={inputClass}
                 >
@@ -155,15 +234,19 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
                 <input
                   id="model"
                   type="text"
+                  list="ai-models"
                   value={form.model}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, model: event.target.value }))
-                  }
+                  onChange={(event) => edit({ model: event.target.value })}
                   placeholder="deepseek-v4.1-flash"
                   spellCheck={false}
                   required
                   className={inputClass}
                 />
+                <datalist id="ai-models">
+                  {models.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
               </Field>
 
               <Field label="Base URL" htmlFor="baseUrl" className="sm:col-span-2">
@@ -171,9 +254,7 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
                   id="baseUrl"
                   type="url"
                   value={form.baseUrl}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, baseUrl: event.target.value }))
-                  }
+                  onChange={(event) => edit({ baseUrl: event.target.value })}
                   placeholder="https://api.deepseek.com/v1"
                   spellCheck={false}
                   required
@@ -185,18 +266,39 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
                 <SecretInput
                   id="apiKey"
                   value={form.apiKey}
-                  onChange={(value) => setForm((current) => ({ ...current, apiKey: value }))}
+                  onChange={(value) => edit({ apiKey: value })}
                   placeholder="sk-…"
                 />
                 <p className="mt-2 rounded-md bg-amber/10 px-2.5 py-2 text-[12px] leading-5 text-ink/80">
-                  留空不会保留原 Key：保存会整体覆盖配置，必须重新输入。
+                  留空不会保留原 Key：保存会整体覆盖配置，必须重新输入。测试和获取模型可以留空，直接用已保存的
+                  Key。
                 </p>
               </Field>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-5">
-              <button type="submit" disabled={saving} className={buttonClass}>
+              <button
+                type="submit"
+                disabled={saving || probeBusy !== null}
+                className={buttonClass}
+              >
                 {saving ? '保存中…' : '保存配置'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleTest()}
+                disabled={saving || probeBusy !== null}
+                className={secondaryButtonClass}
+              >
+                {probeBusy === 'test' ? '测试中…' : '测试连接'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleFetchModels()}
+                disabled={saving || probeBusy !== null}
+                className={secondaryButtonClass}
+              >
+                {probeBusy === 'models' ? '获取中…' : '获取模型'}
               </button>
               {saved && (
                 <span role="status" className="inline-flex items-center gap-1.5 text-[13px] text-sent">
@@ -205,6 +307,30 @@ function ConfigPage({ token, signOut }: { token: string; signOut: () => void }) 
                 </span>
               )}
             </div>
+
+            {probeNote !== null && (
+              <p role="status" className="mt-3 text-[13px] text-sent">
+                {probeNote}
+              </p>
+            )}
+
+            {testReply !== null && (
+              <p
+                role="status"
+                className="mt-3 rounded-md border border-sent/25 bg-sent/5 px-2.5 py-2 text-[13px] leading-5 text-sent"
+              >
+                连接成功 · {testReply}
+              </p>
+            )}
+
+            {probeError !== null && (
+              <p
+                role="alert"
+                className="mt-3 rounded-md border border-danger/25 bg-danger/5 px-2.5 py-2 text-[12px] leading-5 text-danger"
+              >
+                {probeError instanceof Error ? probeError.message : '请求失败'}
+              </p>
+            )}
 
             {saveError !== null && (
               <div className="mt-4">

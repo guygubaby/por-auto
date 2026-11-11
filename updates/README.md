@@ -12,6 +12,8 @@
 | `GET /api/runs`、`/api/runs/<id>` | 管理端查看日志 | `Authorization: Bearer <ADMIN_TOKEN>` |
 | `GET /api/config` | App 拉取 AI 配置 | `x-ingest-key` + `x-passcode-sha256` |
 | `PUT /api/config` | 管理端写 AI 配置 | `Authorization: Bearer <ADMIN_TOKEN>` |
+| `POST /api/config/models` | 管理端按 `/models` 拉模型列表 | `Authorization: Bearer <ADMIN_TOKEN>` |
+| `POST /api/config/test` | 管理端发最小请求测试配置 | `Authorization: Bearer <ADMIN_TOKEN>` |
 | `GET /api/passcode` | App 读取口令指纹与版本 | `x-ingest-key` |
 | `PUT /api/passcode` | 管理端改口令 | `Authorization: Bearer <ADMIN_TOKEN>` |
 
