@@ -10,18 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ConfigRouteImport } from './routes/config'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConfigRoute = ConfigRouteImport.update({
-  id: '/config',
-  path: '/config',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
@@ -37,34 +31,30 @@ const RunsIdRoute = RunsIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/config': typeof ConfigRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs/': typeof RunsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/config': typeof ConfigRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs': typeof RunsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/config': typeof ConfigRoute
   '/runs/$id': typeof RunsIdRoute
   '/runs/': typeof RunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/config' | '/runs/$id' | '/runs/'
+  fullPaths: '/' | '/runs/$id' | '/runs/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/config' | '/runs/$id' | '/runs'
-  id: '__root__' | '/' | '/config' | '/runs/$id' | '/runs/'
+  to: '/' | '/runs/$id' | '/runs'
+  id: '__root__' | '/' | '/runs/$id' | '/runs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ConfigRoute: typeof ConfigRoute
   RunsIdRoute: typeof RunsIdRoute
   RunsIndexRoute: typeof RunsIndexRoute
 }
@@ -76,13 +66,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/config': {
-      id: '/config'
-      path: '/config'
-      fullPath: '/config'
-      preLoaderRoute: typeof ConfigRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/runs/': {
@@ -104,7 +87,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ConfigRoute: ConfigRoute,
   RunsIdRoute: RunsIdRoute,
   RunsIndexRoute: RunsIndexRoute,
 }

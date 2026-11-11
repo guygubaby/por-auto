@@ -58,11 +58,6 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
     LaunchedEffect(Unit) { viewModel.refresh() }
     LaunchedEffect(tab) { if (tab == 3) viewModel.refresh() }
 
-    if (state.passcode.required) {
-        PasscodeScreen(state = state.passcode, onSubmit = viewModel::submitPasscode)
-        return
-    }
-
     Scaffold(
         topBar = { AppHeader(TABS[tab].label, TABS[tab].subtitle) },
         bottomBar = {
@@ -127,6 +122,8 @@ fun MainScreen(viewModel: MainViewModel, onOpenNotificationSettings: () -> Unit)
                         onDownloadUpdate = viewModel::downloadUpdate,
                         onDismissUpdate = viewModel::dismissUpdate,
                         onTheme = viewModel::setTheme,
+                        onFetchAiModels = viewModel::fetchAiModels,
+                        onSaveAi = viewModel::saveAi,
                     )
                 }
             }

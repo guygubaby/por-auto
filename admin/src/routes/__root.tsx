@@ -6,7 +6,7 @@ export const Route = createRootRoute({
   notFoundComponent: NotFoundPage,
 })
 
-type TopNavTo = '/' | '/runs' | '/config'
+type TopNavTo = '/' | '/runs'
 
 function RootLayout() {
   return (
@@ -27,7 +27,6 @@ function RootLayout() {
           <nav aria-label="主导航" className="flex items-center gap-1 text-[13px]">
             <TopNavLink to="/">下载</TopNavLink>
             <TopNavLink to="/runs">运行日志</TopNavLink>
-            <TopNavLink to="/config">AI 配置</TopNavLink>
           </nav>
         </div>
       </header>

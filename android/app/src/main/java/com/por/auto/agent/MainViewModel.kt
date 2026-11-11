@@ -26,11 +26,8 @@ import com.por.auto.agent.wecom.RunNotifier
 import com.por.auto.agent.wecom.RunStore
 import com.por.auto.agent.ui.ThemeMode
 import com.por.auto.agent.ui.ThemeStore
-import com.por.auto.agent.update.BackendClient
-import com.por.auto.agent.update.PasscodeStore
 import com.por.auto.agent.update.ReleaseInfo
 import com.por.auto.agent.update.RunUploads
-import com.por.auto.agent.update.sha256Hex
 import com.por.auto.agent.update.UpdateChecker
 import com.por.auto.agent.wecom.WecomBroadcastRunner
 import com.por.auto.agent.wecom.WecomScope
@@ -65,14 +62,6 @@ data class AgentTurn(
     val failed: Boolean = false,
 )
 
-/** 口令闸门：服务端设过口令且本地没通过（或服务端换了口令）时 required 为 true。 */
-data class PasscodeState(
-    val required: Boolean = false,
-    val version: Int = 0,
-    val busy: Boolean = false,
-    val error: String? = null,
-)
-
 /** 更新检查的状态：release 有值表示服务端有更新，file 有值表示已下载完。 */
 data class UpdateState(
     val busy: Boolean = false,
@@ -95,6 +84,8 @@ data class MainUiState(
     val exactAlarmAllowed: Boolean = true,
     val runs: List<RunRecord> = emptyList(),
     val aiConfig: AiConfig = AiConfig(),
+    /** 已保存的明文 Key，用来回填设置页；只在本机内存里。 */
+    val aiKey: String = "",
     val aiModels: List<String> = emptyList(),
     val aiBusy: Boolean = false,
     val aiStatus: String? = null,
@@ -103,7 +94,6 @@ data class MainUiState(
     val agentRunning: Boolean = false,
     val agentTurns: List<AgentTurn> = emptyList(),
     val update: UpdateState = UpdateState(),
-    val passcode: PasscodeState = PasscodeState(),
     val notificationsEnabled: Boolean = true,
     val theme: ThemeMode = ThemeMode.System,
 ) {
@@ -117,7 +107,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(MainUiState())
     val state: StateFlow<MainUiState> = _state.asStateFlow()
 
-    private var aiSyncedVersion: Int? = null
     private var retriedUploads = false
 
     fun refresh() {
@@ -128,15 +117,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             retriedUploads = true
             RunUploads.retryPending(getApplication())
         }
-        // 每次回到前台都问一次服务端口令：管理员换了口令，这里就会重新要求输入。
-        if (!_state.value.passcode.required) checkPasscode()
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val lastRun = RunStore(app).latest()
                 val schedules = ScheduleStore(app).all()
                 val runs = RunStore(app).history()
-                val aiConfig = AiConfigStore(app).load()
+                val aiStore = AiConfigStore(app)
+                val aiConfig = aiStore.load()
+                val aiKey = runCatching { aiStore.keyFor(aiConfig.provider, aiConfig.baseUrl, "") }
+                    .getOrDefault("")
                 _state.update { current ->
                     current.copy(
                         accessibilityEnabled = AgentAccessibilityService.isRunning,
@@ -145,6 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         exactAlarmAllowed = AlarmScheduler(app).canScheduleExact(),
                         runs = runs,
                         aiConfig = aiConfig,
+                        aiKey = aiKey,
                         notificationsEnabled = NotificationManagerCompat.from(app).areNotificationsEnabled(),
                     )
                 }
@@ -507,9 +498,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = runCatching {
                 store.save(AiConfig(provider, baseUrl.trim(), model, hasKey = true), apiKey)
                 val config = store.load()
-                _state.update { it.copy(aiConfig = config) }
+                val key = apiKey.ifBlank {
+                    runCatching { store.keyFor(provider, baseUrl, "") }.getOrDefault("")
+                }
+                _state.update { it.copy(aiConfig = config, aiKey = key) }
                 if (test) {
-                    val reply = AiClient().chat(config, store.keyFor(provider, baseUrl, ""), "回复两个字：可用")
+                    val reply = AiClient().chat(config, store.keyFor(provider, baseUrl, key), "回复两个字：可用")
                     "测试通过：${reply.take(40)}"
                 } else {
                     "已保存"
@@ -564,69 +558,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeAiDraft() {
         _state.update { it.copy(aiDraft = null, aiDraftScope = null) }
-    }
-
-    /** 启动时问一次服务端口令；没设口令或本地指纹一致就直接放行。 */
-    fun checkPasscode() {
-        viewModelScope.launch {
-            val remote = runCatching { BackendClient().passcode() }
-                .onFailure { if (it is CancellationException) throw it }
-                .getOrNull() ?: return@launch
-            val store = PasscodeStore(getApplication())
-            // 服务端只给版本号；本地记的版本对不上就重新要口令。
-            val required = store.version() != remote.version
-            _state.update {
-                it.copy(passcode = PasscodeState(required = required, version = remote.version))
-            }
-            if (!required) syncAiConfig(store.sha256(), remote.version)
-        }
-    }
-
-    fun submitPasscode(input: String) {
-        val state = _state.value.passcode
-        if (state.busy) return
-        val passcode = input.trim()
-        if (passcode.isBlank()) {
-            _state.update { it.copy(passcode = it.passcode.copy(error = "请输入口令")) }
-            return
-        }
-        _state.update { it.copy(passcode = it.passcode.copy(busy = true, error = null)) }
-        viewModelScope.launch {
-            val sha = sha256Hex(passcode)
-            // 直接用这个指纹去要配置：服务端认了才算通过，认不出就是口令不对。
-            val result = runCatching { BackendClient().aiConfig(sha) }
-                .onFailure { if (it is CancellationException) throw it }
-            val failure = result.exceptionOrNull()
-            if (failure != null) {
-                _state.update {
-                    it.copy(passcode = it.passcode.copy(busy = false, error = failure.message ?: "校验失败"))
-                }
-                return@launch
-            }
-            PasscodeStore(getApplication()).accept(sha, state.version)
-            _state.update { it.copy(passcode = PasscodeState(version = state.version)) }
-            syncAiConfig(sha, state.version)
-        }
-    }
-
-    /** 口令通过后把服务端配置拉下来，本地就不用再手填 AI。 */
-    private fun syncAiConfig(passcodeSha: String, version: Int) {
-        if (passcodeSha.isBlank() || aiSyncedVersion == version) return
-        viewModelScope.launch {
-            val config = runCatching { BackendClient().aiConfig(passcodeSha) }.getOrNull() ?: return@launch
-            if (config.baseUrl.isBlank() || config.model.isBlank()) return@launch
-            val stored = runCatching {
-                val provider = AiProvider.fromKey(config.provider)
-                val app = getApplication<Application>()
-                AiConfigStore(app).save(
-                    AiConfig(provider = provider, baseUrl = config.baseUrl, model = config.model),
-                    config.apiKey,
-                )
-                AiConfigStore(app).load()
-            }.getOrNull() ?: return@launch
-            aiSyncedVersion = version
-            _state.update { it.copy(aiConfig = stored, aiStatus = "已从服务器同步 AI 配置") }
-        }
     }
 
     fun setTheme(mode: ThemeMode) {

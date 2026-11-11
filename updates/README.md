@@ -2,7 +2,7 @@
 
 > 部署、发版与密钥的完整清单见 [../devops.md](../devops.md)。
 
-一个 Worker、一个域名 `https://por-auto.guygubaby.top`，同时干四件事：
+一个 Worker、一个域名 `https://por-auto.guygubaby.top`，同时干三件事：
 
 | 路径 | 用途 | 鉴权 |
 |---|---|---|
@@ -10,21 +10,13 @@
 | `/latest`、`/latest.apk` | App 检查更新、下安装包 | 无 |
 | `POST /api/runs` | App 上报一次完整运行日志 | `x-ingest-key` |
 | `GET /api/runs`、`/api/runs/<id>` | 管理端查看日志 | `Authorization: Bearer <ADMIN_TOKEN>` |
-| `GET /api/config` | App 拉取 AI 配置 | `x-ingest-key` + `x-passcode-sha256` |
-| `PUT /api/config` | 管理端写 AI 配置 | `Authorization: Bearer <ADMIN_TOKEN>` |
-| `POST /api/config/models` | 管理端按 `/models` 拉模型列表 | `Authorization: Bearer <ADMIN_TOKEN>` |
-| `POST /api/config/test` | 管理端发最小请求测试配置 | `Authorization: Bearer <ADMIN_TOKEN>` |
-| `GET /api/passcode` | App 读取口令指纹与版本 | `x-ingest-key` |
-| `PUT /api/passcode` | 管理端改口令 | `Authorization: Bearer <ADMIN_TOKEN>` |
+
+AI 配置只存在 App 本地，由 App 设置页填写和测试，服务端不保存。
 
 数据都在 R2 桶 `por-auto-releases`：
 
 - `latest.json`、`latest.apk`：最新版本
 - `runs/<时间>-<随机>.json`：运行日志（保留全部，管理端取最近 50 条）
-- `config/ai.json`：AI 配置
-- `config/passcode.json`：口令的 sha256 与版本号，明文不落库
-
-管理端「获取模型」「测试连接」由 Worker 代为请求服务商，Base URL 必须是 Worker 能出站的地址：Cloudflare 会拦截裸 IP 和非标准端口（返回 `error code: 1003`），请求到不了网关；换成 443 的 HTTPS 域名即可。
 
 ## 部署
 

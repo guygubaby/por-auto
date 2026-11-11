@@ -123,7 +123,7 @@ cd ../updates
 | 管理令牌 | 只存在浏览器 localStorage，后台退出会清掉 |
 | 签名 keystore | `~/.por-auto/por-auto-release.jks` |
 | 签名配置 | `android/keystore.properties`（已 gitignore） |
-| R2 数据 | `latest.json`、`latest.apk`、`runs/*`、`config/ai.json`、`config/passcode.json` |
+| R2 数据 | `latest.json`、`latest.apk`、`runs/*` |
 
 不要提交：`android/local.properties`、`android/keystore.properties`、`android/dist/`、`*.jks`、`admin/dist/`、`.wrangler/`、`.cloudflare/`。
 

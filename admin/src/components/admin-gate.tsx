@@ -24,7 +24,7 @@ export function AdminGate({ children }: AdminGateProps) {
       event.preventDefault()
       const value = draft.trim()
       if (!value) {
-        setError('请输入访问口令')
+        setError('请输入管理令牌')
         return
       }
       writeAdminToken(value)
@@ -35,19 +35,19 @@ export function AdminGate({ children }: AdminGateProps) {
     return (
       <div className="mx-auto max-w-sm rounded-[10px] border border-line bg-white p-6">
         <KeyRound size={20} className="text-amber" aria-hidden="true" />
-        <h1 className="mt-4 font-serif text-xl">访问口令</h1>
+        <h1 className="mt-4 font-serif text-xl">管理令牌</h1>
         <p className="mt-1.5 text-[13px] leading-6 text-muted">
-          运行日志和 AI 配置需要口令。口令由部署时的环境变量设置，只保存在本机浏览器。
+          运行日志需要管理令牌。令牌由部署时的环境变量设置，只保存在本机浏览器。
         </p>
         <form onSubmit={submit} className="mt-5 space-y-3">
           <label htmlFor="admin-token" className="block text-[13px] font-medium">
-            口令
+            管理令牌
           </label>
           <SecretInput
             id="admin-token"
             value={draft}
             onChange={setDraft}
-            placeholder="访问口令"
+            placeholder="管理令牌"
             autoFocus
           />
           {error && <p className="text-[13px] text-danger">{error}</p>}

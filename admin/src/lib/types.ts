@@ -42,12 +42,3 @@ export interface RunDetail extends RunSummary {
   results: RunResult[]
   log: string[]
 }
-
-export type Provider = 'openai' | 'anthropic' | 'opencode'
-
-export interface AiConfig {
-  provider: Provider
-  baseUrl: string
-  model: string
-  apiKey: string
-}

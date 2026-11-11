@@ -8,17 +8,26 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,8 +39,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
 import com.por.auto.agent.MainUiState
+import com.por.auto.agent.ai.AiProvider
 
 @Composable
 fun SettingsTab(
@@ -41,9 +54,16 @@ fun SettingsTab(
     onDownloadUpdate: () -> Unit,
     onDismissUpdate: () -> Unit,
     onTheme: (ThemeMode) -> Unit,
+    onFetchAiModels: (AiProvider, String, String) -> Unit,
+    onSaveAi: (AiProvider, String, String, String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     var showJson by remember { mutableStateOf(false) }
+    var provider by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiConfig.provider) }
+    var baseUrl by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiConfig.baseUrl) }
+    var apiKey by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiKey) }
+    var model by remember(state.aiConfig, state.aiKey) { mutableStateOf(state.aiConfig.model) }
+    var revealKey by remember { mutableStateOf(false) }
     val divider = @Composable { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
 
     Column(
@@ -121,6 +141,113 @@ fun SettingsTab(
                 },
                 status = state.aiConfig.ready,
             )
+            divider()
+
+            Text("服务商", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                AiProvider.entries.forEach { option ->
+                    ChoicePill(
+                        label = option.label,
+                        selected = provider == option,
+                        onClick = {
+                            provider = option
+                            if (baseUrl.isBlank() && option.defaultBaseUrl.isNotBlank()) {
+                                baseUrl = option.defaultBaseUrl
+                            }
+                        },
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = { baseUrl = it },
+                singleLine = true,
+                label = { Text("Base URL") },
+                placeholder = {
+                    Text(provider.defaultBaseUrl.ifBlank { "https://api.example.com/v1" })
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                singleLine = true,
+                label = { Text("API Key") },
+                visualTransformation = if (revealKey) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    IconButton(onClick = { revealKey = !revealKey }) {
+                        Icon(
+                            if (revealKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (revealKey) "隐藏 API Key" else "显示 API Key",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                singleLine = true,
+                label = { Text("模型") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (state.aiModels.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                ) {
+                    state.aiModels.forEach { option ->
+                        ChoicePill(
+                            label = option,
+                            selected = model == option,
+                            onClick = { model = option },
+                        )
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                CompactButton(
+                    text = "获取模型",
+                    onClick = { onFetchAiModels(provider, baseUrl, apiKey) },
+                    enabled = !state.aiBusy,
+                    filled = false,
+                    modifier = Modifier.weight(1f),
+                )
+                CompactButton(
+                    text = "保存",
+                    onClick = { onSaveAi(provider, baseUrl, apiKey, model, false) },
+                    enabled = !state.aiBusy,
+                    filled = false,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            CompactButton(
+                text = if (state.aiBusy) "请稍候…" else "保存并测试",
+                onClick = { onSaveAi(provider, baseUrl, apiKey, model, true) },
+                enabled = !state.aiBusy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            state.aiStatus?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
 

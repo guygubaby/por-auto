@@ -7,7 +7,7 @@
 ```
 android/    当前交付物：PorAuto APK
 admin/      管理台与下载页（React SPA）
-updates/    后端 Worker：发版、运行日志、AI 配置、口令（Cloudflare）
+updates/    后端 Worker：发版、运行日志（Cloudflare）
 docs/       方案与说明文档
 archive/    旧栈存档（Go 桌面端 / AutoJs6 / 工作流 Registry），只读保留
 ```
@@ -16,11 +16,11 @@ archive/    旧栈存档（Go 桌面端 / AutoJs6 / 工作流 Registry），只�
 
 `https://por-auto.guygubaby.top` 一个域名同时提供：
 
-- 下载页与管理台（浏览器打开就是下载页，`/runs` 看运行日志，`/config` 配 AI 与 App 口令）；
+- 下载页与管理台（浏览器打开就是下载页，`/runs` 看运行日志）；
 - App 检查更新（`/latest`、`/latest.apk`）；
-- App 上报运行日志与拉取 AI 配置（`/api/*`，带构建时注入的入网令牌）。
+- App 上报运行日志（`/api/*`，带构建时注入的入网令牌）。
 
-管理员用部署时的口令进入管理台；App 另有一道口令闸门，通过后才会拿到服务端的 AI 配置。
+管理员用部署时设置的管理令牌进入管理台。AI 配置只存在 App 本地，在 App 设置页填写和测试。
 详见 [updates/README.md](updates/README.md)。
 
 ## 当前能力（P0–P2）

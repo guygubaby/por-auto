@@ -15,12 +15,12 @@
 | 群发 | 选范围（群聊 / 单聊 / 全部）→ 填消息 → 试运行（只写草稿再清理）→ 正式发送（只点一次并回读）；中途失败可以只补发剩下的会话 |
 | 定时 | 每天固定时间执行一次群发（范围自选）；暂停 / 立即运行 / 删除 |
 | 日志 | 每次运行的时间、类型、成功失败数；展开看每个会话的结果 |
-| 设置 | 无障碍状态、悬浮读屏按钮、通知按钮、精确闹钟；「AI 配置」点进去是独立页面；调试 JSON、版本 |
+| 设置 | 无障碍状态、悬浮读屏按钮、通知按钮、精确闹钟；AI 服务商、Base URL、Key、模型与获取/测试；调试 JSON、版本 |
 
 界面用 Compose Material 3 + 自带设计层：`Theme.kt` 统一配色（暖纸张底 / 近黑主色 / 琥珀强调）、
 字体比例、圆角和 `Space` 间距；`Components.kt` 提供 `AppHeader`、`Section`、`SettingRow`、
 `CompactButton`、`ScopePicker`、`StatusDot`、`EmptyState`。所有页面都按状态栏 / 导航栏 insets
-留白（edge-to-edge），AI 配置页单独处理 IME inset。
+留白（edge-to-edge）。
 
 ## App 图标
 
@@ -47,11 +47,11 @@
 
 ## AI 配置
 
-设置 → AI 配置（独立页面，左上角返回）：
+设置 → 智能 → AI 配置，全部在本机完成，服务端不保存：
 
 1. 选 `OpenAI 兼容`、`Anthropic 兼容` 或 `OpenCode Go`（选了会自动填好 Base URL）；
 2. 填 Base URL（如 `https://api.deepseek.com/v1`；OpenCode Go 是 `https://opencode.ai/zen/go/v1`）；
-3. 填 API Key（Keystore 加密保存，留空表示不修改）；
+3. 填 API Key（Keystore 加密保存，保存后会回填到设置页）；
 4. 点「获取模型」，从列表里选一个；
 5. 点「保存并测试」，通过后群发页就能用「AI 生成」：一句话同时填好消息正文和范围，仍需自己试运行确认。
 
