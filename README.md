@@ -1,6 +1,6 @@
 # por-auto
 
-手机 AI 助手：说一句话，AI 看着屏幕把 App 里的事办完。当前交付物是 **PorAuto 0.5.1**，基于 [Mika](https://github.com/wangzan101/Mika)（Apache-2.0）二次开发。
+手机 AI 助手：说一句话，AI 看着屏幕把 App 里的事办完。当前交付物是 **PorAuto 0.5.2**，基于 [Mika](https://github.com/wangzan101/Mika)（Apache-2.0）二次开发。
 
 ## 目录
 

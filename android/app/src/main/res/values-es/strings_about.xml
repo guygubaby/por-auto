@@ -22,9 +22,6 @@
     <string name="about_guide">Guía y cómo contribuir</string>
     <string name="about_guide_sub">Primeros pasos; añade conocimiento de apps aunque no programes</string>
     <string name="about_data_note">Los mensajes, el contenido de la pantalla y las capturas se envían al proveedor de modelos que configuraste. Las consultas de actualización y, si activas los informes, los objetivos, pasos y resultados de las tareas se envían al servidor de PorAuto. Puedes desactivar los informes en Ajustes › Avanzado y otros › Servidor.</string>
-    <string name="about_license_link">Licencia Apache-2.0</string>
-    <string name="about_author">Hecho por Wang Zan · © 2026</string>
-    <string name="about_license_title">Licencia Apache-2.0</string>
     <string name="about_update_download">Descargar desde PorAuto</string>
     <string name="about_update_download_in_app">Descargar actualización</string>
     <string name="about_update_downloading">Descargando…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">Versión nueva %1$s</string>
     <string name="about_current">Actual %1$s</string>
     <string name="about_released_on">" · publicada %1$s"</string>
-    <string name="about_released_under">Publicado bajo %1$s</string>
     <string name="issue_body">- Dispositivo: %1$s\n- Versión de Android: %2$s (SDK %3$d)\n- Versión de PorAuto: %4$s (compilación %5$s)\n\n### Qué salió mal\n\n\n### Pasos que seguiste\n\n\n### Qué esperabas\n\n\n### Diagnóstico\n(Opcional) En PorAuto, abre Acerca de › Enviar comentarios › Copiar diagnóstico y pégalo aquí\n\n</string>
-    <string name="licenses_third_party">Componentes de terceros · %1$d</string>
-    <string name="licenses_footer">Los textos completos de las licencias y los avisos de derechos de autor están en LICENSE y en la carpeta licenses/ (incluido THIRD_PARTY_NOTICES.md) del repositorio de código fuente.</string>
     <string name="diagnostics_copy">Copiar diagnóstico</string>
     <string name="diagnostics_copy_sub">Versión, dispositivo y estado de la configuración: pégalo para el autor</string>
     <string name="diagnostics_title">Diagnóstico</string>

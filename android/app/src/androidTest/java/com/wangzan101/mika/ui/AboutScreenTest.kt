@@ -45,7 +45,6 @@ class AboutScreenTest {
     private class Calls {
         val urls = mutableListOf<String>()
         var checks = 0
-        var licenses = 0
     }
 
     private val sampleDiagnostics = "PorAuto 诊断信息 / PorAuto diagnostics\n\n[App]\nversion: 0.1.0 (build abc1234)\n"
@@ -57,7 +56,7 @@ class AboutScreenTest {
                 AboutScreen(
                     versionName = "0.1.0", build = "abc1234", beta = true, update = update, issueUrl = "issue://prefilled",
                     onCheck = { calls.checks++ }, onOpenUrl = { calls.urls += it },
-                    onOpenLicense = { calls.licenses++ }, onBack = {},
+                    onBack = {},
                     diagnostics = { sampleDiagnostics },
                 )
             }
@@ -71,19 +70,20 @@ class AboutScreenTest {
     }
 
     @Test
-    fun showsHeroRowsNoteAndFooter() {
+    fun showsHeroRowsAndNote() {
         about()
         compose.onNodeWithText("PorAuto").assertIsDisplayed()
         compose.onNodeWithText(AboutCopy.TAGLINE).assertIsDisplayed()
         compose.onNodeWithText("版本 0.1.0").assertIsDisplayed()
         compose.onNodeWithText("Beta").assertIsDisplayed()
         compose.onNodeWithText("· 构建 abc1234").assertIsDisplayed()
-        for (t in listOf("检查更新", "更新记录", AboutCopy.DATA_NOTE, AboutCopy.AUTHOR)) {
+        for (t in listOf("检查更新", "更新记录", AboutCopy.DATA_NOTE)) {
             scrollTo(t)
             compose.onNodeWithText(t).assertIsDisplayed()
         }
-        // 许可证只在页脚,不再单独一行
+        // 页脚(许可证、作者)已去掉
         compose.onAllNodesWithText("开源许可").assertCountEquals(0)
+        compose.onAllNodesWithTag("about-license").assertCountEquals(0)
     }
 
     @Test
@@ -93,13 +93,6 @@ class AboutScreenTest {
             compose.onNodeWithText(t).assertDoesNotExist()
         }
         assertTrue(calls.urls.isEmpty())
-    }
-
-    @Test
-    fun footerOpensLicense() {
-        val calls = about()
-        compose.onNodeWithTag("about-license").performScrollTo().performClick()
-        assertEquals(1, calls.licenses)
     }
 
     @Test

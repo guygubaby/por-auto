@@ -22,9 +22,6 @@
     <string name="about_guide">راهنما و روش مشارکت</string>
     <string name="about_guide_sub">شروع به کار؛ افزودن دانش برنامه‌ها حتی بدون برنامه‌نویسی</string>
     <string name="about_data_note">پیام‌ها، محتوای صفحه و تصاویر صفحه به ارائه‌دهنده مدل انتخابی شما فرستاده می‌شوند. بررسی به‌روزرسانی و در صورت فعال بودن گزارش، هدف‌ها، مراحل و نتایج کارها به سرور PorAuto ارسال می‌شوند. گزارش اجرا را می‌توانید در تنظیمات › پیشرفته و سایر › سرور خاموش کنید.</string>
-    <string name="about_license_link">مجوز Apache-2.0</string>
-    <string name="about_author">ساختهٔ Wang Zan · © 2026</string>
-    <string name="about_license_title">مجوز Apache-2.0</string>
     <string name="about_update_download">دانلود از PorAuto</string>
     <string name="about_update_download_in_app">دانلود به‌روزرسانی</string>
     <string name="about_update_downloading">در حال دانلود…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">نسخهٔ جدید %1$s</string>
     <string name="about_current">نسخهٔ فعلی %1$s</string>
     <string name="about_released_on">" · انتشار %1$s"</string>
-    <string name="about_released_under">منتشرشده تحت %1$s</string>
     <string name="issue_body">- دستگاه: %1$s\n- نسخهٔ اندروید: %2$s (SDK %3$d)\n- نسخهٔ PorAuto: %4$s (ساخت %5$s)\n\n### چه مشکلی رخ داد\n\n\n### مراحل انجام‌شده\n\n\n### انتظار شما\n\n\n### اطلاعات عیب‌یابی\n(اختیاری) در PorAuto به درباره ← ارسال بازخورد ← کپی اطلاعات عیب‌یابی بروید و سپس آن را اینجا جای‌گذاری کنید\n\n</string>
-    <string name="licenses_third_party">اجزای شخص ثالث · %1$d</string>
-    <string name="licenses_footer">متن کامل مجوزها و اعلامیه‌های حق نشر در فایل LICENSE و پوشهٔ licenses/ مخزن کد منبع، از جمله THIRD_PARTY_NOTICES.md، قرار دارند.</string>
     <string name="diagnostics_copy">کپی اطلاعات عیب‌یابی</string>
     <string name="diagnostics_copy_sub">نسخه، دستگاه و وضعیت راه‌اندازی؛ آن را برای سازنده ارسال کنید</string>
     <string name="diagnostics_title">اطلاعات عیب‌یابی</string>

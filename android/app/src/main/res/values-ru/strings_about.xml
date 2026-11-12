@@ -22,9 +22,6 @@
     <string name="about_guide">Руководство и как помочь проекту</string>
     <string name="about_guide_sub">С чего начать; можно добавлять знания о приложениях и без программирования</string>
     <string name="about_data_note">Сообщения, содержимое экрана и снимки экрана отправляются настроенному провайдеру модели. Проверки обновлений и, когда включены отчёты, цели, шаги и результаты задач отправляются на сервер PorAuto. Отчёты можно отключить в разделе Настройки › Дополнительно и другое › Сервер.</string>
-    <string name="about_license_link">Лицензия Apache-2.0</string>
-    <string name="about_author">Автор: Wang Zan · © 2026</string>
-    <string name="about_license_title">Лицензия Apache-2.0</string>
     <string name="about_update_download">Скачать с PorAuto</string>
     <string name="about_update_download_in_app">Скачать обновление</string>
     <string name="about_update_downloading">Загрузка…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">Новая версия %1$s</string>
     <string name="about_current">Сейчас %1$s</string>
     <string name="about_released_on">" · выпущена %1$s"</string>
-    <string name="about_released_under">Лицензия: %1$s</string>
     <string name="issue_body">- Устройство: %1$s\n- Версия Android: %2$s (SDK %3$d)\n- Версия PorAuto: %4$s (сборка %5$s)\n\n### Что пошло не так\n\n\n### Что вы делали\n\n\n### Что ожидали\n\n\n### Диагностика\n(По желанию) В PorAuto откройте «О приложении» › «Отправить отзыв» › «Скопировать диагностику» и вставьте её сюда\n\n</string>
-    <string name="licenses_third_party">Сторонние компоненты · %1$d</string>
-    <string name="licenses_footer">Полные тексты лицензий и уведомления об авторских правах находятся в файле LICENSE и папке licenses/ (включая THIRD_PARTY_NOTICES.md) в репозитории с исходным кодом.</string>
     <string name="diagnostics_copy">Скопировать диагностику</string>
     <string name="diagnostics_copy_sub">Версия, устройство и состояние настройки: вставьте это в сообщение автору</string>
     <string name="diagnostics_title">Диагностика</string>

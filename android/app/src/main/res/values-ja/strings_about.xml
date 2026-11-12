@@ -22,9 +22,6 @@
     <string name="about_guide">ガイドと貢献のしかた</string>
     <string name="about_guide_sub">はじめ方。コードを書かなくてもアプリの知識を追加できます</string>
     <string name="about_data_note">メッセージ、画面の内容、スクリーンショットは設定したモデル提供元に送信されます。更新の確認と、報告が有効な場合のタスクの目的・手順・結果は PorAuto サーバーに送信されます。実行ログの報告は「設定 › 詳細とその他 › サーバー」で無効にできます。</string>
-    <string name="about_license_link">Apache-2.0 ライセンス</string>
-    <string name="about_author">制作: Wang Zan · © 2026</string>
-    <string name="about_license_title">Apache-2.0 ライセンス</string>
     <string name="about_update_download">PorAuto からダウンロード</string>
     <string name="about_update_download_in_app">アップデートをダウンロード</string>
     <string name="about_update_downloading">ダウンロード中…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">新バージョン %1$s</string>
     <string name="about_current">現在 %1$s</string>
     <string name="about_released_on">" · %1$s にリリース"</string>
-    <string name="about_released_under">ライセンス: %1$s</string>
     <string name="issue_body">- 端末: %1$s\n- Android バージョン: %2$s (SDK %3$d)\n- PorAuto バージョン: %4$s (ビルド %5$s)\n\n### 何が起きたか\n\n\n### 行った操作\n\n\n### 期待していた動作\n\n\n### 診断情報\n(任意) PorAuto で「概要」›「フィードバックを送信」›「診断情報をコピー」を開き、ここに貼り付けてください\n\n</string>
-    <string name="licenses_third_party">サードパーティのコンポーネント · %1$d</string>
-    <string name="licenses_footer">ライセンス全文と著作権表示は、ソースリポジトリの LICENSE と licenses/ フォルダ(THIRD_PARTY_NOTICES.md を含む)にあります。</string>
     <string name="diagnostics_copy">診断情報をコピー</string>
     <string name="diagnostics_copy_sub">バージョン、端末、設定状況 — 作者に貼り付けて送ってください</string>
     <string name="diagnostics_title">診断情報</string>

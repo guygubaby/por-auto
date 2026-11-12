@@ -22,9 +22,6 @@
     <string name="about_guide">Panduan &amp; cara berkontribusi</string>
     <string name="about_guide_sub">Mulai memakai; tambahkan pengetahuan aplikasi tanpa perlu coding</string>
     <string name="about_data_note">Pesan, isi layar, dan tangkapan layar dikirim ke penyedia model yang Anda atur. Pemeriksaan pembaruan dan, saat pelaporan aktif, tujuan, langkah, serta hasil tugas dikirim ke server PorAuto. Nonaktifkan laporan di Pengaturan › Lanjutan dan lainnya › Server.</string>
-    <string name="about_license_link">Lisensi Apache-2.0</string>
-    <string name="about_author">Dibuat oleh Wang Zan · © 2026</string>
-    <string name="about_license_title">Lisensi Apache-2.0</string>
     <string name="about_update_download">Unduh dari PorAuto</string>
     <string name="about_update_download_in_app">Unduh pembaruan</string>
     <string name="about_update_downloading">Mengunduh…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">Versi baru %1$s</string>
     <string name="about_current">Saat ini %1$s</string>
     <string name="about_released_on">" · dirilis %1$s"</string>
-    <string name="about_released_under">Dirilis di bawah %1$s</string>
     <string name="issue_body">- Perangkat: %1$s\n- Versi Android: %2$s (SDK %3$d)\n- Versi PorAuto: %4$s (build %5$s)\n\n### Apa yang salah\n\n\n### Langkah yang Anda lakukan\n\n\n### Yang Anda harapkan\n\n\n### Diagnostik\n(Opsional) Di PorAuto, buka Tentang › Kirim masukan › Salin diagnostik, lalu tempel di sini\n\n</string>
-    <string name="licenses_third_party">Komponen pihak ketiga · %1$d</string>
-    <string name="licenses_footer">Teks lisensi lengkap dan pemberitahuan hak cipta ada di LICENSE dan folder licenses/ (termasuk THIRD_PARTY_NOTICES.md) pada repositori kode sumber.</string>
     <string name="diagnostics_copy">Salin diagnostik</string>
     <string name="diagnostics_copy_sub">Versi, perangkat, dan status penyiapan — tempelkan ke pembuat</string>
     <string name="diagnostics_title">Diagnostik</string>

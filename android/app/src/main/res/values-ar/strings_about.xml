@@ -22,9 +22,6 @@
     <string name="about_guide">الدليل والمساهمة</string>
     <string name="about_guide_sub">البدء؛ أضف معرفة بالتطبيق حتى دون كتابة شيفرة</string>
     <string name="about_data_note">تُرسل الرسائل ومحتوى الشاشة ولقطات الشاشة إلى موفر النموذج الذي أعددته. تُرسل طلبات التحديث وسجلات أهداف المهام وخطواتها ونتائجها، عند تفعيل الإبلاغ، إلى خادم PorAuto. يمكنك إيقاف الإبلاغ عن السجلات من الإعدادات › خيارات متقدمة وأخرى › الخادم.</string>
-    <string name="about_license_link">ترخيص Apache-2.0</string>
-    <string name="about_author">من إعداد Wang Zan · © 2026</string>
-    <string name="about_license_title">ترخيص Apache-2.0</string>
     <string name="about_update_download">التنزيل من PorAuto</string>
     <string name="about_update_download_in_app">تنزيل التحديث</string>
     <string name="about_update_downloading">جارٍ التنزيل…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">الإصدار الجديد %1$s</string>
     <string name="about_current">الحالي %1$s</string>
     <string name="about_released_on">" · صدر في %1$s"</string>
-    <string name="about_released_under">صدر بموجب %1$s</string>
     <string name="issue_body">- الجهاز: %1$s\n- إصدار Android: %2$s (SDK %3$d)\n- إصدار PorAuto: %4$s (البنية %5$s)\n\n### ما المشكلة؟\n\n\n### خطوات إعادة المشكلة\n\n\n### ما الذي توقعته؟\n\n\n### معلومات التشخيص\n(اختياري) في PorAuto، افتح «حول» › «إرسال ملاحظات» › «نسخ معلومات التشخيص»، ثم ألصقها هنا\n\n</string>
-    <string name="licenses_third_party">مكونات الجهات الخارجية · %1$d</string>
-    <string name="licenses_footer">توجد النصوص الكاملة للتراخيص وإشعارات حقوق النشر في LICENSE ومجلد licenses/ (بما في ذلك THIRD_PARTY_NOTICES.md) في مستودع المصدر.</string>
     <string name="diagnostics_copy">نسخ معلومات التشخيص</string>
     <string name="diagnostics_copy_sub">الإصدار والجهاز وحالة الإعداد — أرسلها إلى المطوّر</string>
     <string name="diagnostics_title">معلومات التشخيص</string>

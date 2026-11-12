@@ -35,15 +35,15 @@ cd ../updates && pnpm dlx wrangler@latest deploy
 推 `v*` tag 会触发 GitHub Actions：构建、签名、校验，并上传 `latest.apk` / `latest.json` 到 R2。
 
 ```sh
-git tag -a v0.5.1 -m "更新说明"
-git push origin v0.5.1
+git tag -a v0.5.2 -m "更新说明"
+git push origin v0.5.2
 ```
 
 版本号要和 `android/app/build.gradle.kts` 里的一致，否则 App 的更新判断会错。本地应急仍可用：
 
 ```sh
 cd updates
-./publish.sh ../android/dist/PorAuto-Agent-0.5.1-release.apk 0.5.1 20 "更新说明"
+./publish.sh ../android/dist/PorAuto-Agent-0.5.2-release.apk 0.5.2 21 "更新说明"
 ```
 
 ## 密钥

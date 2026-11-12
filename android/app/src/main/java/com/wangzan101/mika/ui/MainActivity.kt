@@ -686,13 +686,11 @@ private fun MikaRoot(
             autoUpdate = autoUpdate,
             onAutoUpdate = app.automaticUpdates::setEnabled,
             onOpenUrl = { openInBrowser(context, it) },
-            onOpenLicense = { nav.push(Route.License) },
             onBack = back,
             diagnostics = {
                 Diagnostics.render(DiagnosticsCollector.collect(context, status))
             },
         )
-        Route.License -> LicensesScreen(onBack = back)
         Route.Browser -> BrowserScreen(remember { UserBrowser.of(context) }, onBack = back)
         Route.Files -> FileLibraryScreen(app.chat, filesConversation, filesFromDrawer, onBack = back, onAdded = { id ->
             app.chat.openConversation(id)

@@ -22,9 +22,6 @@
     <string name="about_guide">Guia e como contribuir</string>
     <string name="about_guide_sub">Primeiros passos; adicione conhecimento sobre apps mesmo sem programar</string>
     <string name="about_data_note">Mensagens, conteúdo da tela e capturas são enviados ao provedor de modelos que você configurou. As consultas de atualização e, quando os relatórios estão ativos, os objetivos, etapas e resultados das tarefas são enviados ao servidor PorAuto. Desative os relatórios em Configurações › Avançado e outros › Servidor.</string>
-    <string name="about_license_link">Licença Apache-2.0</string>
-    <string name="about_author">Feito por Wang Zan · © 2026</string>
-    <string name="about_license_title">Licença Apache-2.0</string>
     <string name="about_update_download">Baixar do PorAuto</string>
     <string name="about_update_download_in_app">Baixar atualização</string>
     <string name="about_update_downloading">Baixando…</string>
@@ -47,10 +44,7 @@
     <string name="about_update_title">Nova versão %1$s</string>
     <string name="about_current">Atual %1$s</string>
     <string name="about_released_on">" · lançada em %1$s"</string>
-    <string name="about_released_under">Lançado sob %1$s</string>
     <string name="issue_body">- Dispositivo: %1$s\n- Versão do Android: %2$s (SDK %3$d)\n- Versão do PorAuto: %4$s (build %5$s)\n\n### O que deu errado\n\n\n### O que você fez\n\n\n### O que você esperava\n\n\n### Diagnóstico\n(Opcional) No PorAuto, abra Sobre › Enviar feedback › Copiar diagnóstico e cole aqui\n\n</string>
-    <string name="licenses_third_party">Componentes de terceiros · %1$d</string>
-    <string name="licenses_footer">Os textos completos das licenças e os avisos de direitos autorais estão em LICENSE e na pasta licenses/ (incluindo THIRD_PARTY_NOTICES.md) do repositório do código-fonte.</string>
     <string name="diagnostics_copy">Copiar diagnóstico</string>
     <string name="diagnostics_copy_sub">Versão, dispositivo e estado da configuração — cole para o autor</string>
     <string name="diagnostics_title">Diagnóstico</string>

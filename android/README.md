@@ -2,7 +2,7 @@
 
 基于 [Mika](https://github.com/wangzan101/Mika)（Apache-2.0，快照 `f8f4be0`）的 PorAuto APK。
 包名沿用 `com.por.auto.agent`，用同一张发布证书覆盖升级老用户；应用名是 PorAuto。
-当前版本为 `0.5.1`（versionCode 20）；运行记录先落盘，再等待旧记录上传，避免慢网络阻塞新记录持久化。
+当前版本为 `0.5.2`（versionCode 21）；侧栏入口顺序调整，移除独立许可证页。
 
 ## 与上游的差异
 
