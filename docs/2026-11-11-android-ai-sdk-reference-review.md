@@ -87,7 +87,7 @@ Mika 本来就能操作安装它的这台手机。它的虚拟屏也是同一台
 
 **系统版本。** 固定提交中 `app/build.gradle.kts` 设置 `minSdk = 30`，即 Android 11；README / 设置指南另说明手机 App 操作需要 Android 12 以上，推荐 Android 14 以上。最低能安装与能执行手机任务应分开看。[构建配置][M-app-build]、[使用要求][M-readme]、[设置指南][M-setup]
 
-当前 por-auto 的 `android/app/build.gradle.kts` 为 `minSdk = 26`，现有文档记录的测试设备是 vivo X21 / Android 9。若仍要求支持该设备，Mika 当前版本不能原样安装，不能仅降低 `minSdk` 就视为解决。[当前工程配置](../android/app/build.gradle.kts)、[历史设备记录](2026-11-01-mika-apk-replication-plan.md)
+当前 por-auto 的 `android/app/build.gradle.kts` 为 `minSdk = 30`（即 Android 11，早期版本曾是 26），现有文档记录的测试设备是 vivo X21 / Android 9。该设备按当前 `minSdk` 已无法安装；若仍要求支持该设备，Mika 当前版本不能原样安装，不能仅降低 `minSdk` 就视为解决。[当前工程配置](../android/app/build.gradle.kts)、[历史设备记录](2026-11-01-mika-apk-replication-plan.md)
 
 **前台无障碍模式。** Mika 产品的 `TaskRun.connectPhone()` 会依次检查系统版本、取得 shell helper、等待无障碍服务、准备 `LazyAgentDisplay`，再构造 `AndroidScreen`。源码存在 `ScreenPort` 边界，但产品执行路径不是只给当前显示屏改个编号即可替换。[实际连接路径][M-task-runtime]
 
